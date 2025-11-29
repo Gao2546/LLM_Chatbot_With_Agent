@@ -13,38 +13,54 @@
     # langchain-aws
     langchain-openai
     langchain-ollama
+    langchain-huggingface
 
 # Model
-ollama
-openai
-git+https://github.com/openai/CLIP.git
+    ollama
+    openai
+    git+https://github.com/openai/CLIP.git
+    modelscope
 
 # DB_vector
-chromadb
+    chromadb
+    minio
+    psycopg2
 
-runpod
-pymupdf
-pdfminer.six
-beautifulsoup4
-ipykernel
-matplotlib
-numpy
-pandas
-pillow
-scikit-learn
-scipy
-six
-stack-data
-sympy
-transformers
-datasets
+# Math Tool
+    runpod
+    beautifulsoup4
+    ipykernel
+    matplotlib
+    numpy
+    pandas
+    pillow
+    scikit-learn
+    scipy
+    six
+    stack-data
+    sympy
+    transformers
+    sentence-transformers
+    datasets
 
 #Pytorch
-torch
-torchvision
-torchaudio
-tqdm
-# --extra-index-url https://download.pytorch.org/whl/cu118
+    torch
+    torchvision
+    torchaudio
+    tqdm
+    # --extra-index-url https://download.pytorch.org/whl/cu118
 
 # WebAPI
-#flask
+    flask
+
+# Document
+    docling
+    unstructured
+    pymupdf
+    pdfminer.six
+
+# search Tool
+    duckduckgo_search
+    googlesearch-python
+    selenium
+    webdriver-manager
