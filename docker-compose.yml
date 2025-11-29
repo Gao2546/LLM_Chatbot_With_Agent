@@ -1,0 +1,287 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment: #<==============================================================
+      POSTGRES_USER: athip
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: ai_agent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ports:
+      # - "5433:5432" # Expose DB port to host (optional, for debugging)
+    networks:
+      - app-network
+
+    # Deploy constraints can be used to ensure 'db' runs on a specific node if needed
+    # deploy:
+    #   placement:
+    #     constraints:
+    #       - node.hostname == host_a_hostname # Replace with Host A's actual hostname
+
+
+
+  app:
+    build:
+      context: .
+      dockerfile: ai_agent_with_McpProtocol/Dockerfile
+    # image: ai_agent_app:latest
+    ports:
+      - "3000:3000"
+    environment: #<==============================================================
+      - DATABASE_URL=postgres://athip:123456@db:5432/ai_agent # Example URL, adjust as needed
+      - API_SERVER_URL=http://api_server:5000
+      - API_OLLAMA=http://ollama:11434/api/generate
+      # Add any other necessary environment variables here
+    depends_on:
+      - db
+      # - api_server
+    networks:
+      - app-network
+
+    # Deploy constraints to ensure 'app' runs on Host A
+    # deploy:
+    #   placement:
+    #     constraints:
+    #       - node.hostname == host_a_hostname # Replace with Host A's actual hostname
+
+
+  minio: # <=============================================== NEW SECTION
+    image: minio/minio:latest
+    command: server /data --console-address ":9090"
+    ports:
+      - "9010:9000" # For API access
+      - "9090:9090" # For the web console
+    environment:
+      MINIO_ROOT_USER: minioadmin # <-- IMPORTANT: Change for production
+      MINIO_ROOT_PASSWORD: minioadmin # <-- IMPORTANT: Change for production
+    volumes:
+      - minio_data:/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+
+
+
+
+  # api_server:
+  #   build:
+  #     context: .
+  #     dockerfile: api_server/Dockerfile
+  #   # ports:
+  #     # - "5000:5000"
+  #   environment:
+  #     - PGDATABASE=ai_agent
+  #     - PGUSER=athip
+  #     - PGPASSWORD=123456
+  #     - PGHOST=db
+  #     - PGPORT=5432
+  #     - IS_DOCKER=true
+  #     # Pass the OpenAI API key from the host environment or a .env file
+  #     # Ensure OPENAI_API_KEY is set in your environment before running docker-compose up
+  #     # - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: all # Or specify a specific number of GPUs
+  #   #           capabilities: [gpu]
+  #   runtime: nvidia
+  #   depends_on:
+  #     - db
+  #     - ollama
+  #   networks:
+  #     - app-network
+
+  # ollama:
+  #   image: ollama/ollama
+  #   # ports:
+  #   #   - "11434:11434"
+  #   volumes:
+  #     - /usr/share/ollama/.ollama:/root/.ollama
+  #   networks:
+  #     - app-network
+  #   # Uncomment below if you want GPU access with NVIDIA
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: all
+  #   #           capabilities: [gpu]
+  #   runtime: nvidia
+
+
+
+
+
+volumes:
+  postgres_data:
+  minio_data: {}
+
+# networks:
+#   app-network:
+#     # driver: bridge
+#     external:
+#       # name: my_shared_overlay_network # <--- Reference the external network
+#       name: my_simulation_network
+
+networks:
+  app-network:
+    driver: bridge
+    # external: true
+    # name: my_simulation_network
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# version: '3.8'
+
+# services:
+#   db:
+#     image: pgvector/pgvector:pg16
+#     environment: #<==============================================================
+#       POSTGRES_USER: athip
+#       POSTGRES_PASSWORD: 123456
+#       POSTGRES_DB: ai_agent
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     ports:
+#        - "5432:5432" # Expose DB port to host (optional, for debugging)
+#     networks:
+#       app-network:
+#         aliases:
+#           - db
+
+#     # Deploy constraints can be used to ensure 'db' runs on a specific node if needed
+#     # deploy:
+#     #   placement:
+#     #     constraints:
+#     #       - node.hostname == ip-172-31-89-142 # Replace with Host A's actual hostname
+
+
+
+#   app:
+#     build:
+#       context: .
+#       dockerfile: ai_agent_with_McpProtocol/Dockerfile
+#     #image: ai_agent_app:latest
+#     ports:
+#       - "3000:3000"
+#     environment: #<==============================================================
+#       - DATABASE_URL=postgres://athip:123456@db:5432/ai_agent # Example URL, adjust as needed
+#       - API_SERVER_URL=http://18.212.127.162:5000
+#       - API_OLLAMA=http://18.212.127.162:11434/api/generate
+#       # Add any other necessary environment variables here
+#     depends_on:
+#       - db
+#       # - api_server
+#     networks:
+#       app-network:
+#         aliases:
+#           - app
+
+#     # Deploy constraints to ensure 'app' runs on Host A
+#     # deploy:
+#     #   placement:
+#     #     constraints:
+#     #       - node.hostname == ip-172-31-89-142 # Replace with Host A's actual hostname
+
+
+
+
+
+#   # api_server:
+#   #   build:
+#   #     context: .
+#   #     dockerfile: api_server/Dockerfile
+#   #   # ports:
+#   #     # - "5000:5000"
+#   #   environment:
+#   #     - PGDATABASE=ai_agent
+#   #     - PGUSER=athip
+#   #     - PGPASSWORD=123456
+#   #     - PGHOST=db
+#   #     - PGPORT=5432
+#   #     - IS_DOCKER=true
+#   #     # Pass the OpenAI API key from the host environment or a .env file
+#   #     # Ensure OPENAI_API_KEY is set in your environment before running docker-compose up
+#   #     # - OPENAI_API_KEY=${OPENAI_API_KEY}
+#   #   # deploy:
+#   #   #   resources:
+#   #   #     reservations:
+#   #   #       devices:
+#   #   #         - driver: nvidia
+#   #   #           count: all # Or specify a specific number of GPUs
+#   #   #           capabilities: [gpu]
+#   #   runtime: nvidia
+#   #   depends_on:
+#   #     - db
+#   #     - ollama
+#   #   networks:
+#   #     - app-network
+
+#   # ollama:
+#   #   image: ollama/ollama
+#   #   # ports:
+#   #   #   - "11434:11434"
+#   #   volumes:
+#   #     - /usr/share/ollama/.ollama:/root/.ollama
+#   #   networks:
+#   #     - app-network
+#   #   # Uncomment below if you want GPU access with NVIDIA
+#   #   # deploy:
+#   #   #   resources:
+#   #   #     reservations:
+#   #   #       devices:
+#   #   #         - driver: nvidia
+#   #   #           count: all
+#   #   #           capabilities: [gpu]
+#   #   runtime: nvidia
+
+
+
+
+
+# volumes:
+#   postgres_data:
+
+# networks:
+#   app-network:
+#     driver: bridge
+# #    external:
+# #      name: my_shared_overlay_network # <--- Reference the external network
+#       # name: my_simulation_network
+
+# # networks:
+# #   app-network:
+# #     external: true
+# #     name: my_shared_overlay_network

@@ -1,0 +1,37 @@
+model/
+models/
+data/
+datas/
+images/
+image/
+env/
+data_base/
+node_modules/
+output/
+outputs/
+uploads/
+tmp/
+.roo/
+.save
+.env/
+*.png
+*.jpg
+*.jpeg
+*.xml
+# *.json
+*.pkl
+*.pt
+*.log
+*.pth
+*.zip
+*.backup
+.key
+__pycache__/
+data*/
+low_save/
+temp_images/
+RAG_Model/scratch/
+
+# Environment variables
+.env
+*copy*

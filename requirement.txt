@@ -1,0 +1,50 @@
+## LangChain
+    langchain-text-splitters 
+    langchain-community 
+    langchain-core
+    langgraph
+
+    # Model
+    # langchain[aws]
+    # langchain[google-vertexai]
+    langchain[openai]
+
+    # Embedding
+    # langchain-aws
+    langchain-openai
+    langchain-ollama
+
+# Model
+ollama
+openai
+git+https://github.com/openai/CLIP.git
+
+# DB_vector
+chromadb
+
+runpod
+pymupdf
+pdfminer.six
+beautifulsoup4
+ipykernel
+matplotlib
+numpy
+pandas
+pillow
+scikit-learn
+scipy
+six
+stack-data
+sympy
+transformers
+datasets
+
+#Pytorch
+torch
+torchvision
+torchaudio
+tqdm
+# --extra-index-url https://download.pytorch.org/whl/cu118
+
+# WebAPI
+#flask

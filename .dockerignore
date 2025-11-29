@@ -1,0 +1,16 @@
+node_modules/
+.git
+.gitignore
+.env.local
+*.log
+tmp/
+# Add any other files/folders specific to this app that aren't needed in the image
+AgentRF/
+computer_vision/
+env/
+IMG_Gen/
+LLMs/
+mcp_Client/
+multigpu/
+RAG_Model/
+Text_Gen/

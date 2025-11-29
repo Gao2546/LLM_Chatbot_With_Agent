@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>AI Agent with MCP</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
+</head>
+<body>
+    <div class="auth-container">
+        <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
+        <a href="auth/login" class="login-button" id="loginBtn">Login</a>
+    </div>
+
+  <div id="setupModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal()">×</span>
+      <h1>⚙️ Setup Local Agent</h1>
+      <p>Click the button below to download the appropriate setup script for your system:</p>
+      <button onclick="downloadScript()">🔽 Download Setup Script</button>
+
+      <h2>🧾 How to Use</h2>
+      <pre>
+    🔹 Windows:
+      - Double click **entrypoint.bat** or run in CMD
+
+    🔹 macOS/Linux:
+      chmod +x entrypoint.sh
+      ./entrypoint.sh
+      </pre>
+    </div>
+  </div>
+
+    <div class="container">
+        <div id="chatList">
+            <div class="btn-sidebar-container" display="none"></div>
+            <button id="newChatButton">New Chat</button>
+            <div class="mode-selector-container">
+                <label for="modeSelector">Mode:</label>
+                <select id="modeSelector">
+                    </select>
+            </div>
+            <div class="model-selector-container">
+                <label for="modelSelector">Model:</label>
+                <select id="modelSelector">
+                    </select>
+            </div>
+            <h3 id="chathishead">Chat History</h3>
+            <div id="chatListEle">
+            </div>
+            <button id="openModal" onclick="openModal()">⚙️ Open Setup<br>Instructions</button>
+        </div>
+        <div id="chatbox">
+            <h1 class="header1"><button id="toggleSidebarButton"><i class="fas fa-bars"></i></button> AI Agent Interface</h1>
+            <div class = contain-overflow>
+            <div id="messages"></div>
+            <div class="input-container">
+                <div class="file-input-container">                    
+                    <div id="selectedFiles" style="display: none;"></div>
+                </div>
+                
+                <div class="input-button-container">
+                    <textarea id="userInput" placeholder="Ask any question..." rows="1"></textarea>
+                    <input  type="file" 
+                            id="fileInput" 
+                            accept=".pdf,.txt,.doc,.docx,.ppt,.pptx,.odt,.rtf,.md,
+                                    .py,.c,.cpp,.h,.hpp,.java,.js,.ts,.cs,.go,.rs,.php,.rb,.swift,.kt,.m,.sh,.xls,.xlsx,.xlsm,.csv,.yml,.bat,.xml,.html,.css,.ts,
+                                    image/*" 
+                            multiple />
+                   
+                    <label for="fileInput" class="file-input-label">
+                        <i class="fas fa-paperclip"></i>
+                    </label>
+                    <button id="fileDialogButton" style="display: none;" title="Select file to include path">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
+
+                    <button id="changeDirButton" title="Change current working directory">
+                        <i class="fas fa-folder-tree"></i>
+                    </button>
+    
+                    <button id="sendButton">Send</button>
+                    <button id="stopButton" style="display:none;">Stop</button>
+                </div>
+                <div class="warning">warning: is Alpha version</div>
+            </div>
+            </div>
+            </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+      svg: { fontCache: 'global' }
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="file_browser.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

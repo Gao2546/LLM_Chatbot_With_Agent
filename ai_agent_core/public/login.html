@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png" />
+    <link rel="stylesheet" href="/styleRL.css" />
+</head>
+
+<body>
+    <div class="form-container">
+        <h1 class="LoginTitle">Login</h1>
+        <div id="error-message" class="error-message"></div> <!-- Added error message container -->
+        <form class="login-form">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required />
+
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required />
+
+            <button type="submit" class="login-button">Login</button>
+        </form>
+        <p>Don't have an account? <a href="/auth/register">Register here</a></p>
+    </div>
+    <script src="login.js"></script> <!-- Added script reference -->
+</body>
+
+</html>
