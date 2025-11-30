@@ -455,7 +455,8 @@ document.addEventListener('DOMContentLoaded', async (event) => {
                 if (data.chatHistory && data.chatHistory.length > 0) {
                     data.chatHistory.forEach(message => {
                         if (message.startsWith('user:')) {
-                            displayMessage(message.substring(5).trim(), 'user-message');
+                            // displayMessage(message.substring(5).trim(), 'user-message');
+                            displayMarkdownMessage(message.substring(5).trim(), 'user-message');
                         } 
                         else if (message.startsWith('assistance:')) {
                             displayMarkdownMessage(message.substring(11).trim(), 'agent-message');
@@ -877,7 +878,8 @@ async function sendMessage() {
         return;
     }
 
-    displayMessage(currentMessage, 'user-message'); // Display initial user message
+    // displayMessage(currentMessage, 'user-message'); // Display initial user message
+    displayMarkdownMessage(currentMessage, 'user-message'); // Display initial user message
     // userInput.value = ''; // Clear input field
     // userFiles.value = '';
     userInput.style.height = 'auto'; // Reset height after sending
@@ -1135,13 +1137,40 @@ async function sendMessage() {
 }
 
 
+
 function displayMessage(text, className) {
     const messageElement = document.createElement('div');
     messageElement.textContent = text;
     messageElement.className = className;
+    
+    // Add edit button for user messages
+    if (className === 'user-message') {
+        const editButton = document.createElement('button');
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.className = 'edit-button';
+        editButton.title = 'Edit message';
+        editButton.style.display = 'none'; // Hidden by default
+        
+        // Show button on hover
+        messageElement.addEventListener('mouseenter', () => {
+            editButton.style.display = 'inline-flex';
+        });
+        messageElement.addEventListener('mouseleave', () => {
+            editButton.style.display = 'none';
+        });
+        
+        // Edit button click handler
+        editButton.addEventListener('click', () => {
+            startEditMessage(messageElement, text);
+        });
+        
+        messageElement.appendChild(editButton);
+    }
+    
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to bottom
 }
+
 
 
 let stopCon = false;
@@ -1243,11 +1272,98 @@ const markdown = window.markdownit({
     }
 });
 
+
 function displayMarkdownMessage(text, className) {
     const html = markdown.render(text);
     const messageElement = document.createElement('div');
     messageElement.innerHTML = html;
     messageElement.className = className;
+    
+    // Add copy button for agent messages
+    if (className === 'agent-message') {
+        const copyButton = document.createElement('button');
+        copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+        copyButton.className = 'copy-button';
+        copyButton.title = 'Copy message';
+        copyButton.style.display = 'none'; // Hidden by default
+        
+        // Show button on hover
+        messageElement.addEventListener('mouseenter', () => {
+            copyButton.style.display = 'inline-flex';
+        });
+        messageElement.addEventListener('mouseleave', () => {
+            copyButton.style.display = 'none';
+        });
+        
+        // Copy button click handler
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(text).then(() => {
+                // Show feedback
+                copyButton.innerHTML = '<i class="fas fa-check"></i>';
+                setTimeout(() => {
+                    copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+        
+        messageElement.appendChild(copyButton);
+    }
+
+    // Add edit button for user messages
+    else if (className === 'user-message') {
+        const editButton = document.createElement('button');
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.className = 'edit-button';
+        editButton.title = 'Edit message';
+        editButton.style.display = 'none'; // Hidden by default
+        
+        // Show button on hover
+        messageElement.addEventListener('mouseenter', () => {
+            editButton.style.display = 'inline-flex';
+        });
+        messageElement.addEventListener('mouseleave', () => {
+            editButton.style.display = 'none';
+        });
+        
+        // Edit button click handler
+        editButton.addEventListener('click', () => {
+            startEditMessage(messageElement, text);
+        });
+        
+        messageElement.appendChild(editButton);
+
+        const copyButton = document.createElement('button');
+        copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+        copyButton.className = 'copy-button';
+        copyButton.title = 'Copy message';
+        copyButton.style.display = 'none'; // Hidden by default
+        
+        // Show button on hover
+        messageElement.addEventListener('mouseenter', () => {
+            copyButton.style.display = 'inline-flex';
+        });
+        messageElement.addEventListener('mouseleave', () => {
+            copyButton.style.display = 'none';
+        });
+        
+        // Copy button click handler
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(text).then(() => {
+                // Show feedback
+                copyButton.innerHTML = '<i class="fas fa-check"></i>';
+                setTimeout(() => {
+                    copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+        
+        messageElement.appendChild(copyButton);
+    }
+    
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
@@ -1256,9 +1372,41 @@ function displayMarkdownMessage(text, className) {
     }
 }
 
+
 function displayMarkdownMessageStream(text, messageElement) {
     const html = markdown.render(text);
     messageElement.innerHTML = html;
+
+    // Add copy button for agent messages
+    const copyButton = document.createElement('button');
+    copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+    copyButton.className = 'copy-button';
+    copyButton.title = 'Copy message';
+    copyButton.style.display = 'none'; // Hidden by default
+    
+    // Show button on hover
+    messageElement.addEventListener('mouseenter', () => {
+        copyButton.style.display = 'inline-flex';
+    });
+    messageElement.addEventListener('mouseleave', () => {
+        copyButton.style.display = 'none';
+    });
+    
+    // Copy button click handler
+    copyButton.addEventListener('click', () => {
+        navigator.clipboard.writeText(text).then(() => {
+            // Show feedback
+            copyButton.innerHTML = '<i class="fas fa-check"></i>';
+            setTimeout(() => {
+                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+            }, 1000);
+        }).catch(err => {
+            console.error('Failed to copy text: ', err);
+        });
+    });
+    
+    messageElement.appendChild(copyButton);
+    
 
     // Only auto-scroll if user is already at (or near) the bottom
     const threshold = 300; // px, how close to bottom counts as "at the bottom"
@@ -1381,7 +1529,8 @@ async function loadChatHistory(chatId) {
             if (data.chatHistory && data.chatHistory.length >= 0) { // Allow empty history array
                 data.chatHistory.forEach(message => {
                     if (message.startsWith('user:')) {
-                        displayMessage(message.substring(5).trim(), 'user-message');
+                        // displayMessage(message.substring(5).trim(), 'user-message');
+                        displayMarkdownMessage(message.substring(5).trim(), 'user-message');
                     } 
                     else if (message.startsWith('assistance:')) {
                         displayMarkdownMessage(message.substring(11).trim(), 'agent-message');
@@ -1998,6 +2147,205 @@ async function confirmDirectoryChange() {
         closeDirectoryBrowser();
     }
 }
+
+
+function startEditMessage(messageElement, originalText) {
+    // 1. Save original content in case user cancels
+    // We assume the messageElement contains just the text or simple HTML. 
+    // If you have timestamps inside the div, you might need to target a specific inner-text span.
+    const originalHTML = messageElement.innerHTML;
+    const originalElement = messageElement.cloneNode(true);
+
+    messageElement.classList.add('message-editing');
+
+    // If this is a user-message, re-attach edit/copy button events
+    if (originalElement.classList.contains('user-message')) {
+        const editButton = originalElement.querySelector('.edit-button');
+        const copyButton = originalElement.querySelector('.copy-button');
+        if (editButton) {
+            editButton.addEventListener('click', () => {
+                startEditMessage(originalElement, originalText);
+            });
+            originalElement.addEventListener('mouseenter', () => {
+                editButton.style.display = 'inline-flex';
+            });
+            originalElement.addEventListener('mouseleave', () => {
+                editButton.style.display = 'none';
+            });
+        }
+        if (copyButton) {
+            copyButton.addEventListener('click', () => {
+                navigator.clipboard.writeText(originalText).then(() => {
+                    copyButton.innerHTML = '<i class="fas fa-check"></i>';
+                    setTimeout(() => {
+                        copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+                    }, 1000);
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                });
+            });
+            originalElement.addEventListener('mouseenter', () => {
+                copyButton.style.display = 'inline-flex';
+            });
+            originalElement.addEventListener('mouseleave', () => {
+                copyButton.style.display = 'none';
+            });
+        }
+    }
+
+    // 2. Clear current message content
+    // Clear and inject the editor
+    messageElement.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'edit-form-container';
+    container.innerHTML = `
+        <textarea class="edit-textarea" rows="1"></textarea>
+        <div class="edit-buttons">
+            <button class="edit-btn edit-cancel">Cancel</button>
+            <button class="edit-btn edit-submit">Save</button>
+        </div>
+    `;
+    messageElement.appendChild(container);
+
+    const textarea = container.querySelector('.edit-textarea');
+    const submitBtn = container.querySelector('.edit-submit');
+    const cancelBtn = container.querySelector('.edit-cancel');
+
+    // Set initial text
+    textarea.value = originalText;
+
+    // --- CORE LOGIC: HEIGHT FIT TO LINES ---
+    const autoResize = () => {
+        // 1. Save the scroll position of the main window (or your chat container)
+        // If your chat scrolls inside a specific div (e.g., messagesDiv), use that instead of window
+        const scrollPos = window.scrollY; 
+        // const scrollPos = messagesDiv.scrollTop; // Use this if scrolling happens in a div
+
+        // 2. Perform the resize (this causes the jump)
+        textarea.style.height = 'auto'; 
+        textarea.style.height = textarea.scrollHeight + 'px';
+
+        // 3. Restore the scroll position immediately
+        window.scrollTo(window.scrollX, scrollPos + 100);
+        // messagesDiv.scrollTop = scrollPos; // Use this if scrolling happens in a div
+    };
+
+    // Trigger immediately to fit the original text
+    autoResize();
+
+    // Trigger on every character input
+    textarea.addEventListener('input', autoResize);
+    // ---------------------------------------
+
+    textarea.focus({ preventScroll: true });
+    // Move cursor to end
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    // Handlers
+    const handleCancel = () => {
+        // messageElement.innerHTML = originalHTML;
+        messageElement.replaceWith(originalElement);
+        messageElement.classList.remove('message-editing');
+    };
+
+    const handleSubmit = async () => {
+        const newText = textarea.value.trim();
+        if (newText && newText !== originalText) {
+            textarea.disabled = true;
+            submitBtn.textContent = '...';
+            await editMessage(messageElement, newText);
+        } else {
+            handleCancel();
+        }
+    };
+
+    cancelBtn.addEventListener('click', (e) => { e.stopPropagation(); handleCancel(); });
+    submitBtn.addEventListener('click', (e) => { e.stopPropagation(); handleSubmit(); });
+    
+    textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSubmit();
+        } else if (e.key === 'Escape') {
+            handleCancel();
+        }
+    });
+}
+
+// 1. New Helper Function: Deletes all siblings after a specific element
+function removeMessagesBelow(element) {
+    // While there is a next sibling, remove it
+    while (element.nextElementSibling) {
+        // Note: If your editDialog is appended to messagesDiv, 
+        // this will remove it too, which is generally fine as the edit is finished.
+        element.nextElementSibling.remove();
+    }
+}
+
+// 2. Updated editMessage Function
+async function editMessage(messageElement, newText) {
+    try {
+        // Get session info
+        const sessionResponse = await fetch('/auth/session');
+        const sessionData = await sessionResponse.json();
+        
+        if (!sessionData.loggedIn || !sessionData.currChatId) {
+            console.error('No active session or chat');
+            return;
+        }
+
+        messageElement.classList.remove('message-editing');
+
+        const html = markdown.render(newText);
+        messageElement.style.display = 'block'; // Show loading state if needed
+        messageElement.innerHTML = html;
+
+        console.log('Editing message in chat ID:', sessionData.currChatId);
+        console.log('Editing message Index:', getMessageIndex(messageElement));
+        console.log('New message text:', newText);
+        removeMessagesBelow(messageElement);
+        window.messageElementStream = createMarkdownMessageStreamElement('agent-message')
+        // Call edit message API
+        const response = await fetch('/api/edit-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: sessionData.currChatId,
+                messageIndex: getMessageIndex(messageElement),
+                newMessage: newText,
+                socketId: socket.id,
+                requestId: socket.id + sessionData.currChatId
+            })
+        });
+        
+        if (response.ok) {
+            // --- NEW CODE START ---
+            // Remove all messages below the edited element immediately
+            // removeMessagesBelow(messageElement);
+            // --- NEW CODE END ---
+
+            // Reload chat history to get new responses (and the updated current message)
+            await loadChatHistory(sessionData.currChatId);
+            
+        } else {
+            console.error('Failed to edit message');
+            // Restore original display
+            messageElement.style.display = '';
+            messageElement.classList.remove('message-editing');
+        }
+    } catch (error) {
+        console.error('Error editing message:', error);
+        messageElement.style.display = '';
+        messageElement.classList.remove('message-editing');
+    }
+}
+
+// Function to get message index in chat
+function getMessageIndex(messageElement) {
+    const messages = Array.from(messagesDiv.children);
+    return messages.indexOf(messageElement);
+}
+
 
 // Make functions globally accessible on the window object
 window.openDirectoryBrowser = openDirectoryBrowser;

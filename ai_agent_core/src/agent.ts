@@ -1030,7 +1030,547 @@ router.post('/message', async (req : Request, res : Response) => {
   }
 });
 
+
+router.post('/edit-message', async (req, res) => {
+  const { chatId, messageIndex, newMessage, socketId, requestId } = req.body;
+  const userId = req.session.user?.id;
+  const controller = new AbortController();
+  runningRequests.set(requestId, controller);
+  const socket = io.sockets.sockets.get(socketId);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  // Read current history
+  const rows = await readChatHistory(chatId);
+  if (rows.length === 0) return res.status(404).json({ error: 'Chat not found' });
+  let chatContent = rows[0].message;
+  const messages = chatContent.split('\n<DATA_SECTION>\n');
+  if (messageIndex >= messages.length) return res.status(400).json({ error: 'Invalid message index' });
+  const message = messages[messageIndex];
+  if (!message.startsWith('user:')) return res.status(400).json({ error: 'Can only edit user messages' });
+  // Truncate after this message
+  const truncatedMessages = messages.slice(0, messageIndex + 1);
+  // Update the message
+  truncatedMessages[messageIndex] = 'user: ' + newMessage;
+  // Rebuild chatContent
+  let newChatContent = truncatedMessages.join('\n<DATA_SECTION>\n');
+  // Save truncated
+  console.log("New Chat Content after edit:\n", newChatContent);
+  await storeChatHistory(chatId, newChatContent);
+
+  // Now regenerate the response
+  const systemInformation : resultsT = await callToolFunction('GetSystemInformation', {}, socketId);
+  const systemInformationJSON = await JSON.parse(systemInformation.content[0].text);
+  let setting_prompt;
+  setting_prompt = setting_prompts + "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n`;
+
+  let question : string = "";
+    let question_backup
+    const modelToUse = rows[0].chat_model || 'gemini-2.0-flash-001';
+    const modeToUse = rows[0].chat_mode || 'code';
+    const regexM = /\{.*?\}\s*(.*)/;
+    let serch_doc = ""
+
+    if (chatId){
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: newMessage,
+          user_id: userId,
+          chat_history_id: chatId,
+          top_k: 20,
+          top_k_pages: 5,
+          top_k_text: 5,
+          threshold: 2.0
+        }),
+        signal: controller.signal,
+      });
+
+      const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
+      if (result_similar_TopK && result_similar_TopK.results){
+        result_similar_TopK.results.forEach(doc => {
+          try {
+            console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+            serch_doc += doc.text + "\n\n";
+          } catch (error) {
+            console.error(`Error processing document ${doc.file_name}:`, error);
+            serch_doc += doc + "\n\n";
+          }
+        });
+      }
+    }
+    console.log(serch_doc);
+    console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
+    if ((modeToUse) && (serch_doc != '')){
+      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
+      question_backup = newChatContent + "\n\n" + "document" + ": " + serch_doc
+    }
+    else{
+      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
+      question_backup = newChatContent
+    }
+
+    question = "Model name: " + modelToUse.match(regexM)![1] + "\n\n" + "--------------** Start Conversation Section** --------------\n\n" + question;
+
+    try{
+      if (modeToUse === 'code') {
+        question = setting_prompt + "## **If user do not mation to user system information do not talk about that"+ "\n\n" + question ;
+        // console.log(question);
+      }
+      else{
+        question = "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n---\n\n` + `----------------------- **END USER SYSTEM INFORMATION** -----------------------\n\n` + 
+                   "\n\n\n\n------------------------- **SYSTEM INSTRUCTION**---------------------------\n\n" + `## **If user do not mation to user system information do not talk about that\n\n` + `## **You are assistance\n\n` + `## **You must answer user question\n\n` + `## **If in normal conversation do not use any markdown Code Block in three backticks\n\n` + `## **Use Markdown Code Block in three backticks only in code\n\n` 
+                   + `----------------------------------- **END SYSTEM INSTRUCTION** -----------------------------------\n\n` +
+                    question;
+        // console.log(question)
+      }
+    }
+    catch(err) {
+      console.error('Error setting chat mode:', err);
+      return res.status(500).json({ error: `${err}` });
+    }
+
+    let response: { text: string } | null = null;
+
+  if (
+        // modelToUse.startsWith("gemini") || 
+        // modelToUse.startsWith("gemma-3") || 
+        modelToUse.startsWith("{_Google_API_}")){
+
+      // const Geminiresponse = await ai.models.generateContent({
+      //   model: modelToUse, // Use the determined model
+      //   contents: question,
+      // });
+      // if (Geminiresponse && typeof(Geminiresponse.text) === 'string'){
+      //   response = { text: Geminiresponse.text };
+      // }
+
+
+      let retries = 0;
+          
+      while (retries < 3) {
+        try {
+          console.log(`Streaming response for prompt: "${question}"`);
+        
+
+          const result = await ai.models.generateContentStream({
+            model: modelToUse.replace("{_Google_API_}",""),
+            contents: question,
+            config: {
+              maxOutputTokens: 1_000_000,
+            },
+          });
+
+        
+          let out_res = '';
+          let assistancePrefixRemoved = false;
+        
+          for await (const chunk of result) {
+            if (controller.signal.aborted){
+              return res.status(500).json({ error:'Error streaming Aborted'});
+            }
+            let chunkText = chunk.text;
+            if (chunkText !== undefined) {
+              out_res += chunkText;
+              out_res = out_res.replace("&lt;","<").replace("&gt;", ">").replace("&amp;","&")
+            }
+          
+            if (!assistancePrefixRemoved) {
+              if (out_res.startsWith('assistance:')) {
+                out_res = out_res.slice('assistance:'.length).trimStart();
+                assistancePrefixRemoved = true;
+              }
+            }
+          
+            socket?.emit('StreamText', out_res);
+          }
+        
+          console.log('Streaming finished.');
+          console.log(out_res);
+          response = { text: out_res };
+        
+          retries = 0; // reset retries after success
+          break
+        } catch (error) {
+          console.error('Error streaming from Gemini API:', error);
+          retries++;
+          await new Promise(r => setTimeout(r, 1000 * (retries + 1)));
+          if (retries >= 3) {
+            console.error(`Max retries (${retries}) reached for this attempt.`);
+          }
+           else {
+            // res.end();
+            return res.status(500).json({ error:'Error streaming response from AI'});
+          }
+        }
+      }
+
+
+
+    } else if ( 
+                // modelToUse.startsWith("qwen") || 
+                // modelToUse.startsWith("gemma3") || 
+                // modelToUse.startsWith("deepseek") || 
+                // modelToUse.startsWith("qwq") || 
+                // modelToUse.startsWith("deepcoder") || 
+                // modelToUse.startsWith("phi4") || 
+                // modelToUse.startsWith("llama3.2") || 
+                // modelToUse.startsWith("wizardlm") || 
+                // modelToUse.startsWith("hhao") || 
+                // modelToUse.startsWith("gpt-oss") || 
+                modelToUse.startsWith("{_Ollama_API_}")){
+    try {
+        console.log("Calling Ollama API...");
+        console.log(process.env.API_OLLAMA!);
+
+        const ollamaFetchResponse = await fetch(process.env.API_OLLAMA!, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: modelToUse.replace("{_Ollama_API_}",""),
+            prompt: question,
+            stream: true
+          }),
+          signal: controller.signal, // 👈 important
+        });
+        let out_res = '';
+        let assistancePrefixRemoved = false;
+
+        const stream = ollamaFetchResponse.body as Readable;
+
+        const result = await new Promise<string>((resolve, reject) => {
+          stream.on('data', (chunk: Buffer) => {
+            const text = chunk.toString('utf8');
+            const lines: string[] = text.split('\n').filter((line: string) => line.trim() !== '');
+          
+            for (const line of lines) {
+              try {
+                const json = JSON.parse(line);
+                let chunkText = json.response;
+                out_res += chunkText;
+              
+                if (!assistancePrefixRemoved) {
+                  if (out_res.startsWith('assistance:')) {
+                    out_res = out_res.slice('assistance:'.length).trimStart();
+                    assistancePrefixRemoved = true;
+                  }
+                }
+              
+                
+                socket?.emit('StreamText', out_res);
+              } catch (e) {
+                console.error('Invalid JSON:', line);
+              }
+            }
+          });
+        
+          stream.on('end', () => resolve(out_res));
+          stream.on('error', reject);
+        });
+
+
+        response = { text: result };
+
+
+    } catch (err) {
+        console.error('Error calling Ollama API or processing response:', err);
+        // Send error response immediately if fetch or JSON parsing fails
+        return res.status(500).json({ error: `Failed to communicate with Ollama model: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    }
+
+    else if (
+      // modelToUse.startsWith("qwen") ||
+      // modelToUse.startsWith("gemma3") ||
+      // modelToUse.startsWith("deepseek") ||
+      // modelToUse.startsWith("qwq") ||
+      // modelToUse.startsWith("deepcoder") ||
+      // modelToUse.startsWith("phi4") ||
+      // modelToUse.startsWith("llama3.2") ||
+      // modelToUse.startsWith("wizardlm") ||
+      // modelToUse.startsWith("hhao") ||
+      // modelToUse.startsWith("gpt-oss") ||
+      modelToUse.startsWith("{_OpenRouter_API_}")
+    ) {
+      const regexM = /\{.*?\}\s*(.*)/;
+      let message
+      if (modeToUse == "code"){
+        message = buildMessages(  setting_prompt + 
+                                  "\n\nModel name : " + 
+                                  modelToUse.match(regexM)[1] + 
+                                  "\n\n", 
+                                  question_backup);
+      }
+      else{
+        message = buildMessages("You are assistance" + 
+                                "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n` + 
+                                "## **If user do not mation to user system information do not talk about that"+
+                                "\n\nModel name : " + 
+                                modelToUse.match(regexM)[1] + 
+                                "\n\n",
+                                question_backup 
+                                // + `\n\n## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n`
+                              );
+      }
+
+      // console.log(message);
+      // let sys_prompt = ""
+      // if (modeToUse == 'code'){
+      //   sys_prompt = "system:\nYour are agent \n\n If user give instruction tool and task you must be complete the task by use the tool \n\n # **you can call only one to per round**"
+      // }
+      // else{
+      //   sys_prompt = "Your are assistance \n\n If user ask question you must answer the question"
+      // }
+      try {
+        console.log("Calling OpenRouter API (streaming)...");
+        // console.log("\nquestion: ");
+        // console.log(question);
+      
+        const openRouterFetchResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY!}`,
+            "HTTP-Referer": process.env.SITE_URL || "",
+            "X-Title": process.env.SITE_NAME || "",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: modelToUse.replace("{_OpenRouter_API_}", ""),
+            ...(modelToUse.startsWith("{_OpenRouter_API_}google")
+                ? { prompt: question }
+                : { messages: message }
+            ),
+            ...(modelToUse.startsWith("{_OpenRouter_API_}google")
+                ? { 'provider': {
+                      'order': [
+                        'deepinfra/bf16',
+                        'chutes',
+                        'together',
+                        'google-vertex',
+                        'google-ai-studio',
+
+                      ],
+                    } }
+                : { 'provider': {
+                      'order': [
+                        'deepinfra/fp4',
+                        'chutes/bf4',
+                        'deepinfra/fp8',
+                        'chutes/bf8',
+                        'deepinfra/fp16',
+                        'chutes/bf16',
+                        'deepinfra',
+                        'chutes',
+                        'together',
+                        'xai',
+                        'google-vertex',
+                        'google-ai-studio',
+                        'inference-net'
+                      ],
+                    } }
+            ),
+            // [
+            //   {
+            //     "role": "system",
+            //     "content": setting_prompt,
+            //   },
+            //   {
+            //     "role": "user",
+            //     "content": question_backup,
+            //     // [
+            //       // {
+            //       //   "type": "text",
+            //       //   "text": question
+            //       // },
+            //       // {
+            //       //   "type": "image_url",
+            //       //   "image_url": {
+            //       //     "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+            //       //   }
+            //       // }
+            //     // ]
+            //   },
+            // ],
+            stream: modeToUse == "ask" ? true : false,
+            "reasoning": {
+
+              // One of the following (not both):
+
+              // "effort": "high", // Can be "high", "medium", or "low" (OpenAI-style)
+
+              "max_tokens": 20000, // Specific token limit (Anthropic-style)
+
+              // Optional: Default is false. All models support this.
+
+              "exclude": false, // Set to true to exclude reasoning tokens from response
+
+              // Or enable reasoning with the default parameters:
+
+              "enabled": true // Default: inferred from `effort` or `max_tokens`
+
+            },
+            temperature: 0.0, // ไม่สุ่มเลย
+            // max_tokens: 1_000_000,
+            top_p: 1.0,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+          }),
+          signal: controller.signal, // 👈 important
+        });
+
+      let result = "";
+
+      if (modeToUse == "code"){
+        const openRouterData = await openRouterFetchResponse.json() as OpenRouterChatResponse;
+        if (openRouterData.choices && openRouterData.choices[0]?.message?.content) {
+          result = openRouterData.choices[0].message.content;
+          socket?.emit("StreamText", result);
+        }
+      }
+      else{
+      const stream = openRouterFetchResponse.body as unknown as NodeJS.ReadableStream;
+
+        result = await new Promise<string>((resolve, reject) => {
+        let out_res = "";
+        let assistancePrefixRemoved = false;
+              
+        stream.on("data", (chunk: Buffer) => {
+          const text = chunk.toString("utf8");
+          // console.log(text);
+
+          // Check for context length error
+          if (text.includes('{"error":{"message":"')) {
+            try {
+              const errorObj = JSON.parse(text);
+              if (
+                errorObj.error &&
+                errorObj.error.message &&
+                errorObj.error.message.includes("maximum context length is")
+              ) {
+                reject(new Error(errorObj.error.message));
+                return;
+              }
+            } catch (e) {
+              // If not JSON, just continue
+            }
+          }
+
+          const lines = text.split("\n").filter(
+            (line) => line.trim() !== "" && line.startsWith("data:")
+          );
+
+          for (const line of lines) {
+            const data = line.slice(5).trim(); // remove "data: "
+            if (data === "[DONE]") {
+              // Stream finished
+              console.log("streaming DONE");
+              resolve(out_res); // resolve the promise immediately
+              return;
+            }
+
+            try {
+              const json = JSON.parse(data);
+              // Check for context length error in streamed data
+              if (
+                json.error &&
+                json.error.message &&
+                json.error.message.includes('{"error":{"message":"')
+              ) {
+                reject(new Error(json.error.message));
+                return;
+              }
+              const delta = json.choices?.[0]?.delta?.content || json.choices?.[0]?.text || "";
+              // const delta = json.choices?.[0]?.text;
+              out_res += delta;
+
+              // Optional: strip unwanted prefix
+              if (!assistancePrefixRemoved && out_res.startsWith("assistance:")) {
+                out_res = out_res.slice("assistance:".length).trimStart();
+                assistancePrefixRemoved = true;
+              }
+
+              socket?.emit("StreamText", out_res);
+            } catch (e) {
+              console.error("Invalid JSON:", data, e);
+            }
+          }
+        });
+      
+        stream.on("end", () => resolve(out_res));
+        stream.on("error", reject);
+      });
+      }
+
+      
+        response = { text: result };
+      
+      } catch (err) {
+        console.error("Error calling OpenRouter API or processing response:", err);
+        return res.status(500).json({
+          error: `Failed to communicate with model: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        });
+      }
+    }
+
+
+
+    else if(modelToUse.startsWith('01')){
+      try{
+        console.log("Calling MyModel API...");
+        const MyModelFetchResponse = await fetch('http://127.0.0.1:5000/predict', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                question: newMessage,
+            }),
+            signal: controller.signal, // 👈 important
+        });
+
+
+        if (!MyModelFetchResponse.ok) {
+          const errorText = await MyModelFetchResponse.text();
+          console.error(`MyModel API error! status: ${MyModelFetchResponse.status}`, errorText);
+          // Send error response immediately if API call fails
+          return res.status(500).json({ error: `MyModel API error (${MyModelFetchResponse.status}): ${errorText}` });
+      }
+
+      // Use the OllamaResponse interface defined earlier (lines 81-87)
+      const MyModelData = await MyModelFetchResponse.json() as MyModel; // Explicitly cast to OllamaResponse
+      console.log("Raw MyModel Response:", MyModelData);
+
+      if (MyModelData && typeof MyModelData.answer === 'string') {
+          // Store the response text in the 'response' variable for later processing
+          response = { text: MyModelData.answer };
+          console.log("Extracted MyModel Response Text:", response.text);
+      } else {
+          console.error("Invalid response format from MyModel:", MyModelData);
+          // Send error response immediately if format is invalid
+          return res.status(500).json({ error: "Invalid response format received from MyModel model" });
+      }
+
+
+      } catch (err){
+        console.error('Error calling MyModel API or processing response:', err);
+        // Send error response immediately if fetch or JSON parsing fails
+        return res.status(500).json({ error: `Failed to communicate with MyModel model: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
+  if (response) {
+    newChatContent += "\n<DATA_SECTION>\n" + "assistance: " + response.text + "\n";
+    await storeChatHistory(chatId, newChatContent);
+  }
+
+  res.json({ success: true });
+});
+
+
 router.post('/stop',async (req : Request, res : Response) => {
+
   const { requestId } = req.body;
   const controller = runningRequests.get(requestId);
   if (controller) {

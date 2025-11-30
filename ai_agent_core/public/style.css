@@ -475,7 +475,8 @@ thinking {
     color: #fff;
     margin-left: auto; /* Align right */
     border-bottom-right-radius: 5px; /* Slightly different corner */
-    text-align: right;
+    /* text-align: right; */
+    text-align: left;
 }
 
 .agent-message {
@@ -1007,6 +1008,115 @@ strong {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 0.9rem;
 }
+
+
+.message-editing {
+    width: 100% !important;      /* Fill available chat width */
+    max-width: 100% !important;  /* Override standard bubble limits */
+    display: block !important;   /* Stop acting like an inline-bubble */
+    box-sizing: border-box;
+}
+
+/* Container injected inside the message bubble */
+.edit-form-container {
+    width: 100%;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.edit-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+/* The container that overlays the message */
+.edit-dialog {
+    /* Match the background to your user-message color */
+    background-color: #007bff; /* Example: Standard Messenger Blue */
+    color: white; 
+    border-radius: 18px; /* Standard chat bubble radius */
+    padding: 10px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* transition for smooth appearance */
+    animation: fadeIn 0.15s ease-out;
+}
+
+/* The input area - looks like regular text */
+.edit-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1.5;
+    resize: none; 
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+    overflow-y: hidden; 
+    height: auto; 
+    display: block;
+}
+
+/* Scrollbar styling for textarea if it gets too long */
+.edit-textarea::-webkit-scrollbar {
+    width: 6px;
+}
+.edit-textarea::-webkit-scrollbar-thumb {
+    background-color: rgba(255,255,255,0.3);
+    border-radius: 3px;
+}
+
+/* Button container */
+.edit-btn {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    cursor: pointer;
+    background: rgba(255,255,255,0.1);
+    color: inherit;
+}
+
+.edit-btn:hover {
+    background: rgba(255,255,255,0.2);
+}
+
+.edit-btn:active {
+    transform: scale(0.95);
+}
+
+/* Submit Button */
+.edit-submit {
+    background-color: white;
+    color: #007bff; /* Match dialog background text color */
+}
+
+/* Cancel Button */
+.edit-cancel {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.edit-cancel:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
+
 
 /* Responsive fix: prevent modal content from going off screen */
 @media (max-width: 500px) {
