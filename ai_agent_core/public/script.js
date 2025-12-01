@@ -314,11 +314,9 @@ const changeDirButton = document.getElementById('changeDirButton');
 const dt = new DataTransfer();
 
 fileInput.addEventListener('change', function() {
-    // 2. Iterate through the NEWLY selected files
     for (let i = 0; i < this.files.length; i++) {
         const file = this.files[i];
-        
-        // 3. Prevent duplicates: Check if file already exists in our stored list
+        // ตรวจสอบไฟล์ซ้ำ (เหมือนเดิม)
         let isDuplicate = false;
         for (let j = 0; j < dt.items.length; j++) {
             if (dt.items[j].getAsFile().name === file.name && 
@@ -327,18 +325,12 @@ fileInput.addEventListener('change', function() {
                 break;
             }
         }
-
-        // Only add if it's not a duplicate
         if (!isDuplicate) {
             dt.items.add(file);
         }
     }
-
-    // 4. Update the actual input to include ALL files (old + new)
-    this.files = dt.files;
-
-    // 5. Update the Visual Display
-    updateFileList();
+    // ลบ this.files = dt.files; ออก เพราะไม่ทำงานใน Chrome/Edge
+    updateFileList();  // อัปเดต UI ตามปกติ
 });
 
 function updateFileList() {
@@ -365,26 +357,27 @@ function updateFileList() {
     }
 }
 
+function clearSelectedFiles() {
+    dt.items.clear();
+    // ลบ fileInput.files = dt.files; ออก เพราะไม่ทำงาน
+    updateFileList();
+    selectedFilesDiv.style.display = 'none';
+    selectedFilesDiv.innerHTML = '';
+}
+
 // Function to remove a file from the selection
 function removeFile(fileName) {
-    // 1. Create a temporary DataTransfer to filter out the removed file
     const newDt = new DataTransfer();
-    
-    // 2. Loop through existing global files and copy all EXCEPT the one to remove
     for (let i = 0; i < dt.files.length; i++) {
         if (dt.files[i].name !== fileName) {
             newDt.items.add(dt.files[i]);
         }
     }
-    
-    // 3. Clear the global dt and refill it with the filtered list
     dt.items.clear();
-    for(let i = 0; i < newDt.files.length; i++){
+    for (let i = 0; i < newDt.files.length; i++) {
         dt.items.add(newDt.files[i]);
     }
-
-    // 4. Update the input and the UI
-    fileInput.files = dt.files;
+    // ลบ fileInput.files = dt.files; ออก
     updateFileList();
 }
 
@@ -872,7 +865,8 @@ async function sendMessage() {
 
     let currentMessage = userInput.value.trim();
     const userFiles = document.getElementById('fileInput')
-    let currentFiles = userFiles.files;
+    // let currentFiles = userFiles.files;
+    let currentFiles = dt.files;  // ใช้ dt.files แทน userFiles.files
     if (currentMessage === '') {
         resetButtonState(); // Reset button state if message is empty
         return;
@@ -937,6 +931,7 @@ async function sendMessage() {
             const result = await res.json();
             console.log('show result')
             console.log(result)
+            clearSelectedFiles();
         }
         // Show result in UI
         // document.getElementById("messages").innerHTML += `<p><strong>You:</strong> ${text}</p>`;
@@ -946,6 +941,7 @@ async function sendMessage() {
         // alert("Error sending message.");
         console.log("Error sending message")
         resetButtonState(); // Reset button state on error
+        clearSelectedFiles();
     }
 
     try { // Wrap the loop in a try-catch
