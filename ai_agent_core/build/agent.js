@@ -264,8 +264,15 @@ router.post('/message', async (req, res) => {
             if (result_similar_TopK && result_similar_TopK.results) {
                 result_similar_TopK.results.forEach(doc => {
                     try {
-                        console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
-                        serch_doc += doc.text + "\n\n";
+                        console.log("type : ");
+                        console.log(typeof doc);
+                        if (typeof doc != "string") {
+                            console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+                            serch_doc += doc.text + "\n\n";
+                        }
+                        else if (typeof doc == "string") {
+                            serch_doc += "";
+                        }
                     }
                     catch (error) {
                         console.error(`Error processing document ${doc.file_name}:`, error);
@@ -298,11 +305,12 @@ router.post('/message', async (req, res) => {
         }
         let question = "";
         let question_backup;
-        if ((currentChatMode) && (serch_doc != '')) {
+        if ((currentChatMode) && (serch_doc != "")) {
             question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
             question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc;
         }
         else {
+            console.log("No document");
             question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
             question_backup = chatContent;
         }
