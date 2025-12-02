@@ -82,7 +82,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
 # model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
+# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
 # model = LLM(
 #     model="jinaai/jina-embeddings-v4-vllm-retrieval",
 #     task="auto",
@@ -150,12 +150,12 @@ base_model = AutoModel.from_pretrained(
     # attn_implementation="sdpa"
 )
 
-model = SentenceTransformer(modules=[base_model], device = 'cpu')
+model = SentenceTransformer(modules=[base_model], device = device)
 
 uses_mem = get_model_memory(model)
 
 # Now move to GPU
-model.to(device)
+# model.to(device)
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
