@@ -44,7 +44,6 @@
     datasets
     bitsandbytes
     accelerate
-    flash-attn
 
 #Pytorch
     torch
@@ -71,3 +70,4 @@
     git+https://github.com/illuin-tech/colpali
     packaging
     wheel
+    flash-attn
