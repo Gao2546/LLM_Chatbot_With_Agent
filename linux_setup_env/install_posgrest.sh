@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "--- Starting PostgreSQL and pgvector FIX Script (V2) ---"
+echo "--- Starting PostgreSQL and pgvector FIX Script (V3 - Pre-Cleanup) ---"
 
 # --- Configuration Variables ---
 POSTGRES_VERSION="16"
@@ -10,21 +10,27 @@ PGUSER_PASSWORD="123456"
 # --- End Configuration Variables ---
 
 # =================================================================
-# FIX 0: Stop old service and ensure v16 is primary
+# SECTION 1: Cleanup (Uninstall PostgreSQL 14)
 # =================================================================
-echo "## ⚠️ Stopping potentially conflicting PostgreSQL clusters..."
+echo "## 🗑️ 1. Removing conflicting PostgreSQL 14 packages and clusters..."
 
-# Attempt to stop the generic PostgreSQL service
+# Stop the generic PostgreSQL service
 service postgresql stop 2>/dev/null || true
-# Explicitly stop the older (often v14) cluster to free port 5432
-pg_ctlcluster 14 main stop 2>/dev/null || true
 
+# Purge (uninstall and remove config files) PostgreSQL 14 packages
+# We use 'purge' to ensure configuration and data files are also removed.
+apt purge -y postgresql-14 postgresql-contrib-14 postgresql-server-dev-14 2>/dev/null || true
+
+# Remove any remaining data directories for v14 to be safe
+rm -rf /var/lib/postgresql/14/main
+
+echo "✅ PostgreSQL 14 successfully removed."
 echo "---"
 
 # =================================================================
-# FIX 1: Add Official PostgreSQL Repository (Rerun for safety)
+# FIX 2: Add Official PostgreSQL Repository (Rerun for safety)
 # =================================================================
-echo "## 🔧 Adding official PostgreSQL APT repository..."
+echo "## 🔧 2. Adding official PostgreSQL APT repository..."
 
 # Install necessary tools for secure repository addition
 apt update -y
@@ -42,23 +48,23 @@ echo "Repository added and package list updated."
 echo "---"
 
 # =================================================================
-# SECTION 2: Install PostgreSQL and Dependencies (Rerun)
+# SECTION 3: Install PostgreSQL and Dependencies
 # =================================================================
-echo "## 🐘 2. Installing PostgreSQL (v${POSTGRES_VERSION}) and dependencies..."
+echo "## 🐘 3. Installing PostgreSQL (v${POSTGRES_VERSION}) and dependencies..."
 
 # Install PostgreSQL, contrib modules, and development headers
 apt install -y postgresql-$POSTGRES_VERSION postgresql-contrib-$POSTGRES_VERSION build-essential postgresql-server-dev-$POSTGRES_VERSION git
 
-# Start the postgres service (should now be v16)
+# Start the postgres service (This will now initialize and start v16 on port 5432)
 service postgresql start
 
 echo "✅ PostgreSQL core installation complete and service started."
 echo "---"
 
 # =================================================================
-# SECTION 3: Install pgvector Extension (FIXED COMPILATION)
+# SECTION 4: Install pgvector Extension (FIXED COMPILATION)
 # =================================================================
-echo "## ⚙️ 3. Installing and compiling pgvector..."
+echo "## ⚙️ 4. Installing and compiling pgvector..."
 
 PGVECTOR_VERSION="v0.6.2" # Current stable version
 git clone --branch ${PGVECTOR_VERSION} https://github.com/pgvector/pgvector.git
@@ -76,9 +82,9 @@ echo "✅ pgvector installed to PostgreSQL directories."
 echo "---"
 
 # =================================================================
-# SECTION 4: Initialize/Enable pgvector extension (UPDATED USER)
+# SECTION 5: Initialize/Enable pgvector extension (UPDATED USER)
 # =================================================================
-echo "## ✨ 4. Creating database user, database, and enabling pgvector..."
+echo "## ✨ 5. Creating database user, database, and enabling pgvector..."
 
 # Run commands as the 'postgres' user
 su - postgres <<EOF
@@ -94,9 +100,9 @@ psql -d ${DB_NAME} -c "\dx"
 EOF
 
 # =================================================================
-# FIX 5: Update pg_hba.conf for MD5 Authentication
+# FIX 6: Update pg_hba.conf for MD5 Authentication
 # =================================================================
-echo "## 🔑 5. Updating pg_hba.conf for MD5 password authentication..."
+echo "## 🔑 6. Updating pg_hba.conf for MD5 password authentication..."
 
 # Path to the pg_hba.conf file for PostgreSQL 16 on Ubuntu
 HBA_CONF="/etc/postgresql/${POSTGRES_VERSION}/main/pg_hba.conf"
@@ -105,7 +111,6 @@ HBA_CONF="/etc/postgresql/${POSTGRES_VERSION}/main/pg_hba.conf"
 cp $HBA_CONF $HBA_CONF.bak
 
 # 2. Modify the line for local connections (unix domain sockets) to use md5
-# This fixes the "Peer authentication failed" error
 sed -i.orig '/^local\s\+all\s\+all\s\+peer/c\local\t\tall\t\tall\t\t\t\tmd5' $HBA_CONF
 
 # 3. Modify the line for localhost connections (TCP/IP) to use md5

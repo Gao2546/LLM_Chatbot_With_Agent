@@ -84,6 +84,22 @@ echo "---"
 # =================================================================
 echo "## 🐘 3. Installing PostgreSQL (v${POSTGRES_VERSION}) and pgvector..."
 
+# --- FIX 3.1: Cleanup (Uninstall PostgreSQL 14) ---
+echo "--- 🗑️ Removing conflicting PostgreSQL 14 packages and clusters..."
+
+# Stop the generic PostgreSQL service
+service postgresql stop 2>/dev/null || true
+
+# Purge (uninstall and remove config files) PostgreSQL 14 packages
+apt purge -y postgresql-14 postgresql-contrib-14 postgresql-server-dev-14 2>/dev/null || true
+
+# Remove any remaining data directories for v14 to be safe
+rm -rf /var/lib/postgresql/14/main
+
+echo "PostgreSQL 14 successfully removed."
+# --- END FIX 3.1 ---
+
+
 # Add Official PostgreSQL Repository
 curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | tee /etc/apt/keyrings/postgresql.gpg > /dev/null
 echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | tee /etc/apt/sources.list.d/postgresql.list > /dev/null
@@ -92,23 +108,14 @@ apt update -y
 # Install PostgreSQL and dependencies
 apt install -y postgresql-$POSTGRES_VERSION postgresql-contrib-$POSTGRES_VERSION postgresql-server-dev-$POSTGRES_VERSION
 
-# --- FIX: Stop conflicting PostgreSQL clusters (e.g., v14) to free port 5432 ---
-echo "## ⚠️ Stopping potentially conflicting PostgreSQL clusters..."
-service postgresql stop 2>/dev/null || true
-# Explicitly try to stop any older clusters (like 14/main)
-pg_ctlcluster 14 main stop 2>/dev/null || true
-echo "Old clusters stopped."
-# --- END FIX ---
-
 # Install pgvector (from source)
 PGVECTOR_VERSION="v0.6.2"
 git clone --branch ${PGVECTOR_VERSION} https://github.com/pgvector/pgvector.git
 cd pgvector
 echo "Compiling pgvector ${PGVECTOR_VERSION}..."
-# --- FIX: Use default 'make' path which should correctly link to v16 headers ---
-make 
+# FIX: Use default make path
+make
 make install
-# --- END FIX ---
 cd ..
 rm -rf pgvector
 
@@ -128,10 +135,8 @@ psql -d ${DB_NAME} -c "CREATE EXTENSION vector;"
 psql -d ${DB_NAME} -c "\dx"
 EOF
 
-# =================================================================
-# FIX 4: Update pg_hba.conf for MD5 Authentication
-# =================================================================
-echo "## 🔑 4. Updating pg_hba.conf for MD5 password authentication..."
+# --- FIX 3.2: Update pg_hba.conf for MD5 Authentication ---
+echo "## 🔑 Updating pg_hba.conf for MD5 password authentication..."
 
 # Path to the pg_hba.conf file for PostgreSQL 16 on Ubuntu
 HBA_CONF="/etc/postgresql/${POSTGRES_VERSION}/main/pg_hba.conf"
@@ -140,7 +145,6 @@ HBA_CONF="/etc/postgresql/${POSTGRES_VERSION}/main/pg_hba.conf"
 cp $HBA_CONF $HBA_CONF.bak
 
 # 2. Modify the line for local connections (unix domain sockets) to use md5
-# This fixes the "Peer authentication failed" error
 sed -i.orig '/^local\s\+all\s\+all\s\+peer/c\local\t\tall\t\tall\t\t\t\tmd5' $HBA_CONF
 
 # 3. Modify the line for localhost connections (TCP/IP) to use md5
@@ -152,11 +156,12 @@ service postgresql restart
 
 echo "✅ PostgreSQL and pgvector setup complete. DB: ${DB_NAME} | User: ${PGUSER_NAME}"
 echo "---"
+# --- END FIX 3.2 ---
 
 # =================================================================
-# SECTION 5: MinIO Server Installation (Standalone & FIXED)
+# SECTION 4: MinIO Server Installation (Standalone & FIXED)
 # =================================================================
-echo "## 💾 5. Installing MinIO Object Storage Server (Standalone)..."
+echo "## 💾 4. Installing MinIO Object Storage Server (Standalone)..."
 
 # 1. Installation of MinIO Binary
 curl -fL https://dl.min.io/server/minio/release/linux-amd64/minio -o "${MINIO_BINARY}"
@@ -181,9 +186,9 @@ echo "MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
 echo "---"
 
 # =================================================================
-# SECTION 6: Ollama and Model Installation (FIXED)
+# SECTION 5: Ollama and Model Installation (FIXED)
 # =================================================================
-echo "## 🤖 6. Installing Ollama and pulling models..."
+echo "## 🤖 5. Installing Ollama and pulling models..."
 
 # 1. Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
@@ -222,9 +227,9 @@ fi
 echo "---"
 
 # =================================================================
-# SECTION 7: Python Virtual Environment Setup
+# SECTION 6: Python Virtual Environment Setup
 # =================================================================
-echo "## 🐍 7. Setting up Python Virtual Environment..."
+echo "## 🐍 6. Setting up Python Virtual Environment..."
 
 # 1. Install python3-venv package
 apt install -y python3-venv
@@ -263,3 +268,10 @@ echo "   - Shell command: psql -U ${PGUSER_NAME} -d ${DB_NAME} -h localhost -W"
 echo "4. MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
 echo "5. Ollama status: Running in background (PID: ${OLLAMA_PID})"
 echo "6. To stop background services, use: pkill minio && pkill ollama"
+
+---
+This video discusses building AI agents using shell scripts and a vector database, which is relevant to your project's goal of setting up an environment for an LLM Chatbot with an Agent.
+[Building Ai Agents with Shell Scripts by Laurent Doguin](https://www.youtube.com/watch?v=KUAeISXsbe4)
+
+
+http://googleusercontent.com/youtube_content/0
