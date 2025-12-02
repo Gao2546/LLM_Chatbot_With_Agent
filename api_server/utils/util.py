@@ -1756,7 +1756,7 @@ Output only the descriptive paragraph. No introductory text.
                 search_text = ollama_generate_text(
                     prompt=create_search_prompt,
                     model="gemma3:4b"
-                )[0]
+                )
             
             print(f"Search prompt (HyDE): {search_text}")
             # --- END: Query Expansion Logic ---
@@ -1766,6 +1766,7 @@ Output only the descriptive paragraph. No introductory text.
             model.to(device)
             embedding = model.encode([search_text], task="retrieval")
             model.to("cpu")
+            clear_gpu()
             
             # Convert numpy array to list
             print(f"✅ Generated Jina v4 embedding for text.")
@@ -1786,6 +1787,7 @@ Output only the descriptive paragraph. No introductory text.
             model.to(device)
             embeddings = model.encode(pil_images,batch_size=1) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
             model.to("cpu")  # Free up GPU memory after encoding
+            clear_gpu()
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
             return embeddings.tolist()
