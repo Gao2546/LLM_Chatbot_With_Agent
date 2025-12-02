@@ -71,3 +71,4 @@ wheel
     webdriver-manager
 
     git+https://github.com/illuin-tech/colpali
+    packaging
