@@ -132,25 +132,26 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 #     llm_int8_enable_fp32_cpu_offload=True,
 # )
 
-# Step 1: Configure INT4 quantization (signed 4-bit integers)
+# 1. Define the Quantization Configuration
 quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,  # Enable 4-bit
-    bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
-    bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
-    bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
-    bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
 )
 
-base_model = AutoModel.from_pretrained(
+# 2. Use the standard SentenceTransformer loading function
+# The library will handle the correct loading of the model and its tokenizer.
+model = SentenceTransformer(
     "jinaai/jina-embeddings-v4",
-    trust_remote_code=True,
-    quantization_config=quantization_config,
-    device_map="cpu",  # Automatically maps to GPU (or CPU if needed)
-    torch_dtype=torch.float16,  # Combine with FP16 for better perf
-    # attn_implementation="sdpa"
+    # Pass the configuration to the model_kwargs
+    model_kwargs={
+        'quantization_config': quantization_config,
+        'torch_dtype': torch.float16,
+        'device_map': 'auto' # Let it handle the best device (GPU preferred)
+    },
+    device=device # Use 'cpu' only if you want to force it; 'auto' is generally better
 )
-
-model = SentenceTransformer(modules=[base_model], device = device)
 
 uses_mem = get_model_memory(model)
 
