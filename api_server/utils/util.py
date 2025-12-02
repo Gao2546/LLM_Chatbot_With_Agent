@@ -1782,7 +1782,7 @@ Output only the descriptive paragraph. No introductory text.
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
             model.to(device)
-            embeddings = model.encode(pil_images[0],batch_size=1) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            embeddings = model.encode(pil_images,batch_size=1) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
             model.to("cpu")  # Free up GPU memory after encoding
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
