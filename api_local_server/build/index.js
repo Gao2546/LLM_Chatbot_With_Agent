@@ -20,10 +20,11 @@ console.log(APP_SERVER_URL);
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 const PORT = 3333;
-app.use((0, cors_1.default)({
-    origin: APP_SERVER_URL,
-    credentials: true
-}));
+// app.use(cors({
+//   origin: APP_SERVER_URL,
+//   credentials: true
+// }));
+app.use((0, cors_1.default)()); // Allows all origins
 // let BASE_DIR = path.join(__dirname, 'managed_files');
 // if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR);
 // let BASE_DIR = "/app/files";

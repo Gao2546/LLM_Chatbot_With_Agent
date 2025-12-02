@@ -1781,7 +1781,7 @@ Output only the descriptive paragraph. No introductory text.
             # Encode images (Batch processing is handled automatically by SentenceTransformer)
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
-            embeddings = model.encode(pil_images) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            embeddings = model.encode(pil_images,batch_size=1, convert_to_tensor=True) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
             return embeddings.tolist()
