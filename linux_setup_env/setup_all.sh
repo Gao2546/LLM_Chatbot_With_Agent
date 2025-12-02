@@ -36,7 +36,7 @@ echo "## ⚡ 2. Installing Node.js (v${NODE_MAJOR}) and npm..."
 
 # 1. Update and install dependencies
 apt update -y
-apt install -y ca-certificates curl gnupg build-essential # build-essential is useful here too
+apt install -y ca-certificates curl gnupg build-essential
 
 # 2. Add the NodeSource PPA
 mkdir -p /etc/apt/keyrings
@@ -53,20 +53,39 @@ npm -v
 echo "---"
 
 # =================================================================
-# SECTION 3: PostgreSQL and pgvector Extension Installation
+# SECTION 3: PostgreSQL and pgvector Extension Installation (FIXED)
 # =================================================================
 echo "## 🐘 3. Installing PostgreSQL (v${POSTGRES_VERSION}) and pgvector..."
+
+# --- FIX: Add Official PostgreSQL Repository ---
+echo "--- Adding official PostgreSQL APT repository..."
+apt install -y lsb-release # Ensure lsb-release is installed
+
+# 1. Import the repository signing key
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | tee /etc/apt/keyrings/postgresql.gpg > /dev/null
+
+# 2. Add the repository to the sources list
+echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | tee /etc/apt/sources.list.d/postgresql.list > /dev/null
+
+# 3. Update package lists to include the new repository
+apt update -y
+echo "--- PostgreSQL Repository added successfully."
+# ---------------------------------------------
 
 # 1. Install PostgreSQL and development packages
 apt install -y postgresql-$POSTGRES_VERSION postgresql-contrib-$POSTGRES_VERSION postgresql-server-dev-$POSTGRES_VERSION git
 
+# Start the PostgreSQL service (often automatic, but good to ensure)
+service postgresql start
+
 # 2. Install pgvector (from source)
-PGVECTOR_VERSION="v0.6.2" # Current stable version at the time of writing
+PGVECTOR_VERSION="v0.6.2" # Current stable version
 echo "Compiling and installing pgvector ${PGVECTOR_VERSION}..."
 
 git clone --branch ${PGVECTOR_VERSION} https://github.com/pgvector/pgvector.git
 cd pgvector
-# Use the correct pg_config path
+
+# Compile and install using the correct pg_config path
 make PG_CONFIG=/usr/bin/pg_config-${POSTGRES_VERSION}
 make PG_CONFIG=/usr/bin/pg_config-${POSTGRES_VERSION} install
 
