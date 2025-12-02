@@ -1,5 +1,3 @@
-wheel
-
 ## LangChain
     langchain-text-splitters 
     langchain-community 
@@ -72,3 +70,4 @@ wheel
 
     git+https://github.com/illuin-tech/colpali
     packaging
+    wheel
