@@ -107,25 +107,23 @@ echo "---"
 # =================================================================
 # 4. Start MinIO Service and Create Bucket
 # =================================================================
-echo "## 4. Starting MinIO service..."
+echo "## 4. Starting MinIO server without systemd..."
 
-systemctl start minio
-systemctl enable minio
-sleep 5 # Give MinIO a few seconds to start
+# Export the necessary environment variables
+export MINIO_ROOT_USER="${MINIO_ACCESS_KEY}"
+export MINIO_ROOT_PASSWORD="${MINIO_SECRET_KEY}"
 
-# Verify status
-if systemctl is-active --quiet minio; then
-    echo "✅ MinIO Service is running!"
-else
-    echo "❌ Error: MinIO Service failed to start. Check logs with 'journalctl -u minio'."
-    exit 1
-fi
+# Use 'nohup' and '&' to run the MinIO server in the background, 
+# ensuring it doesn't stop when your shell session exits.
 
-# NOTE: Creating buckets via the console is the recommended way, 
-# but if you need an automated bucket creation, you would use 'mc' (MinIO Client).
-# Since 'mc' is a separate installation step, we'll confirm the server is ready.
+nohup "${MINIO_BINARY}" server --address "${MINIO_ENDPOINT}":"${MINIO_PORT}" "${MINIO_DATA_DIR}" &
 
-echo "--- 🎉 Installation Complete! ---"
+# Capture the Process ID (PID)
+MINIO_PID=$!
+
+echo "✅ MinIO Server started in the background (PID: ${MINIO_PID})"
 echo "MinIO Console is available at: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
-echo "Access Key: ${MINIO_ACCESS_KEY}"
-echo "Secret Key: ${MINIO_SECRET_KEY}"
+echo "Check the nohup.out file for server output."
+echo "---"
+
+# To stop MinIO later, use: kill ${MINIO_PID}
