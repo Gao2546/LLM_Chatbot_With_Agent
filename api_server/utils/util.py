@@ -80,9 +80,9 @@ def clear_gpu():
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
+# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = "cpu",model_kwargs={'default_task': 'retrieval'})
+model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = "cpu",model_kwargs={'default_task': 'retrieval'})
 # model = LLM(
 #     model="jinaai/jina-embeddings-v4-vllm-retrieval",
 #     task="auto",
