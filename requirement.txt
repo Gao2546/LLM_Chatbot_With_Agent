@@ -67,4 +67,7 @@
     selenium
     webdriver-manager
 
+# vllm
+    vllm
+
     git+https://github.com/illuin-tech/colpali
