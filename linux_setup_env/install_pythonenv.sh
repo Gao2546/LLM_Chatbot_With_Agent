@@ -13,12 +13,12 @@ apt install -y python3-venv
 mkdir -p $PROJECT_DIR
 cd $PROJECT_DIR
 
-# 3. Create a dummy requirements.txt for demonstration if missing
-if [ ! -f requirements.txt ]; then
+# 3. Create a dummy requirement.txt for demonstration if missing
+if [ ! -f requirement.txt ]; then
     echo "Warning: requirements.txt not found. Creating a dummy one."
-    echo "fastapi" >> requirements.txt
-    echo "uvicorn" >> requirements.txt
-    echo "psycopg2-binary" >> requirements.txt # For PostgreSQL
+    echo "fastapi" >> requirement.txt
+    echo "uvicorn" >> requirement.txt
+    echo "psycopg2-binary" >> requirement.txt # For PostgreSQL
 fi
 
 # 4. Create the virtual environment
@@ -30,7 +30,7 @@ echo "Virtual environment '$ENV_NAME' created in $PROJECT_DIR"
 # The 'source' command is run inside a non-interactive shell to execute subsequent commands in that context
 source $ENV_NAME/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirement.txt
 deactivate
 
 # 6. Verification

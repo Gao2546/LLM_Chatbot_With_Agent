@@ -183,25 +183,25 @@ echo "## 🐍 6. Setting up Python Virtual Environment..."
 # 1. Install python3-venv package
 apt install -y python3-venv
 
-# 2. Create project directory and requirements.txt
+# 2. Create project directory and requirement.txt
 mkdir -p $PROJECT_DIR
 cd $PROJECT_DIR
 
-if [ ! -f requirements.txt ]; then
-    echo "Warning: requirements.txt not found. Creating a minimal dummy file."
-    echo "fastapi" > requirements.txt
-    echo "psycopg2-binary" >> requirements.txt
-    echo "minio" >> requirements.txt
+if [ ! -f requirement.txt ]; then
+    echo "Warning: requirement.txt not found. Creating a minimal dummy file."
+    echo "fastapi" > requirement.txt
+    echo "psycopg2-binary" >> requirement.txt
+    echo "minio" >> requirement.txt
 fi
 
 # 3. Create the virtual environment
 python3 -m venv $ENV_NAME
 
 # 4. Activate and install requirements
-echo "Installing packages from requirements.txt into '$ENV_NAME'..."
+echo "Installing packages from requirement.txt into '$ENV_NAME'..."
 source $ENV_NAME/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirement.txt
 deactivate
 
 echo "✅ Python environment setup complete. Project directory: ${PROJECT_DIR}"
