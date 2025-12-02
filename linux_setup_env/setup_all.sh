@@ -2,9 +2,15 @@
 
 # --- GLOBAL CONFIGURATION VARIABLES ---
 ENV_NAME="env"
-PROJECT_DIR="/opt/my_project"
+PROJECT_DIR="../"
 POSTGRES_VERSION="16"
 NODE_MAJOR="20"
+
+# --- NEW: POSTGRES CONFIGURATION ---
+DB_NAME="ai_agent"
+PGUSER_NAME="athip"
+PGUSER_PASSWORD="123456"
+# --- END NEW POSTGRES CONFIGURATION ---
 
 # --- MINIO CONFIGURATION ---
 MINIO_USER="minio"
@@ -74,7 +80,7 @@ npm -v
 echo "---"
 
 # =================================================================
-# SECTION 3: PostgreSQL and pgvector Extension
+# SECTION 3: PostgreSQL and pgvector Extension (UPDATED)
 # =================================================================
 echo "## 🐘 3. Installing PostgreSQL (v${POSTGRES_VERSION}) and pgvector..."
 
@@ -95,16 +101,23 @@ make PG_CONFIG=/usr/bin/pg_config-${POSTGRES_VERSION} install
 cd ..
 rm -rf pgvector
 
-# Start the service and create sample DB
+# Start the service and create DB/User
 service postgresql start
-DB_NAME="my_vector_db"
+
+echo "--- Creating user ${PGUSER_NAME} and database ${DB_NAME}..."
 su - postgres <<EOF
-createdb ${DB_NAME}
+# 1. Create the new user with a password
+psql -c "CREATE USER ${PGUSER_NAME} WITH ENCRYPTED PASSWORD '${PGUSER_PASSWORD}';"
+
+# 2. Create the database and set the owner
+createdb ${DB_NAME} -O ${PGUSER_NAME}
+
+# 3. Connect to the new database and enable the vector extension
 psql -d ${DB_NAME} -c "CREATE EXTENSION vector;"
 psql -d ${DB_NAME} -c "\dx"
 EOF
 
-echo "✅ PostgreSQL and pgvector setup complete. Sample DB: ${DB_NAME}"
+echo "✅ PostgreSQL and pgvector setup complete. DB: ${DB_NAME} | User: ${PGUSER_NAME}"
 echo "---"
 
 # =================================================================
@@ -150,7 +163,10 @@ sleep 5 # Wait for the server to initialize
 
 if ! pgrep -f "ollama serve" > /dev/null; then
     echo "❌ Error: Ollama server failed to start."
-    exit 1
+    # If the user is running this in a cloud environment (no GPU), it might fail.
+    # We continue setup but warn them.
+    echo "Attempting to continue script, but Ollama may not be functional."
+    OLLAMA_PID="N/A (Error)"
 fi
 echo "✅ Ollama server is running (PID: ${OLLAMA_PID})."
 
@@ -166,7 +182,7 @@ else
         echo "➡️ Pulling model: ${MODEL}..."
         "${OLLAMA_BINARY}" pull "$MODEL"
         if [ $? -ne 0 ]; then
-            echo "⚠️ Warning: Failed to pull model ${MODEL}."
+            echo "⚠️ Warning: Failed to pull model ${MODEL}. Check Ollama server status."
         else
             echo "✅ Pulled model: ${MODEL}"
         fi
@@ -211,7 +227,9 @@ echo "--- 🎉 ALL INSTALLATIONS COMPLETE ---"
 echo "### Environment Access Details ###"
 echo "1. Change directory: cd ${PROJECT_DIR}"
 echo "2. Activate Python environment: source ${ENV_NAME}/bin/activate"
-echo "3. Connect to PostgreSQL: su - postgres -c 'psql ${DB_NAME}'"
+echo "3. Connect to PostgreSQL (using the new user):"
+echo "   - Connection string: postgres://${PGUSER_NAME}:${PGUSER_PASSWORD}@localhost:5432/${DB_NAME}"
+echo "   - Shell command (as a local user): psql -U ${PGUSER_NAME} -d ${DB_NAME} -h localhost"
 echo "4. MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
 echo "5. Ollama status: Running in background (PID: ${OLLAMA_PID})"
 echo "6. To stop MinIO or Ollama, use the 'kill <PID>' command, or 'pkill minio' / 'pkill ollama'."

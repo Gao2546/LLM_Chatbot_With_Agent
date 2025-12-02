@@ -4,11 +4,15 @@ echo "--- Starting PostgreSQL and pgvector FIX Script ---"
 
 # --- Configuration Variables ---
 POSTGRES_VERSION="16"
-DB_NAME="my_vector_db"
+DB_NAME="ai_agent"
+
+# --- NEW: User Configuration ---
+PGUSER_NAME="athip"
+PGUSER_PASSWORD="123456"
 # --- End Configuration Variables ---
 
 # =================================================================
-# FIX: Add Official PostgreSQL Repository
+# FIX: Add Official PostgreSQL Repository (Keeping this section as-is)
 # =================================================================
 echo "## 🔧 Adding official PostgreSQL APT repository..."
 
@@ -64,11 +68,17 @@ echo "---"
 # =================================================================
 # SECTION 3: Initialize/Enable pgvector extension (Rerun)
 # =================================================================
-echo "## ✨ 3. Creating sample database and enabling pgvector..."
+echo "## ✨ 3. Creating database user, database, and enabling pgvector..."
 
 # Run commands as the 'postgres' user
 su - postgres <<EOF
-createdb ${DB_NAME}
+# 1. Create the new user with a password
+psql -c "CREATE USER ${PGUSER_NAME} WITH ENCRYPTED PASSWORD '${PGUSER_PASSWORD}';"
+
+# 2. Create the database and set the owner
+createdb ${DB_NAME} -O ${PGUSER_NAME}
+
+# 3. Connect to the new database and enable the vector extension
 psql -d ${DB_NAME} -c "CREATE EXTENSION vector;"
 psql -d ${DB_NAME} -c "\dx"
 EOF
@@ -77,6 +87,13 @@ EOF
 echo "## ✅ Verifying PostgreSQL and pgvector setup..."
 service postgresql status
 echo "------------------------------------------"
-echo "To connect to the sample DB: su - postgres -c 'psql ${DB_NAME}'"
+echo "To connect to the sample DB:"
+echo "User: ${PGUSER_NAME}"
+echo "DB: ${DB_NAME}"
+echo "Connection command (as root/sudo):"
+echo "su - ${PGUSER_NAME} -c 'psql ${DB_NAME}'"
+echo ""
+echo "Or using the specified DATABASE_URL structure:"
+echo "postgres://${PGUSER_NAME}:${PGUSER_PASSWORD}@localhost:5432/${DB_NAME}"
 
 echo "--- 🎉 PostgreSQL and pgvector installation completed successfully! ---"
