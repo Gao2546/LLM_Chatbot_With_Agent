@@ -125,20 +125,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # )
 
 # Optional: Configure 8-bit quantization (default settings work for most cases)
-# quantization_config = BitsAndBytesConfig(
-#     load_in_8bit=True,
-#     llm_int8_threshold=6.0,  # Adjust if needed for your use case
-#     llm_int8_has_fp16_weights=True,
-#     llm_int8_enable_fp32_cpu_offload=True,
-# )
+quantization_config = BitsAndBytesConfig(
+    load_in_8bit=True,
+    llm_int8_threshold=6.0,  # Adjust if needed for your use case
+    llm_int8_has_fp16_weights=True,
+    llm_int8_enable_fp32_cpu_offload=True,
+)
 
 # 1. Define the Quantization Configuration
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-)
+# quantization_config = BitsAndBytesConfig(
+#     load_in_4bit=True,
+#     bnb_4bit_quant_type="nf4",
+#     bnb_4bit_compute_dtype=torch.float16,
+#     bnb_4bit_use_double_quant=True,
+# )
 
 # 2. Use the standard SentenceTransformer loading function
 # The library will handle the correct loading of the model and its tokenizer.
