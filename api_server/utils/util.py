@@ -82,7 +82,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
 # model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval','torch_dtype': torch.float16})
+model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
 # model = LLM(
 #     model="jinaai/jina-embeddings-v4-vllm-retrieval",
 #     task="auto",
@@ -1781,7 +1781,7 @@ Output only the descriptive paragraph. No introductory text.
             # Encode images (Batch processing is handled automatically by SentenceTransformer)
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
-            embeddings = model.encode(pil_images) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            embeddings = model.encode(pil_images,batch_size=1) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
             return embeddings.tolist()
