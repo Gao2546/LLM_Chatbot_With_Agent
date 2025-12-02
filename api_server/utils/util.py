@@ -1545,7 +1545,7 @@ Output only the descriptive paragraph. No introductory text.
             search_text = ollama_generate_text(
                 prompt=create_search_prompt,
                 model="gemma3:4b"
-            )[0]
+            )
         print(f"Search prompt: {search_text}")
         input_data.append({"text": search_text})
         task_type = "retrieval.query"
