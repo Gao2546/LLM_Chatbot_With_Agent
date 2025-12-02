@@ -46,7 +46,7 @@ wheel
     datasets
     bitsandbytes
     accelerate
-    flash-attn --no-build-isolation
+    flash-attn
 
 #Pytorch
     torch
