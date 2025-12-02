@@ -21,7 +21,7 @@ echo "--- 🚀 Starting Comprehensive Ubuntu Setup Script (as root) ---"
 echo "--- ---------------------------------------------------- ---"
 
 # =================================================================
-# SECTION 1: Docker Engine Installation (Prerequisite for Docker Compose)
+# SECTION 1: Docker Engine Installation
 # =================================================================
 echo "## 🐳 1. Installing Docker Engine (Required for docker-compose)..."
 apt update -y
@@ -42,10 +42,10 @@ apt update -y
 apt install -y docker-ce docker-ce-cli containerd.io
 
 # Start and Enable the Docker Service
-systemctl start docker
-systemctl enable docker
+systemctl start docker 2>/dev/null || echo "Note: systemctl start failed (expected in minimal environments)."
+systemctl enable docker 2>/dev/null || echo "Note: systemctl enable failed (expected in minimal environments)."
 
-echo "✅ Docker Engine installed and running."
+echo "✅ Docker Engine installation complete."
 echo "---"
 
 # =================================================================
@@ -82,7 +82,6 @@ echo "---"
 # =================================================================
 echo "## ⚡ 3. Installing Node.js (v${NODE_MAJOR}) and npm..."
 
-# Install dependencies (already done in Docker section, but harmless to repeat)
 apt install -y build-essential
 
 # Add the NodeSource PPA
@@ -100,7 +99,7 @@ npm -v
 echo "---"
 
 # =================================================================
-# SECTION 4: PostgreSQL and pgvector Extension Installation (FIXED)
+# SECTION 4: PostgreSQL and pgvector Extension Installation
 # =================================================================
 echo "## 🐘 4. Installing PostgreSQL (v${POSTGRES_VERSION}) and pgvector..."
 
@@ -149,7 +148,7 @@ echo "✅ PostgreSQL and pgvector setup complete. Sample DB: ${DB_NAME}"
 echo "---"
 
 # =================================================================
-# SECTION 5: MinIO Server Installation (Standalone)
+# SECTION 5: MinIO Server Installation (Standalone & FIXED for non-systemd)
 # =================================================================
 echo "## 💾 5. Installing MinIO Object Storage Server (Standalone)..."
 
@@ -168,52 +167,23 @@ if ! id -g "$MINIO_GROUP" >/dev/null 2>&1; then groupadd "$MINIO_GROUP"; fi
 if ! id -u "$MINIO_USER" >/dev/null 2>&1; then useradd -s /sbin/nologin -g "$MINIO_GROUP" "$MINIO_USER"; fi
 
 mkdir -p "${MINIO_DATA_DIR}"
-mkdir -p /etc/minio # Config directory
-
-chown -R "$MINIO_USER":"$MINIO_GROUP" "${MINIO_DATA_DIR}" /etc/minio
+chown -R "$MINIO_USER":"$MINIO_GROUP" "${MINIO_DATA_DIR}"
 echo "--- User/group and directories created."
 
-# 3. Create Systemd Service File
-echo "--- Creating systemd service file..."
-SERVICE_FILE="/etc/systemd/system/minio.service"
+# 3. Start MinIO Server directly in the background (Fix for non-systemd environments)
+echo "--- Starting MinIO Server (using nohup for background execution)..."
 
-cat > "${SERVICE_FILE}" << EOF
-[Unit]
-Description=MinIO Object Storage Server
-Documentation=https://docs.min.io
-Wants=network-online.target
-After=network-online.target
+# Export the necessary environment variables for the background process
+export MINIO_ROOT_USER="${MINIO_ACCESS_KEY}"
+export MINIO_ROOT_PASSWORD="${MINIO_SECRET_KEY}"
 
-[Service]
-User=${MINIO_USER}
-Group=${MINIO_GROUP}
-Environment=MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
-Environment=MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
-ExecStart=${MINIO_BINARY} server --address ${MINIO_ENDPOINT}:${MINIO_PORT} ${MINIO_DATA_DIR}
-Type=simple
-Restart=always
-TimeoutStopSec=5
-LimitNOFILE=65536
-StandardOutput=journal
-StandardError=journal
+# Use 'nohup' and '&' to run the MinIO server in the background
+nohup "${MINIO_BINARY}" server --address "${MINIO_ENDPOINT}":"${MINIO_PORT}" "${MINIO_DATA_DIR}" > minio_nohup.log 2>&1 &
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-
-# 4. Start MinIO Service
-echo "--- Starting MinIO service..."
-systemctl start minio
-systemctl enable minio
-
-if systemctl is-active --quiet minio; then
-    echo "✅ MinIO Service is running!"
-else
-    echo "❌ Error: MinIO Service failed to start. Check logs with 'journalctl -u minio'."
-    exit 1
-fi
+MINIO_PID=$!
+echo "✅ MinIO Server started in the background (PID: ${MINIO_PID})"
+echo "MinIO Console is available at: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
+echo "Output is logged to: minio_nohup.log"
 echo "---"
 
 # =================================================================
@@ -233,7 +203,7 @@ if [ ! -f requirements.txt ]; then
     echo "Warning: requirements.txt not found. Creating a minimal dummy file."
     echo "fastapi" > requirements.txt
     echo "psycopg2-binary" >> requirements.txt
-    echo "minio" >> requirements.txt # Adding the minio python client for completeness
+    echo "minio" >> requirements.txt
 fi
 
 # 3. Create the virtual environment
@@ -255,3 +225,4 @@ echo "1. Change directory: cd ${PROJECT_DIR}"
 echo "2. Activate Python environment: source ${ENV_NAME}/bin/activate"
 echo "3. Connect to PostgreSQL: su - postgres -c 'psql ${DB_NAME}'"
 echo "4. MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT} (User: ${MINIO_ACCESS_KEY}, Pass: ${MINIO_SECRET_KEY})"
+echo "5. To stop MinIO later, use: kill ${MINIO_PID}"
