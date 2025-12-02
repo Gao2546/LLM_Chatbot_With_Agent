@@ -1,48 +1,47 @@
 #!/bin/bash
 
-echo "--- Starting Docker Compose Reinstallation and Verification ---"
+echo "--- 🐳 Starting Docker Engine (CE) Installation ---"
 
-# Define the installation path
-COMPOSE_INSTALL_PATH="/usr/local/bin/docker-compose"
+# 1. Update package lists and install necessary dependencies
+echo "1. Installing core dependencies..."
+apt update -y
+apt install -y ca-certificates curl gnupg lsb-release
 
-# 1. Determine the latest stable version
-echo "1. Fetching the latest Docker Compose version..."
-COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+# 2. Add Docker's official GPG key
+echo "2. Adding Docker's official GPG key..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
 
-if [ -z "$COMPOSE_VERSION" ]; then
-    echo "❌ Error: Could not determine the latest Docker Compose version."
-    exit 1
-fi
+# 3. Set up the Docker repository
+echo "3. Setting up the Docker stable repository..."
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-DOWNLOAD_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
-echo "Found version: ${COMPOSE_VERSION}. Downloading from: ${DOWNLOAD_URL}"
+# 4. Install the Docker Engine
+echo "4. Installing Docker Engine, CLI, and containerd..."
+apt update -y
+apt install -y docker-ce docker-ce-cli containerd.io
 
-# 2. Download the Docker Compose binary
-# Use -f to fail fast on HTTP errors
-curl -fL "${DOWNLOAD_URL}" -o "${COMPOSE_INSTALL_PATH}"
+# 5. Start and Enable the Docker Service
+# On systems where 'service docker status' fails, we use systemctl directly, 
+# which is the underlying management tool on modern Ubuntu systems.
+echo "5. Starting and enabling the Docker service..."
+systemctl start docker
+systemctl enable docker
 
-# Check if the download was successful (curl returns 0 on success with -f)
-if [ $? -ne 0 ]; then
-    echo "❌ Error: Failed to download Docker Compose binary from GitHub."
-    echo "Please check the network connection and the download URL."
-    exit 1
-fi
+# 6. Verification
+echo "6. Verifying installation and service status..."
 
-echo "2. Binary downloaded to ${COMPOSE_INSTALL_PATH}"
-
-# 3. Apply executable permissions
-chmod +x "${COMPOSE_INSTALL_PATH}"
-echo "3. Executable permissions set."
-
-# 4. Verify the installation
-echo "4. Verifying installation..."
-docker-compose --version
-
-if [ $? -eq 0 ]; then
-    echo "✅ Docker Compose installation successful and verified!"
+if systemctl is-active --quiet docker; then
+    echo "✅ Docker Engine is installed and running successfully."
+    echo "Output of 'docker ps':"
+    docker ps
 else
-    echo "❌ Error: Docker Compose verification failed after installation."
+    echo "❌ Error: Docker Engine service failed to start. Please check system logs."
     exit 1
 fi
 
-echo "--- Reinstallation Complete ---"
+echo "--- Installation Complete! ---"
