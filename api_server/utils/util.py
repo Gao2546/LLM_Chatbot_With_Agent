@@ -1763,7 +1763,9 @@ Output only the descriptive paragraph. No introductory text.
 
             # Encode text
             # Task 'retrieval.query' optimizes the embedding for finding matching documents
-            embedding = model.encode([search_text], task="retrieval.query")
+            model.to(device)
+            embedding = model.encode([search_text], task="retrieval")
+            model.to("cpu")
             
             # Convert numpy array to list
             print(f"✅ Generated Jina v4 embedding for text.")
