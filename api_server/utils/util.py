@@ -150,12 +150,12 @@ base_model = AutoModel.from_pretrained(
     # attn_implementation="sdpa"
 )
 
-model = SentenceTransformer(modules=[base_model], device = device)
+model = SentenceTransformer(modules=[base_model], device = 'cpu')
 
 uses_mem = get_model_memory(model)
 
 # Now move to GPU
-# model.to("cuda")
+model.to(device)
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
