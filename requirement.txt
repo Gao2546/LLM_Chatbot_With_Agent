@@ -1,3 +1,5 @@
+wheel
+
 ## LangChain
     langchain-text-splitters 
     langchain-community 
@@ -42,6 +44,9 @@
     transformers
     sentence-transformers
     datasets
+    bitsandbytes
+    accelerate
+    flash-attn --no-build-isolation
 
 #Pytorch
     torch
@@ -64,3 +69,5 @@
     googlesearch-python
     selenium
     webdriver-manager
+
+pip install git+https://github.com/illuin-tech/colpali

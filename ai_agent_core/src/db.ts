@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS document_page_embeddings (
     chat_history_id INTEGER NOT NULL,
     uploaded_file_id INTEGER NOT NULL,
     page_number INTEGER NOT NULL,
-    embedding VECTOR(256), -- CLIP model vector size
+    embedding VECTOR(2048),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_page_user

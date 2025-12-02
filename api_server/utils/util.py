@@ -3,6 +3,7 @@ import base64
 import uuid
 import re
 import os
+from matplotlib import image
 import requests
 import dotenv
 import psycopg2
@@ -12,8 +13,9 @@ import mimetypes # For guessing mime types
 
 from PIL import Image
 from sentence_transformers import SentenceTransformer
-from transformers import BitsAndBytesConfig, AutoModel
+from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
 import torch
+from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 
 # New imports for Docling and concurrent processing
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
@@ -41,12 +43,18 @@ import io
 from unstructured.partition.auto import partition
 from unstructured.documents.elements import Image as UnstructuredImage
 
-# --- NEW IMPORTS ---
 from minio import Minio
 from minio.error import S3Error
 from typing import List, Optional, Dict, Any, Union
 
+
+from vllm import LLM, SamplingParams
+from vllm.config import PoolerConfig
+from vllm.inputs.data import TextPrompt
+
 dotenv.load_dotenv()
+
+LOCAL = os.getenv("LOCAL",True)
 
 # Function to calculate parameter memory
 def get_model_memory(model):
@@ -59,14 +67,62 @@ def get_model_memory(model):
     print(f"Total Memory: {total_memory_gb:.2f} GB ({total_memory_mb:.2f} MB)")
     return total_memory_gb
 
+def clear_gpu():
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        print("Cleared GPU memory.")
 
 # ==============================================================================
 #  DATABASE & MINIO CLIENT SETUP
 # ==============================================================================
-
+clear_gpu()
+device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device='cuda')
-# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = "cpu").half()
+model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
+# model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
+# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = "cpu",model_kwargs={'default_task': 'retrieval'})
+# model = LLM(
+#     model="jinaai/jina-embeddings-v4-vllm-retrieval",
+#     task="auto",
+#     override_pooler_config=PoolerConfig(pooling_type="ALL", normalize=False),
+#     dtype="float16",
+# )
+# quantization_config = BitsAndBytesConfig(
+#     load_in_8bit=True,
+#     llm_int8_threshold=6.0,  # Adjust if needed for your use case
+#     llm_int8_has_fp16_weights=True,
+#     llm_int8_enable_fp32_cpu_offload=True,
+# )
+
+# quantization_config = BitsAndBytesConfig(
+#     load_in_4bit=True,  # Enable 4-bit
+#     bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
+#     bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
+#     bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
+#     bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
+# )
+
+# model = AutoModel.from_pretrained(
+#                 "nvidia/llama-nemoretriever-colembed-1b-v1",
+#                 device_map='cpu',#'cuda' if torch.cuda.is_available() else 'cpu',
+#                 trust_remote_code=True,
+#                 torch_dtype=torch.bfloat16,
+#                 quantization_config=quantization_config,
+#                 attn_implementation="flash_attention_2",
+#                 revision='1f0fdea7f5b19532a750be109b19072d719b8177'
+#             ).eval()
+# print("Model loaded successfully.")
+# model.to(device)
+# print(model)
+# print("Load model to device.")
+
+# processor = AutoProcessor.from_pretrained(
+#     "nvidia/llama-nemoretriever-colembed-1b-v1",
+#     trust_remote_code=True,
+#     revision='1f0fdea7f5b19532a750be109b19072d719b8177'
+# )
 
 # Optional: Configure 8-bit quantization (default settings work for most cases)
 # quantization_config = BitsAndBytesConfig(
@@ -91,6 +147,7 @@ model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=
 #     quantization_config=quantization_config,
 #     device_map="cpu",  # Automatically maps to GPU (or CPU if needed)
 #     torch_dtype=torch.float16,  # Combine with FP16 for better perf
+#     # attn_implementation="sdpa"
 # )
 
 # model = SentenceTransformer(modules=[base_model], device = "cpu")
@@ -775,7 +832,10 @@ def extract_pdf_text(file_storage, option: str = 'describe', mode: str = 'vlm_re
 
 def extract_image_text(file_storage, option: str = 'describe') -> str:
     """Extracts content from a standalone image. Can describe (default) or summarize."""
-    return image_to_describe_from_base64(file_storage.read())
+    text = image_to_describe_from_base64(file_storage.read())
+    print(f"Extracted text from image: {text}")
+    return text
+    # return process_pages_with_vlm(file_storage.read(),"describe this images")
 
 def extract_txt_file(file, option: str = 'describe', mode: str = 'vlm_remote') -> str:
     """Extracts content from a .txt file. Can describe (default) or summarize."""
@@ -806,7 +866,10 @@ def summarize_text_with_llm(text: str) -> str:
     prompt = f"Please summarize the following content:\n\n---\n\n{text}\n\n---\n\nSummary:"
     
     # Using a fast and cost-effective model for summarization tasks
-    summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+    if not LOCAL:
+        summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+    else:
+        summary = ollama_generate_text(prompt=prompt, system_prompt=system_prompt, model="gemma3:4b")[0]
     return summary
 
 def image_to_describe_from_base64(image_bytes: bytes) -> str:
@@ -826,7 +889,10 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     # Prompt for OpenRouter VLM
     prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
     # Call the object detection API with the image bytes
-    response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
+    if not LOCAL:
+        response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
+    else:
+        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b", prompt=prompt, system_prompt=system_prompt)
     return response
 
 # ==============================================================================
@@ -1176,11 +1242,11 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
     reference_text = "\n".join(page_references)
 
     # This prompt is sent as the 'user' message
-    # final_user_prompt = f"""
+    final_user_prompt = f"""
 
-    # I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
+    I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
 
-    # Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
+    Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
 
     # --- Step 4: Call OpenRouterInference ---
     print(f"Sending {len(image_bytes_list)} images to OpenRouter VLM...")
@@ -1191,12 +1257,27 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
         print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
         if (i)*batch_size >= len(image_bytes_list):
             break
-        vlm_response += DeepInfraInference(
-            prompt=vlm_system_prompt,
-            # system_prompt=vlm_system_prompt, # The user's detailed instructions go here
-            image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 5 images
-            model_name="Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
-        ) + "\n\n"
+
+        if not LOCAL:
+            vlm_response += DeepInfraInference(
+                prompt=final_user_prompt,
+                system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+                image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+                model_name="Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+            ) + "\n\n"
+        else :
+             # System prompt for OpenRouter VLM
+            vlm_system_prompt = ("You're an image expert."
+                             "If the image contains text, extract and summarize it...")
+            # Prompt for OpenRouter VLM
+            final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+            vlm_response += ollama_describe_image(
+                image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
+                model="qwen3-vl:2b",
+                prompt=final_user_prompt,
+                system_prompt=vlm_system_prompt
+                )
+            vlm_response = "\n\n".join(vlm_response) + "\n\n"
 
     print("✅ VLM processing complete.")
 
@@ -1334,7 +1415,7 @@ def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embeddin
         return []
 
 # --- NEW: DeepInfra CLIP Embedding Function ---
-# def get_clip_embedding(text: str = None, image_bytes: bytes = None, model_name: str = "sentence-transformers/clip-ViT-B-32") -> Optional[List[float]]:
+# def get_image_embedding_jinna_api(text: str = None, image_bytes: bytes = None, model_name: str = "sentence-transformers/clip-ViT-B-32") -> Optional[List[float]]:
 #     """
 #     Gets a CLIP embedding from DeepInfra for either text or an image.
     
@@ -1351,7 +1432,7 @@ def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embeddin
 #         print("Error: DEEPINFRA_API_KEY environment variable not set.")
 #         return None
 #     if not text and not image_bytes:
-#         print("Error: Must provide either text or image_bytes to get_clip_embedding.")
+#         print("Error: Must provide either text or image_bytes to get_image_embedding_jinna_api.")
 #         return None
 
 #     headers = {"Authorization": f"Bearer {api_key}"}
@@ -1398,7 +1479,7 @@ def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embeddin
 
 
 # --- UPDATED: Jina v4 Multimodal Embedding Function ---
-def get_clip_embedding(
+def get_image_embedding_jinna_api(
     text: str = None, 
     image_bytes_list: List[bytes] = None, 
     model_name: str = "jina-embeddings-v4"
@@ -1429,7 +1510,7 @@ def get_clip_embedding(
         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
         return None
     if not text and not image_bytes_list:
-        print("Error: Must provide either 'text' or 'image_bytes_list' to get_clip_embedding.")
+        print("Error: Must provide either 'text' or 'image_bytes_list' to get_image_embedding_jinna_api.")
         return None
 
     headers = {
@@ -1452,12 +1533,19 @@ Output only the descriptive paragraph. No introductory text.
 """
     if text:
         print("Requesting Jina v4 embedding (Type: Text)...")
-        search_text = DeepInfraInference(
-            prompt=create_search_prompt,
-            # system_prompt=system_prompt,
-            # image_bytes_list=image_bytes_list,
-            model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-        )
+        if not LOCAL:
+            search_text = DeepInfraInference(
+                prompt=create_search_prompt,
+                # system_prompt=system_prompt,
+                # image_bytes_list=image_bytes_list,
+                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+
+        else :
+            search_text = ollama_generate_text(
+                prompt=create_search_prompt,
+                model="gemma3:4b"
+            )[0]
         print(f"Search prompt: {search_text}")
         input_data.append({"text": search_text})
         task_type = "retrieval.query"
@@ -1599,8 +1687,219 @@ Output only the descriptive paragraph. No introductory text.
         print(f"An unexpected error occurred during Jina embedding: {e}")
         return None
 
+# Global cache for the model to prevent reloading it on every function call (High Latency)
+# _JINA_MODEL_INSTANCE = None
 
-# def get_clip_embedding(
+def get_image_embedding_jinna_api_local(
+    text: str = None, 
+    image_bytes_list: List[bytes] = None, 
+    model_name: str = "jinaai/jina-embeddings-v4"
+) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+    """
+    Gets a multimodal embedding locally using SentenceTransformer (Jina v4).
+
+    - If 'text' is provided: Generates a hypothetical document description using an LLM, 
+      then embeds that description. Returns one embedding (List[float]).
+    - If 'image_bytes_list' is provided: Embeds a batch of images. 
+      Returns a list of embeddings (List[List[float]]).
+    
+    Args:
+        text: The text string to embed.
+        image_bytes_list: A list of raw image bytes to embed.
+        model_name: The HuggingFace model ID to use.
+
+    Returns:
+        A single embedding vector (List[float]) if 'text' was used.
+        A list of embedding vectors (List[List[float]]) if 'image_bytes_list' was used.
+        None on failure.
+    """
+    global _JINA_MODEL_INSTANCE
+
+    # 1. Input Validation
+    if text and image_bytes_list:
+        print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+        return None
+    if not text and not image_bytes_list:
+        print("Error: Must provide either 'text' or 'image_bytes_list'.")
+        return None
+
+    try:
+        # 2. Load Model (Singleton Pattern)
+        # if _JINA_MODEL_INSTANCE is None:
+        #     print(f"Loading local model: {model_name}...")
+        #     _JINA_MODEL_INSTANCE = SentenceTransformer(model_name, trust_remote_code=True)
+        #     print("Model loaded successfully.")
+        
+        # model = _JINA_MODEL_INSTANCE
+
+        # 3. Handle Text Input (Retrieval Query)
+        if text:
+            print("Generating Jina v4 embedding (Type: Text)...")
+            
+            # --- START: Query Expansion / HyDE Logic (Preserved) ---
+            create_search_prompt = f"""
+Act as a document search engine. 
+Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query. 
+Do not answer the question directly; only describe the page content.
+
+User Query: {text}
+
+Output only the descriptive paragraph. No introductory text.
+"""
+            # Ensure LOCAL and helper functions are defined in your outer scope
+            if not LOCAL:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+                )
+            else:
+                search_text = ollama_generate_text(
+                    prompt=create_search_prompt,
+                    model="gemma3:4b"
+                )[0]
+            
+            print(f"Search prompt (HyDE): {search_text}")
+            # --- END: Query Expansion Logic ---
+
+            # Encode text
+            # Task 'retrieval.query' optimizes the embedding for finding matching documents
+            embedding = model.encode([search_text], task="retrieval.query")
+            
+            # Convert numpy array to list
+            print(f"✅ Generated Jina v4 embedding for text.")
+            return embedding[0].tolist()
+        
+        # 4. Handle Image Input (Retrieval Passage)
+        elif image_bytes_list:
+            print(f"Generating Jina v4 embedding (Type: {len(image_bytes_list)} Images)...")
+            
+            # Convert raw bytes to PIL Images
+            pil_images = []
+            for img_bytes in image_bytes_list:
+                pil_images.append(Image.open(io.BytesIO(img_bytes)))
+            
+            # Encode images (Batch processing is handled automatically by SentenceTransformer)
+            # Task 'retrieval.passage' optimizes the embedding for being indexed
+            # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
+            embeddings = model.encode(pil_images) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            
+            print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
+            return embeddings.tolist()
+
+    except Exception as e:
+        print(f"An unexpected error occurred during local embedding generation: {e}")
+        return None
+
+
+def get_image_embedding_local_api_colpali_engine(
+    text: str = None, 
+    image_bytes_list: List[bytes] = None, 
+    model_name: str = "vidore/colSmol-250M"
+) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+    """
+    Gets embeddings using the local ColPali engine.
+
+    - If 'text' is provided, embeds a single text string and returns one embedding (List[float]).
+    - If 'image_bytes_list' is provided, embeds a batch of images and returns a list of embeddings (List[List[float]]).
+    
+    Args:
+        text: The text string to embed.
+        image_bytes_list: A list of raw image bytes to embed.
+        model_name: The ColPali model name (default: "vidore/colSmol-500M").
+
+    Returns:
+        A single embedding vector (List[float]) if 'text' was used.
+        A list of embedding vectors (List[List[float]]) if 'image_bytes_list' was used.
+        None on failure.
+    """
+    # Ensure only one input type is provided
+    if text and image_bytes_list:
+        print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+        return None
+    if not text and not image_bytes_list:
+        print("Error: Must provide either 'text' or 'image_bytes_list' to get_image_embedding_local_api_colpali_engine.")
+        return None
+
+    try:
+        # Load the model and processor
+        model = ColIdefics3.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,
+            device_map=device,
+            attn_implementation="flash_attention_2"
+        ).eval()
+        print(f"Loaded ColPali model: {model_name} on device: {model.device}")
+        processor = ColIdefics3Processor.from_pretrained(model_name)
+
+        if text:
+            print("Requesting ColPali embedding (Type: Text)...")
+            # Process the text query
+            batch_queries = processor.process_queries([text]).to(model.device)
+            with torch.no_grad():
+                query_embeddings = model(**batch_queries)
+            # Assuming query_embeddings is a tensor, convert to list
+            embedding = query_embeddings.cpu().numpy().tolist()
+            if embedding:
+                print("✅ Generated ColPali embedding for text.")
+                return embedding[0]  # Single embedding
+            else:
+                print("❌ Failed to generate embedding for text.")
+                return None
+        
+        elif image_bytes_list:
+            print(f"Requesting ColPali embedding (Type: {len(image_bytes_list)} Images)...")
+            # Convert image bytes to PIL Images
+            images = []
+            for img_bytes in image_bytes_list:
+                try:
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                    images.append(img)
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+                    images.append(Image.new("RGB", (32, 32), color="white"))  # Placeholder
+            
+            # Process the images
+            # Batch process images in groups of 3 for efficiency and memory management
+            batch_embeddings = []
+            batch_size = 3
+            for i in range(0, len(images), batch_size):
+                batch_imgs = images[i:i + batch_size]
+                batch_images = processor.process_images(batch_imgs).to(model.device)
+                with torch.no_grad():
+                    image_embeddings = model(**batch_images)
+                    print(image_embeddings.shape)
+                    time.sleep(10)
+                    # Pad embeddings from 128 to 2048 dimensions if needed
+                    if image_embeddings.shape[1] < 2048:
+                        pad_width = 2048 - image_embeddings.shape[1]
+                        image_embeddings = torch.nn.functional.pad(image_embeddings, (0, pad_width), mode='constant', value=0)
+                    elif image_embeddings.shape[1] > 2048:
+                        image_embeddings = image_embeddings[:, :2048]
+                    batch_embeddings.extend(image_embeddings.cpu().numpy().tolist())
+            embeddings = batch_embeddings
+            # with torch.no_grad():
+            #     image_embeddings = model(**batch_images)
+            #     # Pad embeddings from 128 to 2048 dimensions if needed
+            #     if image_embeddings.shape[1] < 2048:
+            #         pad_width = 2048 - image_embeddings.shape[1]
+            #         image_embeddings = torch.nn.functional.pad(image_embeddings, (0, pad_width), mode='constant', value=0)
+            #     elif image_embeddings.shape[1] > 2048:
+            #         image_embeddings = image_embeddings[:, :2048]
+            # Convert to list of lists
+            # embeddings = image_embeddings.cpu().numpy().tolist()
+            if embeddings:
+                print(f"✅ Generated {len(embeddings)} ColPali embeddings for images.")
+                return embeddings
+            else:
+                print("❌ Failed to generate embeddings for images.")
+                return None
+
+    except Exception as e:
+        print(f"Error in ColPali embedding: {e}")
+        return None
+
+
+# def get_image_embedding_jinna_api(
 #     text: str = None, 
 #     image_bytes_list: List[bytes] = None, 
 #     model_name: str = "jina-embeddings-v4"
@@ -1631,7 +1930,7 @@ Output only the descriptive paragraph. No introductory text.
 #         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
 #         return None
 #     if not text and not image_bytes_list:
-#         print("Error: Must provide either 'text' or 'image_bytes_list' to get_clip_embedding.")
+#         print("Error: Must provide either 'text' or 'image_bytes_list' to get_image_embedding_jinna_api.")
 #         return None
 
 #     headers = {
@@ -1687,7 +1986,516 @@ Output only the descriptive paragraph. No introductory text.
 #     except Exception as e:
 #         print(f"An unexpected error occurred during Jina embedding: {e}")
 #         return None
+
+# _JINA_MODEL_INSTANCE = None
+
+# def get_image_embedding_nemoretriever_api_local(
+#     text: str = None, 
+#     image_bytes_list: List[bytes] = None, 
+#     model_name: str = "nvidia/llama-nemoretriever-colembed-1b-v1"
+# ) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+#     """
+#     Gets embeddings using the NVIDIA Llama Nemoretriever Colembed model.
+
+#     - If 'text' is provided, generates a hypothetical document description using an LLM (HyDE), 
+#       then embeds that description as a query. Returns one embedding (List[float]).
+#     - If 'image_bytes_list' is provided, embeds a batch of images as passages. 
+#       Returns a list of embeddings (List[List[float]]).
     
+#     Args:
+#         text: The text string to embed.
+#         image_bytes_list: A list of raw image bytes to embed.
+#         model_name: The HuggingFace model ID (default: NVIDIA model).
+
+#     Returns:
+#         A single embedding vector (List[float]) if 'text' was used.
+#         A list of embedding vectors (List[List[float]]) if 'image_bytes_list' was used.
+#         None on failure.
+#     """
+#     # global _JINA_MODEL_INSTANCE
+#     clear_gpu()
+
+#     # 1. Input Validation
+#     if text and image_bytes_list:
+#         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+#         return None
+#     if not text and not image_bytes_list:
+#         print("Error: Must provide either 'text' or 'image_bytes_list'.")
+#         return None
+
+#     try:
+#         # 2. Load Model (Singleton Pattern)
+#         # if _JINA_MODEL_INSTANCE is None:
+#         #     print(f"Loading local model: {model_name}...")
+#         #     _JINA_MODEL_INSTANCE = AutoModel.from_pretrained(
+#         #         model_name,
+#         #         device_map='cuda' if torch.cuda.is_available() else 'cpu',
+#         #         trust_remote_code=True,
+#         #         torch_dtype=torch.float8_e4m3fn,
+#         #         attn_implementation="flash_attention_2",
+#         #         revision='1f0fdea7f5b19532a750be109b19072d719b8177'
+#         #     ).eval()
+#         #     print("Model loaded successfully.")
+        
+#         # model = _JINA_MODEL_INSTANCE
+
+#         # 3. Handle Text Input (Query Embedding with HyDE)
+#         if text:
+#             print("Generating query embedding (Type: Text) with HyDE...")
+            
+#             # --- START: Query Expansion / HyDE Logic ---
+#             create_search_prompt = f"""
+# Act as a document search engine. 
+# Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query. 
+# Do not answer the question directly; only describe the page content.
+
+# User Query: {text}
+
+# Output only the descriptive paragraph. No introductory text.
+# """
+#             # Ensure LOCAL and helper functions are defined in your outer scope
+#             if not LOCAL:
+#                 search_text = DeepInfraInference(
+#                     prompt=create_search_prompt,
+#                     model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+#                 )
+#             else:
+#                 search_text = ollama_generate_text(
+#                     prompt=create_search_prompt,
+#                     model="gemma3:1b"
+#                 )[0]
+            
+#             print(f"Search prompt (HyDE): {search_text}")
+#             # --- END: Query Expansion Logic ---
+
+#             # Embed the search text as a query
+#             queries = [search_text]
+#             query_embeddings = model.forward_queries(queries, batch_size=8)
+#             # Assuming query_embeddings is a tensor, convert to list
+#             # The model outputs multi-vector representations; we take the mean or flatten as needed
+#             # For simplicity, flatten or average to a single vector per query
+#             embedding = query_embeddings.mean(dim=1).cpu().numpy().tolist()[0]  # Adjust based on model output shape
+            
+#             print(f" Generated query embedding for text.")
+#             return embedding
+        
+#         # 4. Handle Image Input (Passage Embedding)
+#         elif image_bytes_list:
+#             print(f"Generating passage embedding (Type: {len(image_bytes_list)} Images)...")
+            
+#             # Convert raw bytes to PIL Images
+#             images = []
+#             for img_bytes in image_bytes_list:
+#                 try:
+#                     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+#                     original_width, original_height = img.size
+#                     new_height = 640  # Example: desired new height
+#                     aspect_ratio = original_width / original_height
+#                     new_width = int(new_height * aspect_ratio)
+#                     new_size_aspect_ratio = (new_width, new_height)
+#                     resized_image_aspect_ratio = img.resize(new_size_aspect_ratio)
+#                     images.append(resized_image_aspect_ratio)
+#                 except Exception as e:
+#                     print(f"Error processing image: {e}")
+#                     images.append(Image.new("RGB", (224, 224), color="white"))  # Placeholder
+            
+#             # Embed images as passages
+#             # passage_embeddings = model.forward_passages(images, batch_size=1)
+#             # Manual inference loop: process images in batches of 3
+#             batch_size_manual = 1
+#             all_embeddings = []
+#             for i in range(0, len(images), batch_size_manual):
+#                 batch_images = images[i:i + batch_size_manual]
+#                 print(f"Processing batch {i//batch_size_manual + 1} with {len(batch_images)} images...")
+                
+#                 # Call forward_passages for this batch
+#                 batch_embeddings = model(batch_images)
+                
+#                 # Handle if batch_embeddings is a list (unlikely for small batch, but safe)
+#                 if isinstance(batch_embeddings, list):
+#                     batch_embeddings = torch.cat(batch_embeddings, dim=0)
+                
+#                 # batch_embeddings shape: [batch_size, seq_len, embed_dim]
+#                 # Average over seq_len to get [batch_size, embed_dim]
+#                 batch_embeddings_avg = batch_embeddings.mean(dim=1).cpu().numpy().tolist()
+#                 all_embeddings.extend(batch_embeddings_avg)
+
+#             print("finish")
+#             print(len(all_embeddings))
+#             print(len(all_embeddings[0]))
+
+#             # Check for count mismatch
+#             if len(all_embeddings) != len(image_bytes_list):
+#                 print(f"- FAILED to get embeddings or count mismatch. Expected {len(image_bytes_list)}, Got {len(all_embeddings)}.")
+#                 return None
+            
+#             print(f" Generated {len(all_embeddings)} passage embeddings for images.")
+#             return all_embeddings
+
+#     except Exception as e:
+#         print(f"An unexpected error occurred during local embedding generation: {e}")
+#         return None
+
+def get_image_embedding_nemoretriever_api_local(
+    text: str = None, 
+    image_bytes_list: List[bytes] = None, 
+    model_name: str = "nvidia/llama-nemoretriever-colembed-1b-v1"
+) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+    """
+    Gets embeddings using the NVIDIA Llama Nemoretriever Colembed model with manual forward.
+    - For text: Use HyDE to generate description, embed as query.
+    - For images: Manual forward with positional tensor for passages.
+    """
+    clear_gpu()
+
+    if text and image_bytes_list:
+        print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+        return None
+    if not text and not image_bytes_list:
+        print("Error: Must provide either 'text' or 'image_bytes_list'.")
+        return None
+
+    device = next(model.parameters()).device  # Use model's device
+
+    try:
+        if text:
+            print("Generating query embedding (Type: Text) with HyDE...")
+            # HyDE logic (unchanged)
+            create_search_prompt = f"""
+Act as a document search engine. 
+Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query. 
+Do not answer the question directly; only describe the page content.
+
+User Query: {text}
+
+Output only the descriptive paragraph. No introductory text.
+"""
+            if not LOCAL:
+                search_text = DeepInfraInference(prompt=create_search_prompt, model_name="Qwen/Qwen3-235B-A22B-Instruct-2507")
+            else:
+                search_text = ollama_generate_text(prompt=create_search_prompt, model="gemma3:4b")[0]
+            print(f"Search prompt (HyDE): {search_text}")
+
+            # For text queries, use language_model forward (manual or model.forward_texts if available)
+            # Assuming model has forward_queries; if not, tokenize manually
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            inputs = tokenizer(search_text, return_tensors="pt", padding=True, truncation=True).to(device)
+            with torch.no_grad():
+                query_emb = model.language_model(**inputs).last_hidden_state.mean(dim=1)  # Pool to [1, 2048]
+            embedding = query_emb.cpu().numpy().tolist()[0]
+            print(f"Generated query embedding for text (dim: {len(embedding)}).")
+            return embedding
+
+        elif image_bytes_list:
+            print(f"Generating passage embedding (Type: {len(image_bytes_list)} Images)...")
+            
+            # Convert bytes to PIL Images and resize/normalize
+            images = []
+            for img_bytes in image_bytes_list:
+                try:
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                    # Resize to model's expected size (512x512 for 1024 patches)
+                    img = img.resize((512, 512), Image.Resampling.LANCZOS)
+                    images.append(img)
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+                    images.append(Image.new("RGB", (512, 512), color="white"))  # Placeholder
+
+            # Batch process (small batches to avoid OOM)
+            batch_size = 1  # Adjust based on GPU memory
+            all_embeddings = []
+            for i in range(0, len(images), batch_size):
+                batch_images = images[i:i + batch_size]
+                print(f"Processing batch {i//batch_size + 1} with {len(batch_images)} images...")
+
+                # Step 2a: Preprocess to pixel_values [batch, 3, 512, 512]
+                # Provide dummy text input to satisfy processor requirements
+                inputs = processor(
+                                    images=batch_images,
+                                    text=[""] * len(batch_images),
+                                    return_tensors="pt",
+                                    padding=True,          # Pad text to max length
+                                    truncation=True,       # Truncate if too long
+                                    # max_length=77,         # Set max text length
+                                    do_resize=True,        # Resize images
+                                    size={"height": 512, "width": 512},  # Target image size
+                                    do_normalize=True      # Normalize images
+                                ).to(device)
+                pixel_values = inputs['pixel_values']  # [batch, 3, 512, 512]
+
+                # Step 2b: Manual Vision Embeddings with Positional Tensor
+                vision_emb = model.vision_model.embeddings
+                batch_size_b = pixel_values.shape[0]
+
+                # Patch embeddings: [batch, 1536, 32, 32]
+                patch_emb = vision_emb.patch_embedding(pixel_values)
+
+                # Flatten patches: [batch, 1536, 1024] -> [batch, 1024, 1536]
+                batch_size_p, embed_dim_p, h_p, w_p = patch_emb.shape
+                flattened_patches = patch_emb.flatten(2).transpose(1, 2)  # [batch, 1024, 1536]
+
+                # Create Positional Tensor: Indices for 1024 patches
+                # This is the key: torch.arange(0, 1024) for positions 0 to 1023 (row-major order)
+                positional_indices = torch.arange(1024, dtype=torch.long, device=device)
+                positional_indices = positional_indices.unsqueeze(0).expand(batch_size_b, -1)  # [batch, 1024]
+
+                # Get positional embeddings: [batch, 1024, 1536]
+                pos_emb = vision_emb.position_embedding(positional_indices)
+
+                # Add to patches: [batch, 1024, 1536]
+                embedded_patches = flattened_patches + pos_emb
+
+                # Step 2c: Forward through vision encoder [batch, 1024, 1536] -> [batch, 1024, 1536]
+                encoder_inputs = {'inputs_embeds': embedded_patches}  # Bypass class token if none
+                vision_features = model.vision_model.encoder(**encoder_inputs)
+
+                # Post-LN: [batch, 1024, 1536]
+                vision_features = model.vision_model.post_layernorm(vision_features.last_hidden_state)
+
+                # Step 2d: Pool via head (MultiheadAttentionPoolingHead) to [batch, 1536]
+                pooled_features = model.vision_model.head(vision_features).pooled_output  # Assume this exists; adjust if needed (e.g., mean pool)
+
+                # Step 2e: Project to 2048-dim via mlp1? (mlp1 takes 6144, perhaps concat or multi-vector)
+                # For simplicity, mean pool vision_features if head doesn't pool, then project
+                # If model expects fusion, use full model forward
+                if hasattr(model, 'forward_passages'):
+                    # If custom method exists, use it
+                    batch_emb = model.forward_passages(batch_images)
+                else:
+                    # Full model forward (preferred if available)
+                    with torch.no_grad():
+                        full_outputs = model(pixel_values=pixel_values, output_hidden_states=True)
+                        # Extract vision part; assume last_hidden_state is [batch, seq, 2048]
+                        batch_emb = full_outputs.last_hidden_state.mean(dim=1)  # Pool to [batch, 2048]
+
+                # Convert to list
+                batch_emb_list = batch_emb.cpu().numpy().tolist()
+                all_embeddings.extend(batch_emb_list)
+
+            # Check count
+            if len(all_embeddings) != len(image_bytes_list):
+                print(f"Count mismatch. Expected {len(image_bytes_list)}, got {len(all_embeddings)}.")
+                return None
+
+            print(f"Generated {len(all_embeddings)} passage embeddings for images (dim: {len(all_embeddings[0]) if all_embeddings else 0}).")
+            return all_embeddings
+
+    except Exception as e:
+        print(f"Error during Nemoretriever embedding: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+
+# Global vLLM instance for text generation (HyDE)
+
+# def get_image_embedding_jinna_api_local_vllm(
+#     text: str = None, 
+#     image_bytes_list: List[bytes] = None, 
+#     model_name: str = "jinaai/jina-embeddings-v4"
+# ) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+#     """
+#     Gets a multimodal embedding locally using SentenceTransformer (Jina v4), but uses vLLM for HyDE text generation.
+
+#     - If 'text' is provided: Generates a hypothetical document description using vLLM (HyDE), 
+#       then embeds that description. Returns one embedding (List[float]).
+#     - If 'image_bytes_list' is provided: Embeds a batch of images. 
+#       Returns a list of embeddings (List[List[float]]).
+    
+#     Args:
+#         text: The text string to embed.
+#         image_bytes_list: A list of raw image bytes to embed.
+#         model_name: The HuggingFace model ID to use.
+
+#     Returns:
+#         A single embedding vector (List[float]) if 'text' was used.
+#         A list of embedding vectors (List[List[float]]) if 'image_bytes_list' was used.
+#         None on failure.
+#     """
+
+#     # 1. Input Validation
+#     if text and image_bytes_list:
+#         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+#         return None
+#     if not text and not image_bytes_list:
+#         print("Error: Must provide either 'text' or 'image_bytes_list'.")
+#         return None
+
+#     try:
+#         if text:
+#             print("Generating Jina v4 embedding (Type: Text) with HyDE using vLLM...")
+            
+#             # --- START: Query Expansion / HyDE Logic (Updated to use vLLM) ---
+#             create_search_prompt = f"""
+# Act as a document search engine. 
+# Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query. 
+# Do not answer the question directly; only describe the page content.
+
+# User Query: {text}
+
+# Output only the descriptive paragraph. No introductory text.
+# """
+#             # Use vLLM for LOCAL HyDE generation
+#             if LOCAL:
+#                 search_text = ollama_generate_text(
+#                 prompt=create_search_prompt,
+#                 model="gemma3:1b"
+#                 )[0]
+#             else:
+#                 # Fallback to original DeepInfra if not LOCAL
+#                 search_text = DeepInfraInference(
+#                     prompt=create_search_prompt,
+#                     model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+#                 )
+            
+#             print(f"Search prompt (HyDE via vLLM): {search_text}")
+#             # --- END: Query Expansion Logic ---
+
+#             # Encode text
+#             # Task 'retrieval.query' optimizes the embedding for finding matching documents
+#             embedding = model.encode([search_text], task="retrieval.query")
+            
+#             # Convert numpy array to list
+#             print(f" Generated Jina v4 embedding for text.")
+#             return embedding[0].tolist()
+        
+#         # 4. Handle Image Input (Retrieval Passage)
+#         elif image_bytes_list:
+#             print(f"Generating Jina v4 embedding (Type: {len(image_bytes_list)} Images)...")
+            
+#             # Convert raw bytes to PIL Images
+#             pil_images = []
+#             for img_bytes in image_bytes_list:
+#                 pil_images.append(Image.open(io.BytesIO(img_bytes)))
+            
+#             # Encode images (Batch processing is handled automatically by SentenceTransformer)
+#             # Task 'retrieval.passage' optimizes the embedding for being indexed
+#             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
+#             embeddings = model.encode(pil_images) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            
+#             print(f" Generated {len(embeddings)} Jina v4 embeddings for images.")
+#             return embeddings.tolist()
+
+#     except Exception as e:
+#         print(f"An unexpected error occurred during local embedding generation: {e}")
+#         return None
+
+
+# Configuration for your local vLLM server
+VLLM_API_BASE = "http://localhost:4444/v1"  # Adjust port if necessary
+VLLM_API_KEY = "EMPTY"  # vLLM usually uses 'EMPTY' or 'token'
+
+def get_image_embedding_jinna_api_local_vllm(
+    text: str = None, 
+    image_bytes_list: List[bytes] = None, 
+    model_name: str = "jinaai/jina-embeddings-v3" # Ensure this model is loaded in vLLM
+) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
+    """
+    Gets a multimodal embedding using a local vLLM server (OpenAI API compatible).
+    
+    - If 'text' is provided: Generates HyDE description (optional) -> Calls vLLM embedding endpoint.
+    - If 'image_bytes_list' is provided: Converts images to Base64 -> Calls vLLM embedding endpoint.
+
+    Args:
+        text: The text string to embed.
+        image_bytes_list: A list of raw image bytes to embed.
+        model_name: The model ID currently served by vLLM.
+
+    Returns:
+        A single embedding vector (List[float]) if 'text' was used.
+        A list of embedding vectors (List[List[float]]) if 'image_bytes_list' was used.
+        None on failure.
+    """
+
+    # 1. Input Validation
+    if text and image_bytes_list:
+        print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
+        return None
+    if not text and not image_bytes_list:
+        print("Error: Must provide either 'text' or 'image_bytes_list'.")
+        return None
+
+    # 2. Initialize OpenAI Client pointing to local vLLM
+    client = OpenAI(
+        base_url=VLLM_API_BASE,
+        api_key=VLLM_API_KEY,
+    )
+
+    try:
+        # 3. Handle Text Input (with HyDE)
+        if text:
+            print("Processing Text Query with HyDE...")
+            
+            # --- START: Query Expansion / HyDE Logic ---
+            create_search_prompt = f"""
+Act as a document search engine. 
+Based on the user's query below, generate a detailed paragraph describing the content likely to appear on a document page that answers this query.
+User Query: {text}
+Output only the descriptive paragraph.
+"""
+            # NOTE: Ideally, use the 'client.chat.completions' here as well if vLLM handles generation
+            # For now, keeping your existing logic structure or assuming a separate generation call exists.
+            # If you want to use vLLM for the HyDE generation part too:
+            try:
+                hyde_response = client.chat.completions.create(
+                    model=model_name, # Or a specific chat model loaded in vLLM
+                    messages=[{"role": "user", "content": create_search_prompt}],
+                    temperature=0.7
+                )
+                search_text = hyde_response.choices[0].message.content
+            except Exception:
+                # Fallback if the embedding model doesn't support chat generation
+                search_text = text 
+                print("HyDE generation failed or model is embedding-only. Using raw text.")
+
+            print(f"Embedding Text (HyDE Result): {search_text[:50]}...")
+            # --- END: Query Expansion Logic ---
+
+            # Call vLLM Embeddings Endpoint
+            # Note: For Jina v3/v4, you might need to prepend "Query: " depending on how vLLM serves it.
+            response = client.embeddings.create(
+                input=[search_text],
+                model=model_name
+            )
+            
+            embedding = response.data[0].embedding
+            print(f"Generated embedding for text.")
+            return embedding
+        
+        # 4. Handle Image Input
+        elif image_bytes_list:
+            print(f"Processing {len(image_bytes_list)} Images via vLLM API...")
+            
+            input_payload = []
+            
+            for img_bytes in image_bytes_list:
+                # Convert bytes to Base64 string
+                base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                
+                # Check model requirements: 
+                # Some vLLM multimodal forks expect the raw base64 string, 
+                # others expect a data URI scheme "data:image/jpeg;base64,..."
+                # Here we assume standard Base64 string.
+                input_payload.append(base64_image)
+            
+            # Call vLLM Embeddings Endpoint
+            response = client.embeddings.create(
+                input=input_payload,
+                model=model_name
+            )
+            
+            # Extract embeddings preserving order
+            embeddings = [data.embedding for data in response.data]
+            
+            print(f"Generated {len(embeddings)} embeddings for images.")
+            return embeddings
+
+    except Exception as e:
+        print(f"An unexpected error occurred during API embedding generation: {e}")
+        return None
+
+
 
 # ==============================================================================
 #  LEGACY & NEW: DATABASE SAVE/SEARCH
@@ -1700,12 +2508,17 @@ def encode_text_for_embedding(text: str) -> list[float]:
     """
     # --- NEW: Use DeepInfra for embeddings ---
     if os.getenv("DEEPINFRA_API_KEY"):
-        embeddings_list = DeepInfraEmbedding(inputs=[text])
-        if embeddings_list and len(embeddings_list) > 0:
-            print("✅ Generated embedding using DeepInfra.")
-            return embeddings_list[0]
+        if not LOCAL:
+            embeddings_list = DeepInfraEmbedding(inputs=[text])
+            if embeddings_list and len(embeddings_list) > 0:
+                print("✅ Generated embedding using DeepInfra.")
+                return embeddings_list[0]
+            else:
+                print("⚠️ DeepInfra embedding failed. Falling back to local model.")
         else:
-            print("⚠️ DeepInfra embedding failed. Falling back to local model.")
+            embeddings_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
+            # embeddings_list = model.encode(text,device='cpu',task='retrieval').tolist()
+            return embeddings_list
     
     # --- FALLBACK: Original SentenceTransformer logic ---
     print("Generating embedding using local SentenceTransformer model.")
@@ -1776,6 +2589,9 @@ def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_numb
             raise Exception("Could not connect to database")
             
         cur = conn.cursor()
+
+        print(f"user_id:{user_id}")
+        print(f"chat_id:{chat_history_id}")
 
         query = """
             INSERT INTO document_page_embeddings (user_id, chat_history_id, uploaded_file_id, page_number, embedding)
@@ -1856,8 +2672,8 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
 # --- NEW: Search Similar Pages Function ---
 # Search Page (New)
 from typing import List, Dict, Any
-# Assuming get_clip_embedding and get_db_connection are defined elsewhere
-# import { get_clip_embedding, get_db_connection } from ...
+# Assuming get_image_embedding_jinna_api and get_db_connection are defined elsewhere
+# import { get_image_embedding_jinna_api, get_db_connection } from ...
 
 def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
     """
@@ -1875,7 +2691,10 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
         [{'page_id': 12, 'file_name': 'report.pdf', ..., 'distance': 0.25, 'normalized_distance': 0.1}, ...]
     """
     # Step 1: Encode the query text using the *CLIP* model
-    query_embedding = get_clip_embedding(text=query_text)
+    if not LOCAL:
+        query_embedding = get_image_embedding_jinna_api(text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
     if not query_embedding:
         print("❌ Failed to get CLIP embedding for query.")
         return []
@@ -1988,7 +2807,7 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
 #         [{'page_id': 12, 'file_name': 'report.pdf', 'object_name': '...', 'page_number': 5, 'distance': 0.25}, ...]
 #     """
 #     # Step 1: Encode the query text using the *CLIP* model
-#     query_embedding = get_clip_embedding(text=query_text)
+#     query_embedding = get_image_embedding_jinna_api(text=query_text)
 #     if not query_embedding:
 #         print("❌ Failed to get CLIP embedding for query.")
 #         return []
@@ -2079,7 +2898,7 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
 #         [{'page_id': 12, 'file_name': 'report.pdf', 'object_name': '...', 'page_number': 5, 'distance': 0.25}, ...]
 #     """
 #     # Step 1: Encode the query text using the *CLIP* model
-#     query_embedding = get_clip_embedding(text=query_text)
+#     query_embedding = get_image_embedding_jinna_api(text=query_text)
 #     if not query_embedding:
 #         print("❌ Failed to get CLIP embedding for query.")
 #         return []
@@ -2350,16 +3169,203 @@ Provide your response in Markdown format, following the tagging guidelines provi
 """
 
     # Use OpenRouterInference, which now accepts a list of images
-    # vlm_response = OpenRouterInference(
-    vlm_response = DeepInfraInference(
-        prompt=prompt,
-        system_prompt=system_prompt,
-        image_bytes_list=image_bytes_list,
-        model_name="Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-    )
+    if not LOCAL:
+        # vlm_response = OpenRouterInference
+        vlm_response = DeepInfraInference(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            image_bytes_list=image_bytes_list,
+            model_name="Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+        )
+    else:
+         # System prompt for OpenRouter VLM
+        system_prompt = ("You're an image expert."
+                         "If the image contains text, extract and summarize it...")
+        # Prompt for OpenRouter VLM
+        prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+        vlm_response = ollama_describe_image(
+            image_bytes=image_bytes_list,
+            model="qwen3-vl:2b",
+            prompt=prompt,
+            system_prompt=system_prompt,
+        )
+        vlm_response = "\n\n".join(vlm_response)
     print("✅ VLM processing complete.")
     
     return vlm_response
+
+
+
+# ==============================================================================
+#  NEW: OLLAMA INFERENCE FUNCTIONS
+# ==============================================================================
+
+
+def ollama_generate_text(prompt: Union[str, List[str]], model: str = "llama3.2:3b", system_prompt: str = "") -> Union[str, List[str]]:
+    """
+    Generate text using Ollama's API. Supports single prompt or list of prompts.
+    
+    Args:
+        prompt: The user prompt(s) (str or list[str]).
+        model: The Ollama model name (e.g., "llama3.2:3b").
+        system_prompt: Optional system prompt.
+    
+    Returns:
+        Generated text(s) or error message(s).
+    """
+    if isinstance(prompt, str):
+        prompts = [prompt]
+        single = True
+    else:
+        prompts = prompt
+        single = False
+    
+    results = []
+    for p in prompts:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model,
+            "prompt": p,
+            "stream": False
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+        
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            results.append(data.get("response", "No response generated."))
+        except requests.exceptions.RequestException as e:
+            results.append(f"Error calling Ollama API: {e}")
+        except Exception as e:
+            results.append(f"An unexpected error occurred: {e}")
+    
+    return results[0] if single else results
+
+def ollama_embed_text(text: Union[str, List[str]], model: str = "nomic-embed-text") -> List[List[float]]:
+    """
+    Generate embeddings for text using Ollama's API. Supports single text or list of texts.
+    
+    Args:
+        text: The text(s) to embed (str or list[str]).
+        model: The Ollama embedding model name (e.g., "nomic-embed-text").
+    
+    Returns:
+        List of embeddings (list[list[float]]).
+    """
+    if isinstance(text, str):
+        inputs = [text]
+    else:
+        inputs = text
+    
+    url = "http://localhost:11434/api/embed"
+    payload = {
+        "model": model,
+        "input": inputs
+    }
+    
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        embeddings = data.get("embeddings", [])
+        return embeddings if embeddings else [[] for _ in inputs]
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling Ollama embed API: {e}")
+        return [[] for _ in inputs]
+    except Exception as e:
+        print(f"An unexpected error occurred during embedding: {e}")
+        return [[] for _ in inputs]
+
+def ollama_describe_image(image_bytes: Union[bytes, List[bytes]], model: str = "llava", prompt: str = "Describe this image in detail.",system_prompt="") -> Union[str, List[str]]:
+    """
+    Describe an image using Ollama's vision model. Supports single image or list of images.
+    
+    Args:
+        image_bytes: Raw image bytes (bytes or list[bytes]).
+        model: The Ollama vision model name (e.g., "llava").
+        prompt: The prompt for description.
+    
+    Returns:
+        Description text(s) or error message(s).
+    """
+    if isinstance(image_bytes, bytes):
+        images = [image_bytes]
+        single = True
+    else:
+        images = image_bytes
+        single = False
+    
+    results = []
+    for img_bytes in images:
+        import base64
+        base64_image = base64.b64encode(img_bytes).decode('utf-8')
+        
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "system" :system_prompt,
+            "images": [base64_image],
+            "stream": False
+        }
+        
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            print("Raw output")
+            print(data)
+            results.append(data.get("response", "No description generated."))
+        except requests.exceptions.RequestException as e:
+            results.append(f"Error calling Ollama vision API: {e}")
+        except Exception as e:
+            results.append(f"An unexpected error occurred: {e}")
+        print(f"Description: {results[0]}")
+    
+    return results[0] if single else results
+
+def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str = "llava", embed_model: str = "nomic-embed-text", prompt: str = "Describe this image in detail.") -> List[List[float]]:
+    """
+    Generate embeddings for an image by first describing it with a vision model, then embedding the description.
+    Supports single image or list of images.
+    
+    Args:
+        image_bytes: Raw image bytes (bytes or list[bytes]).
+        vision_model: The Ollama vision model for description.
+        embed_model: The Ollama embedding model for text.
+        prompt: The prompt for image description.
+    
+    Returns:
+        List of embeddings (list[list[float]]).
+    """
+     # System prompt for OpenRouter VLM
+    system_prompt = ("You're an image expert."
+                     "If the image contains text, extract and summarize it...")
+    # Prompt for OpenRouter VLM
+    prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+    descriptions = ollama_describe_image(image_bytes, vision_model, prompt)
+    if isinstance(descriptions, str):
+        descriptions = [descriptions]
+    
+    # Filter out error descriptions
+    valid_descriptions = [d for d in descriptions if not d.startswith("Error")]
+    if not valid_descriptions:
+        return [[] for _ in descriptions]
+    
+    embeddings = ollama_embed_text(valid_descriptions, embed_model)
+    
+    # Map back to original order, with empty lists for failed descriptions
+    result = []
+    idx = 0
+    for d in descriptions:
+        if d.startswith("Error"):
+            result.append([])
+        else:
+            result.append(embeddings[idx])
+            idx += 1
+    return result
 
 
 # ==============================================================================

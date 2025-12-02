@@ -47,18 +47,24 @@ from utils.util import (
     extract_pptx_text,
     extract_txt_file,
     extract_xls_text,
+    get_image_embedding_jinna_api_local,
+    get_image_embedding_nemoretriever_api_local,
+    get_image_embedding_jinna_api_local_vllm,
     save_vector_to_db,
     search_similar_documents_by_chat,
     model as embeddings,
     get_db_connection,
-
-    # --- NEW IMPORTS FOR DUAL-METHOD RAG ---
     upload_file_to_minio_and_db,
-    get_clip_embedding,
+    get_image_embedding_jinna_api,
     save_page_vector_to_db,
     convert_pdf_page_to_image,
     search_similar_pages,
-    process_pages_with_vlm
+    process_pages_with_vlm,
+    ollama_describe_image,
+    ollama_embed_image,
+    ollama_embed_text,
+    ollama_generate_text,
+    get_image_embedding_local_api_colpali_engine,
 )
 
 conn = get_db_connection()
@@ -67,6 +73,12 @@ TEXT_FILE_EXTENSIONS = ['.txt', '.pdf', '.docx', '.pptx', '.odt', '.rtf']
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
+
+LOCAL = os.getenv("LOCAL", True)
+
+if LOCAL:
+    print("Run model on local")
+
 file_system = EditedFileSystem()
 
 # Add project root to sys.path to allow absolute imports
@@ -635,7 +647,10 @@ def process():
                 image_bytes_batch = [page['img_bytes'] for page in pages_to_embed]
                 
                 # NEW: Call wi(processing_mode == 'new_page_image') or th image_bytes_list
-                embeddings_list = get_clip_embedding(image_bytes_list=image_bytes_batch) 
+                if not LOCAL:
+                    embeddings_list = get_image_embedding_jinna_api(image_bytes_list=image_bytes_batch) 
+                else :
+                    embeddings_list = get_image_embedding_jinna_api_local(image_bytes_list=image_bytes_batch)
                 
                 if not embeddings_list or len(embeddings_list) != len(pages_to_embed):
                     print(f"    - FAILED to get embeddings or count mismatch. Expected {len(pages_to_embed)}, Got {len(embeddings_list) if embeddings_list else 0}.")
@@ -802,10 +817,12 @@ def search_similar_api_unified():
     clear_gpu()
 
     if legacy_results == [] and vlm_summary == None:
+        print("no result")
         return jsonify({"results": [""]})
     
     # --- 4. Return Combined Results ---
     # ส่งคืนผลลัพธ์ทั้งหมดใน JSON เดียว
+    print(f"legacy result : {legacy_results}")
     return jsonify({"results": legacy_results + [vlm_summary]})
 
 # --- NEW RAG ENDPOINT ---
