@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ENV_NAME="env"
-PROJECT_DIR="/opt/my_project" # Example project directory
+PROJECT_DIR="../" # Example project directory
 
 echo "Starting Python environment setup..."
 
