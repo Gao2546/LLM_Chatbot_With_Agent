@@ -70,4 +70,4 @@ wheel
     selenium
     webdriver-manager
 
-pip install git+https://github.com/illuin-tech/colpali
+    git+https://github.com/illuin-tech/colpali
