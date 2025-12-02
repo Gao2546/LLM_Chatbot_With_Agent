@@ -133,24 +133,24 @@ model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True,
 # )
 
 # Step 1: Configure INT4 quantization (signed 4-bit integers)
-# quantization_config = BitsAndBytesConfig(
-#     load_in_4bit=True,  # Enable 4-bit
-#     bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
-#     bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
-#     bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
-#     bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
-# )
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,  # Enable 4-bit
+    bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
+    bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
+    bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
+    bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
+)
 
-# base_model = AutoModel.from_pretrained(
-#     "jinaai/jina-embeddings-v4",
-#     trust_remote_code=True,
-#     quantization_config=quantization_config,
-#     device_map="cpu",  # Automatically maps to GPU (or CPU if needed)
-#     torch_dtype=torch.float16,  # Combine with FP16 for better perf
-#     # attn_implementation="sdpa"
-# )
+base_model = AutoModel.from_pretrained(
+    "jinaai/jina-embeddings-v4",
+    trust_remote_code=True,
+    quantization_config=quantization_config,
+    device_map="cpu",  # Automatically maps to GPU (or CPU if needed)
+    torch_dtype=torch.float16,  # Combine with FP16 for better perf
+    # attn_implementation="sdpa"
+)
 
-# model = SentenceTransformer(modules=[base_model], device = "cpu")
+model = SentenceTransformer(modules=[base_model], device = device)
 
 uses_mem = get_model_memory(model)
 
