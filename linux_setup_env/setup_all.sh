@@ -6,11 +6,11 @@ PROJECT_DIR="../"
 POSTGRES_VERSION="16"
 NODE_MAJOR="20"
 
-# --- NEW: POSTGRES CONFIGURATION ---
+# --- POSTGRES CONFIGURATION ---
 DB_NAME="ai_agent"
 PGUSER_NAME="athip"
 PGUSER_PASSWORD="123456"
-# --- END NEW POSTGRES CONFIGURATION ---
+# --- END POSTGRES CONFIGURATION ---
 
 # --- MINIO CONFIGURATION ---
 MINIO_USER="minio"
@@ -80,7 +80,7 @@ npm -v
 echo "---"
 
 # =================================================================
-# SECTION 3: PostgreSQL and pgvector Extension (UPDATED)
+# SECTION 3: PostgreSQL and pgvector Extension (FIXED)
 # =================================================================
 echo "## 🐘 3. Installing PostgreSQL (v${POSTGRES_VERSION}) and pgvector..."
 
@@ -92,16 +92,27 @@ apt update -y
 # Install PostgreSQL and dependencies
 apt install -y postgresql-$POSTGRES_VERSION postgresql-contrib-$POSTGRES_VERSION postgresql-server-dev-$POSTGRES_VERSION
 
+# --- FIX: Stop conflicting PostgreSQL clusters (e.g., v14) to free port 5432 ---
+echo "## ⚠️ Stopping potentially conflicting PostgreSQL clusters..."
+service postgresql stop 2>/dev/null || true
+# Explicitly try to stop any older clusters (like 14/main)
+pg_ctlcluster 14 main stop 2>/dev/null || true
+echo "Old clusters stopped."
+# --- END FIX ---
+
 # Install pgvector (from source)
 PGVECTOR_VERSION="v0.6.2"
 git clone --branch ${PGVECTOR_VERSION} https://github.com/pgvector/pgvector.git
 cd pgvector
-make PG_CONFIG=/usr/bin/pg_config-${POSTGRES_VERSION}
-make PG_CONFIG=/usr/bin/pg_config-${POSTGRES_VERSION} install
+echo "Compiling pgvector ${PGVECTOR_VERSION}..."
+# --- FIX: Use default 'make' path which should correctly link to v16 headers ---
+make 
+make install
+# --- END FIX ---
 cd ..
 rm -rf pgvector
 
-# Start the service and create DB/User
+# Start the service (should now start v16 and take port 5432)
 service postgresql start
 
 echo "--- Creating user ${PGUSER_NAME} and database ${DB_NAME}..."
@@ -117,13 +128,35 @@ psql -d ${DB_NAME} -c "CREATE EXTENSION vector;"
 psql -d ${DB_NAME} -c "\dx"
 EOF
 
+# =================================================================
+# FIX 4: Update pg_hba.conf for MD5 Authentication
+# =================================================================
+echo "## 🔑 4. Updating pg_hba.conf for MD5 password authentication..."
+
+# Path to the pg_hba.conf file for PostgreSQL 16 on Ubuntu
+HBA_CONF="/etc/postgresql/${POSTGRES_VERSION}/main/pg_hba.conf"
+
+# 1. Backup the original file
+cp $HBA_CONF $HBA_CONF.bak
+
+# 2. Modify the line for local connections (unix domain sockets) to use md5
+# This fixes the "Peer authentication failed" error
+sed -i.orig '/^local\s\+all\s\+all\s\+peer/c\local\t\tall\t\tall\t\t\t\tmd5' $HBA_CONF
+
+# 3. Modify the line for localhost connections (TCP/IP) to use md5
+sed -i '/^host\s\+all\s\+all\s\+127.0.0.1\/32/c\host\t\tall\t\tall\t\t127.0.0.1/32\t\t\tmd5' $HBA_CONF
+sed -i '/^host\s\+all\s\+all\s\+::1\/128/c\host\t\tall\t\tall\t\t::1/128\t\t\t\tmd5' $HBA_CONF
+
+# 4. Restart the service for changes to take effect
+service postgresql restart
+
 echo "✅ PostgreSQL and pgvector setup complete. DB: ${DB_NAME} | User: ${PGUSER_NAME}"
 echo "---"
 
 # =================================================================
-# SECTION 4: MinIO Server Installation (Standalone & FIXED)
+# SECTION 5: MinIO Server Installation (Standalone & FIXED)
 # =================================================================
-echo "## 💾 4. Installing MinIO Object Storage Server (Standalone)..."
+echo "## 💾 5. Installing MinIO Object Storage Server (Standalone)..."
 
 # 1. Installation of MinIO Binary
 curl -fL https://dl.min.io/server/minio/release/linux-amd64/minio -o "${MINIO_BINARY}"
@@ -148,9 +181,9 @@ echo "MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
 echo "---"
 
 # =================================================================
-# SECTION 5: Ollama and Model Installation (FIXED)
+# SECTION 6: Ollama and Model Installation (FIXED)
 # =================================================================
-echo "## 🤖 5. Installing Ollama and pulling models..."
+echo "## 🤖 6. Installing Ollama and pulling models..."
 
 # 1. Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
@@ -162,10 +195,7 @@ OLLAMA_PID=$!
 sleep 5 # Wait for the server to initialize
 
 if ! pgrep -f "ollama serve" > /dev/null; then
-    echo "❌ Error: Ollama server failed to start."
-    # If the user is running this in a cloud environment (no GPU), it might fail.
-    # We continue setup but warn them.
-    echo "Attempting to continue script, but Ollama may not be functional."
+    echo "❌ Error: Ollama server failed to start. Attempting to continue."
     OLLAMA_PID="N/A (Error)"
 fi
 echo "✅ Ollama server is running (PID: ${OLLAMA_PID})."
@@ -192,9 +222,9 @@ fi
 echo "---"
 
 # =================================================================
-# SECTION 6: Python Virtual Environment Setup
+# SECTION 7: Python Virtual Environment Setup
 # =================================================================
-echo "## 🐍 6. Setting up Python Virtual Environment..."
+echo "## 🐍 7. Setting up Python Virtual Environment..."
 
 # 1. Install python3-venv package
 apt install -y python3-venv
@@ -227,9 +257,9 @@ echo "--- 🎉 ALL INSTALLATIONS COMPLETE ---"
 echo "### Environment Access Details ###"
 echo "1. Change directory: cd ${PROJECT_DIR}"
 echo "2. Activate Python environment: source ${ENV_NAME}/bin/activate"
-echo "3. Connect to PostgreSQL (using the new user):"
+echo "3. Connect to PostgreSQL (Password: ${PGUSER_PASSWORD}):"
 echo "   - Connection string: postgres://${PGUSER_NAME}:${PGUSER_PASSWORD}@localhost:5432/${DB_NAME}"
-echo "   - Shell command (as a local user): psql -U ${PGUSER_NAME} -d ${DB_NAME} -h localhost"
+echo "   - Shell command: psql -U ${PGUSER_NAME} -d ${DB_NAME} -h localhost -W"
 echo "4. MinIO Console: http://${MINIO_ENDPOINT}:${MINIO_PORT}"
 echo "5. Ollama status: Running in background (PID: ${OLLAMA_PID})"
-echo "6. To stop MinIO or Ollama, use the 'kill <PID>' command, or 'pkill minio' / 'pkill ollama'."
+echo "6. To stop background services, use: pkill minio && pkill ollama"
