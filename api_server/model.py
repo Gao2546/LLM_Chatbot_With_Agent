@@ -94,10 +94,12 @@ app = Flask(__name__)
 
 def clear_gpu():
     import torch
+    import gc
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
         print("Cleared GPU memory.")
+    gc.collect()
 
 
 def init_driver():
@@ -1270,4 +1272,4 @@ if __name__ == '__main__':
     #             n_class=n_class
 
     #         )
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
