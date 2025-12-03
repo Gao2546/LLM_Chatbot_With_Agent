@@ -823,6 +823,7 @@ def search_similar_api_unified():
     # --- 4. Return Combined Results ---
     # ส่งคืนผลลัพธ์ทั้งหมดใน JSON เดียว
     print(f"legacy result : {legacy_results}")
+    print(f"vlm summary : {vlm_summary}")
     return jsonify({"results": legacy_results + [vlm_summary]})
 
 # --- NEW RAG ENDPOINT ---
