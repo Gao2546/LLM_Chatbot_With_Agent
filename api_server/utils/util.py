@@ -69,10 +69,12 @@ def get_model_memory(model):
 
 def clear_gpu():
     import torch
+    import gc
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
         print("Cleared GPU memory.")
+    gc.collect()
 
 # ==============================================================================
 #  DATABASE & MINIO CLIENT SETUP
@@ -82,7 +84,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
 # model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device=device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = 'cpu',model_kwargs={'default_task': 'retrieval'})
+model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
 # model = LLM(
 #     model="jinaai/jina-embeddings-v4-vllm-retrieval",
 #     task="auto",
@@ -1763,11 +1765,9 @@ Output only the descriptive paragraph. No introductory text.
 
             # Encode text
             # Task 'retrieval.query' optimizes the embedding for finding matching documents
-            model.to(device)
-            embedding = model.encode([search_text], task="retrieval",convert_to_numpy=True)
-            clear_gpu()
-            model.to("cpu")
-            clear_gpu()
+            with torch.no_grad():
+                embedding = model.encode([search_text], task="retrieval",convert_to_numpy=True)
+                clear_gpu()
             
             # Convert numpy array to list
             print(f"✅ Generated Jina v4 embedding for text.")
@@ -1785,11 +1785,9 @@ Output only the descriptive paragraph. No introductory text.
             # Encode images (Batch processing is handled automatically by SentenceTransformer)
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
-            model.to(device)
-            embeddings = model.encode(pil_images,batch_size=1, convert_to_numpy=True) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
-            clear_gpu()
-            model.to("cpu")  # Free up GPU memory after encoding
-            clear_gpu()
+            with torch.no_grad():
+                embeddings = model.encode(pil_images,batch_size=1, convert_to_numpy=True) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+                clear_gpu()
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
             return embeddings.tolist()
