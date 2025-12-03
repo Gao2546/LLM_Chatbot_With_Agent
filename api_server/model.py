@@ -52,7 +52,7 @@ from utils.util import (
     get_image_embedding_jinna_api_local_vllm,
     save_vector_to_db,
     search_similar_documents_by_chat,
-    model as embeddings,
+    # model as embeddings,
     get_db_connection,
     upload_file_to_minio_and_db,
     get_image_embedding_jinna_api,
