@@ -1764,7 +1764,8 @@ Output only the descriptive paragraph. No introductory text.
             # Encode text
             # Task 'retrieval.query' optimizes the embedding for finding matching documents
             model.to(device)
-            embedding = model.encode([search_text], task="retrieval")
+            embedding = model.encode([search_text], task="retrieval",convert_to_numpy=True)
+            clear_gpu()
             model.to("cpu")
             clear_gpu()
             
@@ -1785,7 +1786,8 @@ Output only the descriptive paragraph. No introductory text.
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
             model.to(device)
-            embeddings = model.encode(pil_images,batch_size=1) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            embeddings = model.encode(pil_images,batch_size=1, convert_to_numpy=True) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+            clear_gpu()
             model.to("cpu")  # Free up GPU memory after encoding
             clear_gpu()
             
