@@ -417,7 +417,6 @@ window.addEventListener('beforeunload', async (event) => {
 // });
 
 
-
 // Fetch chat history when the page loads
 document.addEventListener('DOMContentLoaded', async (event) => {
     // socket.emit('pong');
@@ -434,6 +433,31 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             // handleResize below will adjust other elements based on this collapsed state
         }
     }
+    const docSearchBtn = document.getElementById('documentSearch');
+    
+    // State variable to track mode (Optional: use this in your send logic)
+    let isRagMode = false; 
+
+    if(docSearchBtn) {
+        docSearchBtn.addEventListener('click', () => {
+            // 1. Toggle the visual class
+            docSearchBtn.classList.toggle('active');
+            
+            // 2. Update logic state
+            isRagMode = docSearchBtn.classList.contains('active');
+            
+            // Optional: Provide UI feedback
+            if(isRagMode) {
+                console.log("Knowledge Base Search: ON");
+                // You might want to change the placeholder text
+                document.getElementById('userInput').placeholder = "Ask questions about your documents...";
+            } else {
+                console.log("Knowledge Base Search: OFF");
+                document.getElementById('userInput').placeholder = "Ask any question...";
+            }
+        });
+    }
+    
     await fetch(`/api/reload-page`)
         .then(response => response.json())
         .then(data => {
@@ -808,17 +832,17 @@ userInput.addEventListener('input', function() {
     // Check if the last character before cursor is @
     const lastChar = textBeforeCursor.charAt(textBeforeCursor.length - 1);
     
-    if (lastChar === '@') {
-        // Show the file dialog button
-        fileDialogButton.style.display = 'inline-flex';
-        // Show the change directory button
-        changeDirButton.style.display = 'inline-flex';
-    } else {
-        // Hide the file dialog button
-        fileDialogButton.style.display = 'none';
-        // Hide the change directory button
-        changeDirButton.style.display = 'none';
-    }
+    // if (lastChar === '@') {
+    //     // Show the file dialog button
+    //     fileDialogButton.style.display = 'inline-flex';
+    //     // Show the change directory button
+    //     changeDirButton.style.display = 'inline-flex';
+    // } else {
+    //     // Hide the file dialog button
+    //     fileDialogButton.style.display = 'none';
+    //     // Hide the change directory button
+    //     changeDirButton.style.display = 'none';
+    // }
     
     // Also adjust textarea height
     this.style.height = 'auto';

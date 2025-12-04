@@ -224,13 +224,31 @@ function selectItem(itemPath, element) {
 function confirmSelection() {
     if (selectedItemPath) {
         const userInput = document.getElementById('userInput');
+
         if (userInput) {
+            // 1. Get the current cursor/selection position
             const cursorPos = userInput.selectionStart;
+
+            // 2. Extract the text parts
             const textBefore = userInput.value.substring(0, cursorPos);
-            const textAfter = userInput.value.substring(cursorPos);
+            const textAfter = userInput.value.substring(cursorPos); // Simpler way to get the rest of the string
+
+            // 3. Define the text to be inserted, including surrounding quotes and spaces
+            const textToInsert = ` "${selectedItemPath}" `;
+
+            // 4. Construct the new value
+            userInput.value = textBefore + textToInsert + textAfter;
+
+            // 5. CRITICAL UPDATE: Set the new cursor position
+            // The new position is the original position + the length of the inserted string
+            const newCursorPos = cursorPos + textToInsert.length;
             
-            // Simple logic to append
-            userInput.value = userInput.value.substring(0, cursorPos - 1) + ` "${selectedItemPath}" `;
+            // Set the cursor position (both start and end for non-selection)
+            userInput.selectionStart = newCursorPos;
+            userInput.selectionEnd = newCursorPos;
+
+            // Give focus back to the input field, which helps with certain browsers/OSes
+            userInput.focus();
         }
         closeFileBrowser();
     }

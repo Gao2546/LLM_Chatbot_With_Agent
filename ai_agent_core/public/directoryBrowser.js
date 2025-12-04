@@ -218,7 +218,7 @@ async function confirmDirectoryChange() {
                     const cursorPos = userInput.selectionStart;
                     const textBefore = userInput.value.substring(0, cursorPos);
                     const textAfter = userInput.value.substring(cursorPos);
-                    userInput.value = userInput.value.substring(0, cursorPos - 1)
+                    userInput.value = textBefore + textAfter;
                 }
                 // Assuming displayMarkdownMessage is global in script.js
                 if(typeof displayMarkdownMessage === 'function') {
