@@ -35,7 +35,9 @@ import pool, {
     setUserActiveStatus,
     uploadFile, // Import the new MinIO upload function
     getFileInfoByObjectName,
-    getFileByObjectName
+    getFileByObjectName,
+    getFilesByChatId,
+    deleteFile,
 } from './db.js';
 import { callToolFunction, GetSocketIO } from "./api.js"
 
@@ -252,6 +254,67 @@ router.post('/upload', upload.array('files'), async (req, res) => {
         console.error("Error during the upload process:", err);
         return res.status(500).send("Failed to process message and upload files.");
     }
+});
+
+
+router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
+  const { text, method } = req.body;
+  const files = req.files as Express.Multer.File[];
+  
+  // 1. Validate Session
+  const userId = req.session.user?.id;
+  if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: User session not found." });
+  }
+
+  try {
+      // 2. Prepare FormData for Python Server
+      const form = new FormData();
+      
+      // Pass the session user_id to Python
+      form.append('user_id', userId.toString());
+      
+      // Pass other fields
+      if (text) form.append('text', text);
+      form.append('method', method || 'text'); // Default to text if missing
+
+      // Append files
+      if (files && files.length > 0) {
+          for (const file of files) {
+              // Append buffer with filename and known length
+              form.append('files', file.buffer, {
+                  filename: file.originalname,
+                  contentType: file.mimetype,
+                  knownLength: file.size
+              });
+          }
+      }
+
+      // 3. Forward to Python Server
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      console.log(`Forwarding /processDocument to ${API_SERVER_URL}/processDocument...`);
+
+      const flaskRes = await axios.post(`${API_SERVER_URL}/processDocument`, form, {
+          headers: {
+              ...form.getHeaders(),
+              // Optional: Increase timeout for large file processing
+              'Content-Type': form.getHeaders()['content-type'] 
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity
+      });
+
+      // 4. Return Python response to Client
+      res.json(flaskRes.data);
+
+  } catch (err: any) {
+      console.error("Error forwarding to Python model:", err.message);
+      if (err.response) {
+          // Pass through the error from Python
+          return res.status(err.response.status).json(err.response.data);
+      }
+      return res.status(500).json({ error: "Internal server error processing document." });
+  }
 });
 
 
@@ -1886,4 +1949,45 @@ router.post("/save_img", upload.single("file"), async (req: Request, res: Respon
     console.error("❌ Error saving file to MinIO:", err);
     return res.status(500).json({ error: "Failed to save file to object storage" });
   }
+});
+
+// =================================================================================
+// ⭐ NEW: LIST FILES FOR A SPECIFIC CHAT (e.g., ID -1)
+// =================================================================================
+router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
+    const chatId = parseInt(req.params.chatId, 10);
+    
+    if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid Chat ID' });
+    }
+
+    try {
+        const files = await getFilesByChatId(chatId);
+        res.json(files);
+    } catch (error) {
+        console.error('Error fetching files:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// =================================================================================
+// ⭐ NEW: DELETE A SPECIFIC FILE
+// =================================================================================
+router.delete('/file/:fileId', async (req: Request, res: Response) => {
+    const fileId = parseInt(req.params.fileId, 10);
+
+    if (isNaN(fileId)) {
+        return res.status(400).json({ error: 'Invalid File ID' });
+    }
+
+    // Optional: Add ownership check here if strictly required for non-dummy chats
+    // const userId = req.session.user?.id;
+
+    try {
+        await deleteFile(fileId);
+        res.status(200).json({ message: 'File deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting file:', error);
+        res.status(500).json({ error: 'Failed to delete file' });
+    }
 });

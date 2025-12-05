@@ -76,8 +76,13 @@ dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
 
+LOCAL = True if LOCAL == "True" else False
+
 if LOCAL:
     print("Run model on local")
+
+else:
+    print("Run model on server")
 
 file_system = EditedFileSystem()
 
@@ -683,6 +688,205 @@ def process():
     return jsonify({
         'reply': f"Processed {len(processed_files)}/{len(files)} files.",
         'processed_files': processed_files
+    })
+
+
+@app.route('/processDocument', methods=['POST'])
+def process_document_api():
+    """
+    Endpoint to process documents for the Knowledge Base (forcing chat_history_id = -1).
+    """
+    clear_gpu()
+    
+    try:
+        # 1. Get Form Data
+        files = request.files.getlist('files')
+        text_input = request.form.get('text', '')
+        method = request.form.get('method', 'text')
+        
+        # Get user_id sent from TypeScript agent
+        user_id_str = request.form.get('user_id')
+        if not user_id_str:
+            return jsonify({"error": "user_id is required from agent"}), 400
+        user_id = int(user_id_str)
+
+        # Force Chat ID to -1 for "Knowledge Base" / Global context
+        chat_history_id = -1 
+
+    except Exception as e:
+        return jsonify({"error": f"Invalid form data: {e}"}), 400
+
+    if not files and not text_input:
+        return jsonify({"error": "No files or text provided"}), 400
+
+    processed_files = []
+    
+    # --- SCENARIO A: Text Input Only ---
+    if text_input and not files:
+        print(f"Processing raw text input via {method} method...")
+        
+        # Create a dummy file record for pure text
+        uploaded_file_id, object_name = upload_file_to_minio_and_db(
+            user_id=0,
+            chat_history_id=chat_history_id,
+            file_name=f"text_snippet_{int(time.time())}.txt",
+            file_bytes=text_input.encode('utf-8')
+        )
+
+        if method == 'image':
+             # Logic if someone tries to "image encode" raw text (Use HyDE or Text-to-Image logic)
+             # For now, we reuse the local embedding function which handles text input via HyDE
+             if LOCAL:
+                 print("local101")
+                 embedding = get_image_embedding_jinna_api_local(text=text_input)
+             else:
+                 print("api101")
+                 embedding = get_image_embedding_jinna_api(text=text_input)
+             
+             if embedding:
+                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, 1, embedding)
+                 processed_files.append({"name": "Raw Text", "status": "indexed_as_multimodal_text"})
+
+        else:
+            # Standard Text Embedding
+            embedding = encode_text_for_embedding(text_input)
+            save_vector_to_db(user_id, chat_history_id, uploaded_file_id, "Raw Text Input", text_input, embedding, -1)
+            processed_files.append({"name": "Raw Text", "status": "indexed_as_legacy_text"})
+
+
+    # --- SCENARIO B: File Processing ---
+    for file in files:
+        filename = file.filename
+        file.seek(0)
+        file_bytes = file.read()
+        
+        if not file_bytes:
+            continue
+
+        # 1. Upload to MinIO & DB
+        user_id = 0
+        uploaded_file_id, object_name = upload_file_to_minio_and_db(
+            user_id=user_id,
+            chat_history_id=chat_history_id,
+            file_name=filename,
+            file_bytes=file_bytes
+        )
+        
+        if not uploaded_file_id:
+            print(f"Failed to upload {filename}. Skipping.")
+            continue
+
+        # 2. Process based on Method
+        
+        # === METHOD: IMAGE (VLM / Multimodal Embeddings) ===
+        if method == 'image':
+            print(f"Processing '{filename}' via VLM/Image method...")
+            try:
+                pages_to_embed = []
+                
+                # A. Handle PDF
+                if filename.lower().endswith('.pdf'):
+                    pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    num_pages = pdf_doc.page_count
+                    
+                    # Convert pages to images
+                    for page_num_0_idx in range(num_pages):
+                        img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
+                        if img_bytes:
+                            pages_to_embed.append({
+                                "page_num_1_idx": page_num_0_idx + 1,
+                                "img_bytes": img_bytes
+                            })
+                    pdf_doc.close()
+                
+                # B. Handle Images
+                elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    pages_to_embed.append({
+                        "page_num_1_idx": 1,
+                        "img_bytes": file_bytes
+                    })
+                
+                if not pages_to_embed:
+                    print(f"No pages extracted from {filename}.")
+                    continue
+
+                # Batch Embed
+                image_bytes_batch = [p['img_bytes'] for p in pages_to_embed]
+                
+                # Select Embedding Provider
+                if LOCAL:
+                    # Use local model (e.g., Jina v4 / ColPali)
+                    print("local_101")
+                    embeddings_list = get_image_embedding_jinna_api_local(image_bytes_list=image_bytes_batch)
+                else:
+                    # Use API
+                    print("api_101")
+                    embeddings_list = get_image_embedding_jinna_api(image_bytes_list=image_bytes_batch)
+                
+                # Save embeddings
+                if embeddings_list and len(embeddings_list) == len(pages_to_embed):
+                    for page_data, img_embedding in zip(pages_to_embed, embeddings_list):
+                        save_page_vector_to_db(
+                            user_id=user_id,
+                            chat_history_id=chat_history_id,
+                            uploaded_file_id=uploaded_file_id,
+                            page_number=page_data['page_num_1_idx'],
+                            embedding=img_embedding
+                        )
+                    processed_files.append({"name": filename, "status": "indexed_as_images", "pages": len(embeddings_list)})
+                else:
+                    print(f"Failed to generate embeddings for {filename}")
+
+            except Exception as e:
+                print(f"Error in image processing for {filename}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # === METHOD: TEXT (Legacy OCR/Extraction) ===
+        else:
+            print(f"Processing '{filename}' via Legacy Text method...")
+            try:
+                file_text = ""
+                # Wrap bytes for extractors
+                file_stream = io.BytesIO(file_bytes)
+                file_stream.filename = filename
+
+                # Select Extractor
+                if filename.lower().endswith('.pdf'):
+                    file_text = extract_pdf_text(file_stream)
+                elif filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    file_text = extract_image_text(file_stream)
+                elif filename.lower().endswith(('.docx', '.doc')):
+                    file_text = extract_docx_text(file_stream)
+                elif filename.lower().endswith(('.xlsx', '.xls')):
+                    file_text = extract_excel_text(file_stream)
+                else:
+                    # Default text
+                    file_text = extract_txt_file(file_stream)
+
+                if file_text and file_text.strip():
+                    data_vector = encode_text_for_embedding(file_text)
+                    save_vector_to_db(
+                        user_id=user_id,
+                        chat_history_id=chat_history_id,
+                        uploaded_file_id=uploaded_file_id,
+                        file_name=filename,
+                        text=file_text,
+                        embedding=data_vector,
+                        page_number=-1
+                    )
+                    processed_files.append({"name": filename, "status": "indexed_as_text"})
+                else:
+                    print(f"No text extracted from {filename}")
+
+            except Exception as e:
+                print(f"Error in text processing for {filename}: {e}")
+
+    clear_gpu()
+    return jsonify({
+        "status": "success", 
+        "message": f"Successfully processed {len(processed_files)} items.",
+        "details": processed_files
     })
 
 

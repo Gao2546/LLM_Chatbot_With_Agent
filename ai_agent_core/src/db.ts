@@ -155,6 +155,38 @@ END
 $$;
 `;
 
+// --- NEW HELPER FOR DUMMY DATA ---
+/**
+ * Creates a System User (ID 0) and a Dummy Chat History (ID -1).
+ * This ensures that file uploads targeting chat_id -1 have a valid foreign key relation.
+ */
+async function initializeDummyData() {
+    try {
+        // 1. Insert System User (ID 0) if not exists
+        // We use ID 0 to avoid conflicts with auto-incrementing regular users (starting at 1)
+        await pool.query(`
+            INSERT INTO users (id, username, password, email, role, is_active, is_guest)
+            VALUES (0, 'system_placeholder', NULL, 'system@local', 'admin', TRUE, FALSE)
+            ON CONFLICT (id) DO NOTHING;
+        `);
+        console.log('DB: System user (ID 0) ensured.');
+
+        // 2. Insert Dummy Chat History (ID -1) if not exists
+        // We attach this to User ID 0
+        await pool.query(`
+            INSERT INTO chat_history (id, user_id, message, chat_mode, chat_model)
+            VALUES (-1, 0, 'TEMP_UPLOAD_BUFFER', 'system', 'system')
+            ON CONFLICT (id) DO NOTHING;
+        `);
+        console.log('DB: Dummy chat history (ID -1) ensured.');
+
+    } catch (error) {
+        console.error('Error initializing dummy data:', error);
+        // We don't throw here to allow app to try to continue, 
+        // but uploads to ID -1 will likely fail if this failed.
+    }
+}
+
 // Note: Guest support columns are now integrated into the main createUsersTableQuery
 // to simplify initialization. This block is no longer strictly necessary if starting fresh.
 const alterGuestSupportQuery = `
@@ -201,6 +233,12 @@ async function initializeDatabase() {
 
     await pool.query(createChatHistoryTableQuery);
     console.log('DB: Chat history table created or already exists');
+
+    // --- EXECUTE DUMMY DATA CREATION HERE ---
+    // Must be done BEFORE uploaded_files creation creates constraints, 
+    // or at least before we try to use the system.
+    await initializeDummyData(); 
+    console.log('DB: Create dummy chat with system user user id : 0')
 
     await pool.query(createUploadedFilesTableQuery); // Using updated query
     console.log('DB: Uploaded files table created or already exists');
@@ -747,6 +785,22 @@ async function deleteAllGuestUsersAndChats() {
     }
 }
 
+async function getFilesByChatId(chatId: number) {
+  const query = `
+    SELECT id, file_name, object_name, mime_type, file_size_bytes, uploaded_at 
+    FROM uploaded_files 
+    WHERE chat_history_id = $1 
+    ORDER BY uploaded_at DESC
+  `;
+  try {
+    const result = await pool.query(query, [chatId]);
+    return result.rows;
+  } catch (error) {
+    console.error(`Error getting files for chat ${chatId}:`, error);
+    throw error;
+  }
+}
+
 // These startup cleanup functions can be run if needed.
 // await deleteAllGuestUsersAndChats();
 
@@ -784,6 +838,7 @@ export {
   getFileByObjectName, // <-- Added new function here
   getFileInfoByObjectName, // <-- Added new function here
   deleteFile,
+  getFilesByChatId,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

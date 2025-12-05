@@ -251,6 +251,8 @@ function showPreprocessDialog() {
     newDocBtn.textContent = '+ New Document';
     newDocBtn.className = 'pp-btn pp-btn-primary';
     newDocBtn.onclick = () => {
+        textArea.disabled = false;
+        dropdown.disabled = false;
         const inputs = document.querySelectorAll('.pp-input, .pp-textarea');
         inputs.forEach(input => input.value = '');
         document.querySelectorAll('.pp-doc-item').forEach(item => item.classList.remove('active'));
@@ -273,6 +275,7 @@ function showPreprocessDialog() {
     // Document List Container
     const docList = document.createElement('div');
     docList.className = 'pp-doc-list';
+    leftSidebar.appendChild(docList); // Append immediately so we can populate it
 
     // --- RIGHT PANEL CONTAINER ---
     const rightPanel = document.createElement('div');
@@ -292,96 +295,140 @@ function showPreprocessDialog() {
     previewView.style.display = 'none';
     previewView.style.height = '100%';
     previewView.style.flexDirection = 'column';
-    
-    // --- POPULATE LEFT SIDEBAR ITEMS ---
-    const documents = [
-        'project_proposal.pdf', 
-        'architecture.png', 
-        'data_export.csv', 
-        'meeting_recording.mp3', 
-        'demo_clip.mp4',
-        'config.json',
-        'styles.css',
-        'main_script.py',
-        'vector_icon.svg',
-        'unknown_file.xyz'
-    ];
-    
-    documents.forEach((doc, index) => {
-        // Create Item Container
-        const docItem = document.createElement('div');
-        docItem.className = 'pp-doc-item';
-        docItem.id = `doc-item-${index}`; // Add ID for individual targeting if needed
-        
-        docItem.style.userSelect = 'none';      
-        docItem.style.webkitUserSelect = 'none';
-        docItem.style.mozUserSelect = 'none';   
-        docItem.style.msUserSelect = 'none';    
-        
-        // 1. Icon
-        const icon = getIconForFile(doc);
-        const iconSpan = document.createElement('span');
-        iconSpan.innerHTML = icon;
-        iconSpan.style.marginRight = '8px';
-        iconSpan.style.color = '#b0b0b0';
-        
-        // 2. Name
-        const docName = document.createElement('span');
-        docName.textContent = doc;
-        docName.style.pointerEvents = 'none';
-        docName.style.flexGrow = '1';
-        docName.style.overflow = 'hidden';
-        docName.style.textOverflow = 'ellipsis';
-        docName.style.whiteSpace = 'nowrap';
-        
-        // 3. NEW: Status Spinner Span
-        const statusSpan = document.createElement('span');
-        statusSpan.className = 'pp-doc-status'; // Base class (hidden by default)
-        
-        // 4. Delete Button
-        const delBtn = document.createElement('span');
-        delBtn.innerHTML = '&times;';
-        delBtn.className = 'pp-doc-delete';
-        delBtn.title = 'Remove Document';
-        
-        delBtn.onclick = (e) => {
-            e.stopPropagation(); 
-            if(confirm(`Are you sure you want to remove "${doc}"?`)) {
-                docItem.style.opacity = '0';
-                docItem.style.transform = 'translateX(-20px)';
-                setTimeout(() => {
-                    if (docItem.parentNode) docItem.parentNode.removeChild(docItem);
-                    const currentTitle = document.getElementById('pp-preview-title');
-                    if (currentTitle && currentTitle.textContent.includes(doc)) {
-                        previewView.style.display = 'none';
-                        mainFormView.style.display = 'block';
-                    }
-                }, 200);
-            }
-        };
-
-        // Append in Order
-        docItem.appendChild(iconSpan);
-        docItem.appendChild(docName);
-        docItem.appendChild(statusSpan); // <--- Added Status here
-        docItem.appendChild(delBtn);
-        
-        docItem.onclick = () => {
-             const isActive = docItem.classList.contains('active');
-             if (isActive) docItem.classList.remove('active');
-             else docItem.classList.add('active');
-        };
-
-        docItem.ondblclick = () => {
-            handleFilePreview(doc, previewView, mainFormView);
-        };
-
-        docList.appendChild(docItem);
-    });
-    leftSidebar.appendChild(docList);
 
     // =========================================================
-    // FORM CONSTRUCTION
+    // ⭐ NEW: DYNAMIC DOCUMENT LIST LOGIC
+    // =========================================================
+    
+    // Helper to fetch and render the list
+    const fetchAndRenderDocuments = async () => {
+        docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
+        
+        try {
+            // NOTE: Assuming your backend has an endpoint to list files for a chat
+            // If not, you need to add: app.get('/api/chat/:chatId/files', ...)
+            const response = await fetch('/api/chat/-1/files'); 
+            
+            if (!response.ok) throw new Error("Failed to load files");
+            
+            const files = await response.json();
+            docList.innerHTML = ''; // Clear loading message
+
+            if (files.length === 0) {
+                docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">No documents found.</div>';
+                return;
+            }
+
+            files.forEach((fileObj) => {
+                // Determine filename (handle object or simple string for robustness)
+                const fileName = fileObj.file_name || fileObj.name || "Unknown File";
+                const fileId = fileObj.id; // Assuming DB returns an ID
+
+                // Create Item Container
+                const docItem = document.createElement('div');
+                docItem.className = 'pp-doc-item';
+                docItem.id = `doc-item-${fileId}`; 
+                
+                docItem.style.userSelect = 'none';      
+                
+                // 1. Icon
+                const icon = getIconForFile(fileName);
+                const iconSpan = document.createElement('span');
+                iconSpan.innerHTML = icon;
+                iconSpan.style.marginRight = '8px';
+                iconSpan.style.color = '#b0b0b0';
+                
+                // 2. Name
+                const docName = document.createElement('span');
+                docName.textContent = fileName;
+                docName.style.pointerEvents = 'none';
+                docName.style.flexGrow = '1';
+                docName.style.overflow = 'hidden';
+                docName.style.textOverflow = 'ellipsis';
+                docName.style.whiteSpace = 'nowrap';
+                
+                // 3. Status Spinner
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'pp-doc-status'; 
+                
+                // 4. Delete Button (Updated to call API)
+                const delBtn = document.createElement('span');
+                delBtn.innerHTML = '&times;';
+                delBtn.className = 'pp-doc-delete';
+                delBtn.title = 'Remove Document';
+                
+                delBtn.onclick = async (e) => {
+                    e.stopPropagation(); 
+                    if(confirm(`Are you sure you want to delete "${fileName}"?`)) {
+                        // Optimistic UI update
+                        docItem.style.opacity = '0.5';
+                        
+                        try {
+                            // Call API to delete file
+                            const delRes = await fetch(`/api/file/${fileId}`, { method: 'DELETE' });
+                            if(delRes.ok) {
+                                docItem.style.transform = 'translateX(-20px)';
+                                docItem.style.opacity = '0';
+                                setTimeout(() => {
+                                    if (docItem.parentNode) docItem.parentNode.removeChild(docItem);
+                                    // If we deleted the file currently being previewed
+                                    const currentTitle = document.getElementById('pp-preview-title');
+                                    if (currentTitle && currentTitle.textContent === fileName) {
+                                        previewView.style.display = 'none';
+                                        mainFormView.style.display = 'block';
+                                    }
+                                    // Refresh list to be safe
+                                    fetchAndRenderDocuments();
+                                }, 200);
+                            } else {
+                                alert("Failed to delete file on server.");
+                                docItem.style.opacity = '1';
+                            }
+                        } catch (err) {
+                            console.error("Delete error:", err);
+                            alert("Error deleting file.");
+                            docItem.style.opacity = '1';
+                        }
+                    }
+                };
+
+                // Append in Order
+                docItem.appendChild(iconSpan);
+                docItem.appendChild(docName);
+                docItem.appendChild(statusSpan); 
+                docItem.appendChild(delBtn);
+                
+                docItem.onclick = () => {
+                     // Handle active class
+                    //  document.querySelectorAll('.pp-doc-item').forEach(i => i.classList.remove('active'));
+                    const isActive = docItem.classList.contains('active')
+                    if (isActive){
+                        docItem.classList.remove('active')
+                    }
+                    else {
+                     docItem.classList.add('active');
+                    }
+                };
+
+                docItem.ondblclick = () => {
+                    // Pass the file ID or URL logic if available, currently just using name for mock preview
+                    handleFilePreview(fileName, previewView, mainFormView);
+                };
+
+                docList.appendChild(docItem);
+            });
+
+        } catch (error) {
+            console.error("Error fetching docs:", error);
+            docList.innerHTML = '<div style="padding:10px; color:#ff6b6b; font-size:12px;">Error loading list.<br><small>Is backend running?</small></div>';
+        }
+    };
+
+    // Initial Load
+    fetchAndRenderDocuments();
+
+    // =========================================================
+    // FORM CONSTRUCTION (Standard)
     // =========================================================
 
     const inputSection = document.createElement('div');
@@ -400,6 +447,7 @@ function showPreprocessDialog() {
     uploadBtn.className = 'pp-btn pp-btn-upload';
     
     const fileInput = document.createElement('input');
+    fileInput.id = "inputDocumentFile"
     fileInput.type = 'file';
     fileInput.style.display = 'none';
     
@@ -408,14 +456,24 @@ function showPreprocessDialog() {
     fileNameInput.placeholder = 'No file selected';
     fileNameInput.className = 'pp-input';
     fileNameInput.readOnly = true;
-
+    
     uploadBtn.onclick = () => fileInput.click();
     fileInput.onchange = (e) => {
+        textArea.disabled = true;
+        textArea.value = ''; 
         const file = e.target.files[0];
         if (file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (['pdf', 'jpg', 'png', 'jpeg', ''].includes(ext)){
+                dropdown.disabled = false;
+            }
+            else {
+                dropdown.value = 'text';
+                dropdown.disabled = true;
+            }
             fileNameInput.value = file.name;
             const outputName = document.getElementById('pp-output-name');
-            if(outputName && !outputName.value) {
+            if(outputName) {
                 outputName.value = file.name;
             }
         }
@@ -435,9 +493,18 @@ function showPreprocessDialog() {
     textArea.className = 'pp-textarea';
     textArea.placeholder = 'Paste your text content here...';
     textArea.style.height = '120px';
-    textArea.style.resize = 'vertical';
-    inputSection.appendChild(textArea);
+    textArea.style.resize = 'none';
 
+    textArea.onkeyup = textArea.onkeydown = () => {
+        if (textArea.value != ''){
+            dropdown.value = 'text'
+            dropdown.disabled = true;
+        }
+        else {
+            dropdown.disabled = false;
+        }
+    }
+    inputSection.appendChild(textArea);
     mainFormView.appendChild(inputSection);
 
     // Section B: Configuration
@@ -504,34 +571,100 @@ function showPreprocessDialog() {
     processBtn.textContent = 'Process Document';
     processBtn.className = 'pp-btn pp-btn-success';
     
-    // --- UPDATED PROCESS LOGIC WITH ANIMATION ---
-    processBtn.onclick = () => {
-        // 1. Change Button State
+    // --- UPDATED PROCESS LOGIC ---
+    processBtn.onclick = async () => {
+        // 1. Get current values
+        const fileCount = fileInput.files.length;
+        const textContent = textArea.value;
+        const outputNameVal = outputInput.value.trim();
+
+        // 2. Validation
+        if (fileCount === 0 && textContent.trim() === ''){
+            alert("Please select a file or paste text content to process.");
+            return console.error("Invalid form");   
+        }
+
+        // 3. UI Feedback
         processBtn.textContent = 'Processing...';
         processBtn.style.opacity = '0.8';
         processBtn.disabled = true;
 
-        // 2. Select all status spinners
         const statusSpinners = document.querySelectorAll('.pp-doc-status');
-        
-        // 3. Show Animation (Add loading class)
         statusSpinners.forEach(spinner => {
             spinner.classList.add('pp-loading');
         });
 
-        // 4. Simulate Processing Delay (e.g., 2 seconds)
-        setTimeout(() => {
-            // 5. Hide Animation (Remove loading class)
-            statusSpinners.forEach(spinner => {
-                spinner.classList.remove('pp-loading');
+        // 4. Prepare Data
+        const formData = new FormData();
+        const methodValue = dropdown.value;
+        
+        // ⭐ Force chat_id to -1 for the dummy buffer
+        formData.append('chat_id', '-1'); 
+
+        // Handle File or Text
+        if (fileCount > 0) {
+            const file = fileInput.files[0];
+            if (outputNameVal) {
+                const renamedFile = new File([file], outputNameVal, { type: file.type });
+                formData.append('files', renamedFile);
+            } else {
+                formData.append('files', file);
+            }
+        } 
+        else if (textContent.trim() !== '') {
+            let finalFilename = outputNameVal;
+            let mimeType = 'text/plain';
+
+            if (!finalFilename) {
+                const trimmedText = textContent.trim();
+                if (trimmedText.startsWith('<html') || trimmedText.startsWith('<!DOCTYPE')) {
+                    finalFilename = 'content.html'; mimeType = 'text/html';
+                } else if ((trimmedText.startsWith('{') && trimmedText.endsWith('}'))) {
+                    finalFilename = 'data.json'; mimeType = 'application/json';
+                } else {
+                    finalFilename = 'text_content.txt';
+                }
+            } else if (finalFilename.indexOf('.') === -1) {
+                finalFilename += '.txt';
+            }
+
+            const textFile = new File([textContent], finalFilename, { type: mimeType });
+            formData.append('files', textFile);
+        }
+
+        const promptMessage = "Please describe the image in detail in a text format.";
+        formData.append("text", promptMessage);
+        formData.append('method', methodValue);
+
+        try {
+            const res = await fetch("/api/processDocument", {
+                method: "POST",
+                body: formData
             });
+
+            const result = await res.json();
+            console.log('Result:', result);
             
-            // 6. Reset Button
+            // ⭐ REFRESH THE LIST AFTER UPLOAD
+            await fetchAndRenderDocuments();
+
             alert('Processing complete!');
+        } catch (error) {
+            console.error(error);
+            alert("Error processing document");
+        } finally {
+             // Reset UI
+            statusSpinners.forEach(spinner => spinner.classList.remove('pp-loading'));
+            fileInput.value = '';
+            fileNameInput.value = '';
+            outputInput.value = '';
+            textArea.value = '';
+            textArea.disabled = false;
             processBtn.textContent = 'Process Document';
             processBtn.style.opacity = '1';
             processBtn.disabled = false;
-        }, 2000);
+            dropdown.disabled = false;
+        }
     };
 
     actionDiv.appendChild(cancelBtn);
@@ -553,7 +686,7 @@ function showPreprocessDialog() {
 }
 
 // ---------------------------------------------------------
-// COMPREHENSIVE PREVIEW LOGIC
+// COMPREHENSIVE PREVIEW LOGIC (Kept exactly as provided)
 // ---------------------------------------------------------
 function handleFilePreview(filename, previewContainer, formContainer) {
     // 1. Switch Views
@@ -767,6 +900,7 @@ function createMockTable(filename) {
 // HELPER: File Icons
 // ---------------------------------------------------------
 function getIconForFile(filename) {
+    if(!filename) return '📄';
     const ext = filename.split('.').pop().toLowerCase();
     if (['jpg','png','gif','webp','svg'].includes(ext)) return '🖼️';
     if (['pdf'].includes(ext)) return '📕';
