@@ -435,27 +435,70 @@ document.addEventListener('DOMContentLoaded', async (event) => {
     }
     const docSearchBtn = document.getElementById('documentSearch');
     
-    // State variable to track mode (Optional: use this in your send logic)
-    let isRagMode = false; 
+    // 1. Fetch initial status from backend
+    let resDocSearchStatus = await fetch(`/api/getDocSearchStatus`)
+        .then(response => response.json())
+        .catch(e => ({ docSearchMethod: 'none' }));
 
+    console.log('Document Search Status:', resDocSearchStatus);
+
+    // 2. Initialize UI based on fetched status
+    // Ensure we handle the 3 states
+    const validStates = ['none', 'searchDoc', 'searchdocAll'];
+    let initialState = 'none';
+    
+    if (resDocSearchStatus && validStates.includes(resDocSearchStatus.docSearchMethod)) {
+        initialState = resDocSearchStatus.docSearchMethod;
+    }
+    
+    updateDocSearchUI(initialState);
+
+    // 3. Update Click Listener to Cycle through 3 states
     if(docSearchBtn) {
-        docSearchBtn.addEventListener('click', () => {
-            // 1. Toggle the visual class
-            docSearchBtn.classList.toggle('active');
-            
-            // 2. Update logic state
-            isRagMode = docSearchBtn.classList.contains('active');
-            
-            // Optional: Provide UI feedback
-            if(isRagMode) {
-                console.log("Knowledge Base Search: ON");
-                // You might want to change the placeholder text
-                document.getElementById('userInput').placeholder = "Ask questions about your documents...";
-            } else {
-                console.log("Knowledge Base Search: OFF");
-                document.getElementById('userInput').placeholder = "Ask any question...";
-            }
-        });
+        // Fetch session info to determine if user is guest
+        let isGuest = false;
+        try {
+            const sessionRes = await fetch('/auth/session');
+            const sessionData = await sessionRes.json();
+            console.log('Session data:', sessionData);
+            isGuest = sessionData.isGuest;
+            console.log('isGuest:', isGuest);
+        } catch (e) {
+            console.error("Failed to fetch session info for doc search button", e);
+        }
+
+        if (isGuest || isGuest == undefined) {
+            docSearchBtn.title = "Login required to use document search";
+            docSearchBtn.classList.add('disabled');
+            docSearchBtn.style.pointerEvents = 'none';
+            docSearchBtn.style.opacity = '0.5';
+        } else {
+            docSearchBtn.addEventListener('click', async () => {
+                // Cycle: none -> searchDoc -> searchdocAll -> none
+                let nextState = 'none';
+                if (globalThis.docSearchState === 'none') {
+                    nextState = 'searchDoc';
+                } else if (globalThis.docSearchState === 'searchDoc') {
+                    nextState = 'searchdocAll';
+                } else {
+                    nextState = 'none';
+                }
+
+                // Update UI
+                updateDocSearchUI(nextState);
+
+                // Optional: Persist to backend immediately if you have a setting endpoint
+                try {
+                    await fetch('/api/setDocSearchStatus', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ docSearchMethod: nextState })
+                    });
+                } catch (e) {
+                    console.error("Failed to save search state", e);
+                }
+            });
+        }
     }
     
     await fetch(`/api/reload-page`)
@@ -802,6 +845,8 @@ async function createNewChat() {
         const chatListDiv = document.getElementById('chatListEle');
         const allChatItems = chatListDiv.querySelectorAll('.chat-item');
         allChatItems.forEach(item => item.classList.remove('active'));
+        updateDocSearchUI('none');
+        document.getElementById('userInput').placeholder = "Ask any question...";
 }
 
 sendButton.addEventListener('click', sendMessage);
@@ -913,21 +958,20 @@ async function sendMessage() {
     // let data = null;
 
     try {
-
         const create_record_res = await fetch('/api/create_record', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: currentMessage, // Use currentMessage for the loop
-                    // Use the actual current values from selectors or defaults captured *before* the loop
-                    mode: selectedMode,
-                    model: selectedModel,
-                    role: role,
-                    socket: socket.id //****************************************************************************************************************** */
-                })
-            });
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: currentMessage, 
+                mode: selectedMode,
+                model: selectedModel,
+                // UPDATED LINE: Send the specific state string
+                docSearchMethod: globalThis.docSearchState, 
+                role: role,
+                socket: socket.id 
+            })
+        });
+
         console.log(create_record_res);
         const formData = new FormData();
         formData.append("text", currentMessage);
@@ -1009,21 +1053,20 @@ async function sendMessage() {
 
             // Send message to the backend
             const response = await fetch('/api/message', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: currentMessage,
-                    mode: selectedMode,
-                    model: selectedModel,
-                    role: role,
-                    socket: socket.id,
-                    requestId: socket.id + sessionData.currChatId
-                }),
-                // 3. Pass the signal to the fetch options
-                signal: signal
-            });
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: currentMessage,
+                mode: selectedMode,
+                model: selectedModel,
+                role: role,
+                socket: socket.id,
+                // UPDATED LINE: Send the specific state string
+                docSearchMethod: globalThis.docSearchState,
+                requestId: socket.id + sessionData.currChatId
+            }),
+            signal: signal
+        });
 
 
 
@@ -1265,6 +1308,8 @@ async function displayChatList(chatIds) {
                     // if (data.ClearDisplay){
                     //     messagesDiv.innerHTML = ''; // Clear existing messages
                     // }
+                    updateDocSearchUI('none');
+                    document.getElementById('userInput').placeholder = "Ask any question...";
                     console.log(`Chat history ${chatId} deleted successfully`);
                 } else {
                     const data = await response.json();
@@ -1536,6 +1581,13 @@ async function loadChatHistory(chatId) {
             // Ensure dropdowns are populated before setting values
             const defaultMode = populateModes();
             const defaultModel = populateModels();
+            const docSearchBtn = document.getElementById('documentSearch');
+            
+            console.log('Document Search Mode from loadChatHistory:', data.docSearchMethod);
+            
+            // Apply the state from history, defaulting to 'none' if undefined
+            const historyState = data.docSearchMethod || 'none';
+            updateDocSearchUI(historyState);
 
             if (data.exp){
                 loginBtn.textContent = 'Login';
@@ -1589,6 +1641,21 @@ async function loadChatHistory(chatId) {
                         console.log(`Model reset to default from loadChatHistory: ${defaultModel}`);
                     }
                 }
+                
+                console.log('Document Search Mode from loadChatHistory:', data.docSearchMethod);
+                if (docSearchBtn){
+                    if (data.docSearchMethod && data.docSearchMethod === 'searchDoc'){
+                        docSearchBtn.classList.add('active');
+                        globalThis.isDocMode = true;
+                        console.log('Document Search Mode enabled from loadChatHistory');
+                    }
+                    else {
+                        docSearchBtn.classList.remove('active');
+                        globalThis.isDocMode = false;
+                        console.log('Document Search Mode disabled from loadChatHistory');
+                    }
+                }
+
             } else if (data.error) {
                 console.error('Error loading chat history:', data.error);
                 // On error loading specific chat, maybe reset dropdowns to default?
@@ -2339,7 +2406,9 @@ async function editMessage(messageElement, newText) {
                 messageIndex: getMessageIndex(messageElement),
                 newMessage: newText,
                 socketId: socket.id,
-                requestId: socket.id + sessionData.currChatId
+                requestId: socket.id + sessionData.currChatId,
+                // UPDATED LINE
+                documentSearchMethod: globalThis.docSearchState 
             })
         });
         

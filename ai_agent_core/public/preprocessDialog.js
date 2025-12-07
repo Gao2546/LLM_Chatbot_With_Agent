@@ -233,7 +233,7 @@
 // preprocessDialog.js
 // Function to create and show the preprocess file dialog modal
 
-function showPreprocessDialog() {
+async function showPreprocessDialog() {
     // 1. Create Overlay
     const overlay = document.createElement('div');
     overlay.className = 'pp-overlay';
@@ -255,6 +255,7 @@ function showPreprocessDialog() {
         dropdown.disabled = false;
         const inputs = document.querySelectorAll('.pp-input, .pp-textarea');
         inputs.forEach(input => input.value = '');
+        // Remove active class from all items
         document.querySelectorAll('.pp-doc-item').forEach(item => item.classList.remove('active'));
         const preview = document.getElementById('pp-preview-view');
         const form = document.getElementById('pp-form-view');
@@ -272,10 +273,31 @@ function showPreprocessDialog() {
     listHeading.style.marginTop = '20px';
     leftSidebar.appendChild(listHeading);
 
+    // Selection All files button
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.textContent = 'Select All';
+    selectAllBtn.className = 'pp-btn pp-btn-secondary';
+    selectAllBtn.onclick = () => {
+    selectAllBtn.classList.toggle('active');
+    const shouldBeActive = selectAllBtn.classList.contains('active');
+
+    document.querySelectorAll('.pp-doc-item').forEach(item => {
+        const isItemActive = item.classList.contains('active');
+
+        // Only click the item if its state needs to change
+        if (shouldBeActive && !isItemActive) {
+            item.click(); // Turn ON
+        } else if (!shouldBeActive && isItemActive) {
+            item.click(); // Turn OFF
+        }
+    });
+};
+    leftSidebar.appendChild(selectAllBtn);
+
     // Document List Container
     const docList = document.createElement('div');
     docList.className = 'pp-doc-list';
-    leftSidebar.appendChild(docList); // Append immediately so we can populate it
+    leftSidebar.appendChild(docList); 
 
     // --- RIGHT PANEL CONTAINER ---
     const rightPanel = document.createElement('div');
@@ -297,16 +319,41 @@ function showPreprocessDialog() {
     previewView.style.flexDirection = 'column';
 
     // =========================================================
-    // ⭐ NEW: DYNAMIC DOCUMENT LIST LOGIC
+    // ⭐ NEW: STATE MANAGEMENT
+    // =========================================================
+    let currentUserId = null;
+
+    // Helper to get current user ID from session
+    const getCurrentUser = async () => {
+        try {
+            // Using /reload-page as it returns session info including userId
+            const response = await fetch('/api/get_current_user'); 
+            if (response.ok) {
+                const data = await response.json();
+                currentUserId = data.userId;
+                console.log("Current User ID:", currentUserId);
+            }
+        } catch (e) {
+            console.error("Failed to fetch user session", e);
+        }
+    };
+
+    // =========================================================
+    // ⭐ UPDATED: DOCUMENT LIST LOGIC
     // =========================================================
     
-    // Helper to fetch and render the list
     const fetchAndRenderDocuments = async () => {
         docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
         
         try {
-            // NOTE: Assuming your backend has an endpoint to list files for a chat
-            // If not, you need to add: app.get('/api/chat/:chatId/files', ...)
+            // 1. Ensure we have the user ID first
+            if (!currentUserId) await getCurrentUser();
+            if (!currentUserId) {
+                docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
+                return;
+            }
+
+            // 2. Fetch files
             const response = await fetch('/api/chat/-1/files'); 
             
             if (!response.ok) throw new Error("Failed to load files");
@@ -320,15 +367,22 @@ function showPreprocessDialog() {
             }
 
             files.forEach((fileObj) => {
-                // Determine filename (handle object or simple string for robustness)
                 const fileName = fileObj.file_name || fileObj.name || "Unknown File";
-                const fileId = fileObj.id; // Assuming DB returns an ID
+                const fileId = fileObj.id;
+                const objectName = fileObj.object_name;
+                // Check if current user is in the active_users array
+                const activeUsers = fileObj.active_users || [];
+                const isActiveByMe = currentUserId && activeUsers.includes(currentUserId);
 
                 // Create Item Container
                 const docItem = document.createElement('div');
                 docItem.className = 'pp-doc-item';
-                docItem.id = `doc-item-${fileId}`; 
+                // Apply active class immediately if user is in the list
+                if (isActiveByMe) {
+                    docItem.classList.add('active');
+                }
                 
+                docItem.id = `doc-item-${fileId}`; 
                 docItem.style.userSelect = 'none';      
                 
                 // 1. Icon
@@ -347,37 +401,29 @@ function showPreprocessDialog() {
                 docName.style.textOverflow = 'ellipsis';
                 docName.style.whiteSpace = 'nowrap';
                 
-                // 3. Status Spinner
+                // 3. Active Indicator (Visual Feedback)
                 const statusSpan = document.createElement('span');
                 statusSpan.className = 'pp-doc-status'; 
                 
-                // 4. Delete Button (Updated to call API)
+                // 4. Delete Button
                 const delBtn = document.createElement('span');
                 delBtn.innerHTML = '&times;';
                 delBtn.className = 'pp-doc-delete';
                 delBtn.title = 'Remove Document';
                 
+                // ... Delete Logic (Same as before) ...
                 delBtn.onclick = async (e) => {
                     e.stopPropagation(); 
                     if(confirm(`Are you sure you want to delete "${fileName}"?`)) {
-                        // Optimistic UI update
                         docItem.style.opacity = '0.5';
-                        
                         try {
-                            // Call API to delete file
                             const delRes = await fetch(`/api/file/${fileId}`, { method: 'DELETE' });
                             if(delRes.ok) {
                                 docItem.style.transform = 'translateX(-20px)';
                                 docItem.style.opacity = '0';
                                 setTimeout(() => {
                                     if (docItem.parentNode) docItem.parentNode.removeChild(docItem);
-                                    // If we deleted the file currently being previewed
-                                    const currentTitle = document.getElementById('pp-preview-title');
-                                    if (currentTitle && currentTitle.textContent === fileName) {
-                                        previewView.style.display = 'none';
-                                        mainFormView.style.display = 'block';
-                                    }
-                                    // Refresh list to be safe
+                                    // Handle preview closing if needed...
                                     fetchAndRenderDocuments();
                                 }, 200);
                             } else {
@@ -386,33 +432,58 @@ function showPreprocessDialog() {
                             }
                         } catch (err) {
                             console.error("Delete error:", err);
-                            alert("Error deleting file.");
                             docItem.style.opacity = '1';
                         }
                     }
                 };
 
-                // Append in Order
                 docItem.appendChild(iconSpan);
                 docItem.appendChild(docName);
                 docItem.appendChild(statusSpan); 
                 docItem.appendChild(delBtn);
                 
-                docItem.onclick = () => {
-                     // Handle active class
-                    //  document.querySelectorAll('.pp-doc-item').forEach(i => i.classList.remove('active'));
-                    const isActive = docItem.classList.contains('active')
-                    if (isActive){
-                        docItem.classList.remove('active')
+                // ⭐ CLICK HANDLER: Toggle Active Status via API
+                docItem.onclick = async () => {
+                    if (!currentUserId) {
+                        alert("Session error: Cannot identify user.");
+                        return;
                     }
-                    else {
-                     docItem.classList.add('active');
+
+                    // Determine intended action based on current UI state
+                    const isCurrentlyActive = docItem.classList.contains('active');
+                    const method = isCurrentlyActive ? 'DELETE' : 'POST';
+                    
+                    // Optimistic UI feedback (optional, or wait for server)
+                    statusSpan.classList.add('pp-loading'); 
+
+                    try {
+                        const res = await fetch(`/api/file/${fileId}/active`, {
+                            method: method,
+                            headers: { 'Content-Type': 'application/json' },
+                            // body: JSON.stringify({ userId: currentUserId }) // Optional if session handles it
+                        });
+
+                        if (res.ok) {
+                            const data = await res.json();
+                            // Update UI based on the array returned from server
+                            if (data.active_users.includes(currentUserId)) {
+                                docItem.classList.add('active');
+                            } else {
+                                docItem.classList.remove('active');
+                            }
+                        } else {
+                            console.error("Failed to toggle status");
+                        }
+                    } catch (error) {
+                        console.error("API Error:", error);
+                    } finally {
+                        statusSpan.classList.remove('pp-loading');
                     }
                 };
 
                 docItem.ondblclick = () => {
-                    // Pass the file ID or URL logic if available, currently just using name for mock preview
-                    handleFilePreview(fileName, previewView, mainFormView);
+                    // Pass the objectName to the preview function
+                    handleFilePreview(fileName, objectName, previewView, mainFormView);
                 };
 
                 docList.appendChild(docItem);
@@ -420,7 +491,7 @@ function showPreprocessDialog() {
 
         } catch (error) {
             console.error("Error fetching docs:", error);
-            docList.innerHTML = '<div style="padding:10px; color:#ff6b6b; font-size:12px;">Error loading list.<br><small>Is backend running?</small></div>';
+            docList.innerHTML = '<div style="padding:10px; color:#ff6b6b; font-size:12px;">Error loading list.</div>';
         }
     };
 
@@ -573,37 +644,69 @@ function showPreprocessDialog() {
     
     // --- UPDATED PROCESS LOGIC ---
     processBtn.onclick = async () => {
-        // 1. Get current values
         const fileCount = fileInput.files.length;
         const textContent = textArea.value;
         const outputNameVal = outputInput.value.trim();
 
-        // 2. Validation
+        // 1. Validation
         if (fileCount === 0 && textContent.trim() === ''){
             alert("Please select a file or paste text content to process.");
-            return console.error("Invalid form");   
+            return;   
         }
 
-        // 3. UI Feedback
+        // 2. Lock UI & Visual Feedback
         processBtn.textContent = 'Processing...';
         processBtn.style.opacity = '0.8';
         processBtn.disabled = true;
 
-        const statusSpinners = document.querySelectorAll('.pp-doc-status');
-        statusSpinners.forEach(spinner => {
-            spinner.classList.add('pp-loading');
-        });
+        // 3. Create Temporary List Item (The "Fake" item)
+        const tempItem = document.createElement('div');
+        tempItem.className = 'pp-doc-item';
+        tempItem.style.opacity = '0.7'; // Dim slightly
+        tempItem.style.pointerEvents = 'none'; // Prevent clicking
+        
+        // Determine Display Name
+        let tempDisplayName = "Processing...";
+        if (fileCount > 0) {
+            const file = fileInput.files[0];
+            tempDisplayName = outputNameVal || file.name;
+        } else if (outputNameVal) {
+            tempDisplayName = outputNameVal;
+        } else {
+            tempDisplayName = "Text Content";
+        }
+
+        // Build Inner HTML for Temp Item
+        const iconSpan = document.createElement('span');
+        iconSpan.innerHTML = getIconForFile(tempDisplayName); 
+        iconSpan.style.marginRight = '8px';
+        iconSpan.style.color = '#b0b0b0';
+
+        const docName = document.createElement('span');
+        docName.textContent = tempDisplayName;
+        docName.style.flexGrow = '1';
+        
+        // The Loading Spinner
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'pp-doc-status pp-loading'; // Add loading class immediately
+        statusSpan.style.display = 'inline-block'; // Force visible
+        
+        tempItem.appendChild(iconSpan);
+        tempItem.appendChild(docName);
+        tempItem.appendChild(statusSpan);
+
+        // Add to the top of the list or bottom
+        docList.insertBefore(tempItem, docList.firstChild);
+        docList.scrollTop = 0; // Scroll to top
 
         // 4. Prepare Data
         const formData = new FormData();
         const methodValue = dropdown.value;
-        
-        // ⭐ Force chat_id to -1 for the dummy buffer
         formData.append('chat_id', '-1'); 
 
-        // Handle File or Text
         if (fileCount > 0) {
             const file = fileInput.files[0];
+            // Handle renaming if needed
             if (outputNameVal) {
                 const renamedFile = new File([file], outputNameVal, { type: file.type });
                 formData.append('files', renamedFile);
@@ -612,54 +715,50 @@ function showPreprocessDialog() {
             }
         } 
         else if (textContent.trim() !== '') {
-            let finalFilename = outputNameVal;
-            let mimeType = 'text/plain';
-
-            if (!finalFilename) {
-                const trimmedText = textContent.trim();
-                if (trimmedText.startsWith('<html') || trimmedText.startsWith('<!DOCTYPE')) {
-                    finalFilename = 'content.html'; mimeType = 'text/html';
-                } else if ((trimmedText.startsWith('{') && trimmedText.endsWith('}'))) {
-                    finalFilename = 'data.json'; mimeType = 'application/json';
-                } else {
-                    finalFilename = 'text_content.txt';
-                }
-            } else if (finalFilename.indexOf('.') === -1) {
-                finalFilename += '.txt';
-            }
-
-            const textFile = new File([textContent], finalFilename, { type: mimeType });
+            let finalName = tempDisplayName;
+            // Ensure extension for text files
+            if(finalName.indexOf('.') === -1) finalName += '.txt';
+            
+            const textFile = new File([textContent], finalName, { type: 'text/plain' });
             formData.append('files', textFile);
         }
 
-        const promptMessage = "Please describe the image in detail in a text format.";
-        formData.append("text", promptMessage);
+        formData.append("text", "Please describe the image in detail in a text format.");
         formData.append('method', methodValue);
 
+        // 5. Send Request
         try {
             const res = await fetch("/api/processDocument", {
                 method: "POST",
                 body: formData
             });
 
-            const result = await res.json();
-            console.log('Result:', result);
-            
-            // ⭐ REFRESH THE LIST AFTER UPLOAD
-            await fetchAndRenderDocuments();
+            if (!res.ok) throw new Error("Server failed to process document");
 
-            alert('Processing complete!');
+            const result = await res.json();
+            
+            // SUCCESS: Refresh the real list (this will naturally remove the temp item)
+            await fetchAndRenderDocuments();
+            // alert('Processing complete!');
+
         } catch (error) {
             console.error(error);
-            alert("Error processing document");
+            
+            // ERROR: Remove the temp item immediately
+            if(tempItem && tempItem.parentNode) {
+                tempItem.parentNode.removeChild(tempItem);
+            }
+            
+            alert("Error processing document: " + error.message);
+            
         } finally {
-             // Reset UI
-            statusSpinners.forEach(spinner => spinner.classList.remove('pp-loading'));
+            // Reset UI
             fileInput.value = '';
             fileNameInput.value = '';
             outputInput.value = '';
             textArea.value = '';
             textArea.disabled = false;
+            
             processBtn.textContent = 'Process Document';
             processBtn.style.opacity = '1';
             processBtn.disabled = false;
@@ -686,15 +785,19 @@ function showPreprocessDialog() {
 }
 
 // ---------------------------------------------------------
-// COMPREHENSIVE PREVIEW LOGIC (Kept exactly as provided)
+// COMPREHENSIVE PREVIEW LOGIC (MinIO Integrated)
 // ---------------------------------------------------------
-function handleFilePreview(filename, previewContainer, formContainer) {
+async function handleFilePreview(filename, objectName, previewContainer, formContainer) {
     // 1. Switch Views
     formContainer.style.display = 'none';
     previewContainer.style.display = 'flex';
     previewContainer.innerHTML = '';
 
-    // 2. Header
+    // ⭐ Construct the Real URL
+    // We use encodeURIComponent to handle slashes/spaces in the MinIO object path safely
+    const fileUrl = `/api/storage/${objectName}`;
+
+    // 2. Header (Same as before)
     const header = document.createElement('div');
     header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:15px; border-bottom:1px solid #3a3a3a; background-color:#2a2a2a; flex-shrink:0;';
     
@@ -713,14 +816,17 @@ function handleFilePreview(filename, previewContainer, formContainer) {
 
     const btnGroup = document.createElement('div');
     
-    // Download/Open External Mock Button
-    const extBtn = document.createElement('button');
-    extBtn.innerHTML = '&#x2197; Open System';
-    extBtn.className = 'pp-btn pp-btn-secondary';
-    extBtn.style.marginRight = '10px';
-    extBtn.style.padding = '5px 10px';
-    extBtn.style.fontSize = '12px';
-    extBtn.onclick = () => alert(`Opening ${filename} in system viewer (simulation).`);
+    // Download Button (Points to the real file)
+    const downloadBtn = document.createElement('a');
+    downloadBtn.href = fileUrl;
+    downloadBtn.download = filename; // Suggests filename to browser
+    downloadBtn.innerHTML = '⬇ Download';
+    downloadBtn.className = 'pp-btn pp-btn-secondary';
+    downloadBtn.style.marginRight = '10px';
+    downloadBtn.style.padding = '5px 10px';
+    downloadBtn.style.fontSize = '12px';
+    downloadBtn.style.textDecoration = 'none';
+    downloadBtn.target = '_blank';
     
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '✕ Close';
@@ -731,7 +837,7 @@ function handleFilePreview(filename, previewContainer, formContainer) {
         previewContainer.style.display = 'none';
         formContainer.style.display = 'block';
     };
-    btnGroup.appendChild(extBtn);
+    btnGroup.appendChild(downloadBtn);
     btnGroup.appendChild(closeBtn);
     header.appendChild(btnGroup);
     previewContainer.appendChild(header);
@@ -742,13 +848,13 @@ function handleFilePreview(filename, previewContainer, formContainer) {
 
     const ext = filename.split('.').pop().toLowerCase();
 
-    // --- RENDER LOGIC ---
+    // --- RENDER LOGIC (UPDATED WITH REAL URLS) ---
 
     // 1. IMAGES
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
         const img = document.createElement('img');
-        img.src = `https://placehold.co/600x400/3a3a3a/e0e0e0?text=${filename}`; 
-        img.style.cssText = 'max-width:100%; max-height:100%; border:1px solid #3a3a3a; box-shadow:0 5px 15px rgba(0,0,0,0.3); border-radius:4px;';
+        img.src = fileUrl; // ⭐ Real URL
+        img.style.cssText = 'max-width:100%; max-height:100%; border:1px solid #3a3a3a; box-shadow:0 5px 15px rgba(0,0,0,0.3); border-radius:4px; object-fit: contain;';
         contentArea.appendChild(img);
     } 
     // 2. VIDEO
@@ -756,18 +862,9 @@ function handleFilePreview(filename, previewContainer, formContainer) {
         const video = document.createElement('video');
         video.controls = true;
         video.style.cssText = 'max-width:100%; max-height:100%; border-radius:8px; outline:none; background:#000;';
-        video.src = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"; 
+        video.src = fileUrl; // ⭐ Real URL
         
-        const note = document.createElement('div');
-        note.innerHTML = '<small style="color:#666;">Playing sample video from remote source</small>';
-        note.style.position = 'absolute';
-        note.style.bottom = '10px';
-        
-        const container = document.createElement('div');
-        container.style.cssText = 'display:flex; flex-direction:column; align-items:center; width:100%; height:100%; justify-content:center;';
-        container.appendChild(video);
-        container.appendChild(note);
-        contentArea.appendChild(container);
+        contentArea.appendChild(video);
     }
     // 3. AUDIO
     else if (['mp3', 'wav', 'aac', 'flac'].includes(ext)) {
@@ -783,11 +880,10 @@ function handleFilePreview(filename, previewContainer, formContainer) {
         const audio = document.createElement('audio');
         audio.controls = true;
         audio.style.width = '300px';
-        // Mock source
-        audio.src = ""; 
+        audio.src = fileUrl; // ⭐ Real URL
         
         const msg = document.createElement('p');
-        msg.textContent = "Audio Preview Player";
+        msg.textContent = filename;
         msg.style.color = '#b0b0b0';
 
         container.appendChild(icon);
@@ -797,31 +893,64 @@ function handleFilePreview(filename, previewContainer, formContainer) {
     }
     // 4. PDF (Embedded)
     else if (['pdf'].includes(ext)) {
-        const embed = document.createElement('embed');
-        // Mock PDF URL
-        embed.src = "https://pdfobject.com/pdf/sample.pdf"; 
-        embed.type = "application/pdf";
+        const embed = document.createElement('iframe'); // iframe is often more reliable for PDF blobs/streams
+        embed.src = fileUrl; // ⭐ Real URL
         embed.style.cssText = "width:100%; height:100%; border:none; border-radius:4px;";
         
         contentArea.style.padding = '0';
         contentArea.style.display = 'block';
         contentArea.appendChild(embed);
     }
-    // 5. DATA (CSV) - Mock Table
-    else if (['csv', 'tsv'].includes(ext)) {
-        contentArea.style.alignItems = 'flex-start';
-        contentArea.appendChild(createMockTable(filename));
-    }
-    // 6. CODE / TEXT / DATA FILES
+    // 5. TEXT / CODE FILES (Fetch content)
     else if (['txt', 'md', 'js', 'json', 'py', 'html', 'css', 'xml', 'yaml', 'yml', 'sh', 'sql', 'java', 'c', 'cpp'].includes(ext)) {
         contentArea.style.alignItems = 'flex-start';
         
         const pre = document.createElement('pre');
         pre.style.cssText = 'width:100%; margin:0; white-space:pre-wrap; font-family:"Consolas", "Monaco", monospace; font-size:13px; text-align:left; background-color:#2a2a2a; color:#d4d4d4; padding:20px; border-radius:6px; border:1px solid #3a3a3a;';
+        pre.textContent = "Loading content...";
         
-        pre.textContent = generateMockCode(ext, filename);
+        // ⭐ Fetch the text content from the API
+        try {
+            const response = await fetch(fileUrl);
+            if (response.ok) {
+                const text = await response.text();
+                pre.textContent = text;
+            } else {
+                pre.textContent = `Error loading file: ${response.statusText}`;
+            }
+        } catch (e) {
+            pre.textContent = "Failed to load file content.";
+        }
+
         contentArea.appendChild(pre);
     }
+
+    // 6. DATA (CSV/TSV) - Real Table Render
+    else if (['csv', 'tsv', 'xls', 'xlsx'].includes(ext)) {
+        contentArea.style.alignItems = 'flex-start';
+        contentArea.innerHTML = '<div style="color:#aaa; padding:20px;">Loading data table...</div>';
+        
+        try {
+            const response = await fetch(fileUrl);
+            if (response.ok) {
+                const text = await response.text();
+                contentArea.innerHTML = ''; // Clear loading message
+                
+                // Determine delimiter based on extension
+                const delimiter = ext === 'tsv' ? '\t' : ',';
+                
+                // Render the table
+                const tableContainer = renderCSVToTable(text, delimiter);
+                contentArea.appendChild(tableContainer);
+            } else {
+                contentArea.innerHTML = `<div style="color:#ff6b6b;">Error loading data: ${response.statusText}</div>`;
+            }
+        } catch (e) {
+            console.error(e);
+            contentArea.innerHTML = '<div style="color:#ff6b6b;">Failed to load file content.</div>';
+        }
+    }
+
     // 7. FALLBACK
     else {
         const fallback = document.createElement('div');
@@ -830,7 +959,8 @@ function handleFilePreview(filename, previewContainer, formContainer) {
         fallback.innerHTML = `
             <div style="font-size: 48px; margin-bottom: 15px;">📄</div>
             <h3 style="color:#e0e0e0">No Preview Available</h3>
-            <p>The file format <b>.${ext}</b> is not supported for quick preview.</p>
+            <p>The file format <b>.${ext}</b> is not supported for web preview.</p>
+            <a href="${fileUrl}" target="_blank" style="color: #4CAF50; text-decoration: none; border: 1px solid #4CAF50; padding: 8px 16px; border-radius: 4px; margin-top: 10px; display: inline-block;">Download File</a>
         `;
         contentArea.appendChild(fallback);
     }
@@ -852,48 +982,115 @@ function generateMockCode(ext, filename) {
 }
 
 // ---------------------------------------------------------
-// HELPER: Mock Table Generator (Dark Theme)
+// HELPER: Real CSV/TSV Renderer (Excel-like)
 // ---------------------------------------------------------
-function createMockTable(filename) {
-    const tableWrapper = document.createElement('div');
-    tableWrapper.style.width = '100%';
-    
+function renderCSVToTable(csvText, delimiter = ',') {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'width:100%; height:100%; overflow:auto; background-color:#1e1e1e;';
+
     const table = document.createElement('table');
-    table.style.cssText = 'width:100%; border-collapse:collapse; font-size:13px; color:#e0e0e0;';
+    table.style.cssText = 'border-collapse:separate; border-spacing:0; width:100%; font-size:13px; color:#e0e0e0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;';
+
+    // Simple CSV Parser (Handles basic quotes, newlines)
+    // NOTE: For very complex CSVs, a library like PapaParse is recommended.
+    // This is a robust vanilla implementation for preview purposes.
+    const rows = [];
+    let currentRow = [];
+    let currentCell = '';
+    let insideQuote = false;
     
-    const thead = document.createElement('thead');
-    thead.innerHTML = `
-        <tr style="background-color:#2a2a2a; text-align:left;">
-            <th style="padding:10px; border-bottom:1px solid #4a4a4a;">ID</th>
-            <th style="padding:10px; border-bottom:1px solid #4a4a4a;">Name</th>
-            <th style="padding:10px; border-bottom:1px solid #4a4a4a;">Date</th>
-            <th style="padding:10px; border-bottom:1px solid #4a4a4a;">Status</th>
-        </tr>
-    `;
-    
-    const tbody = document.createElement('tbody');
-    for(let i=1; i<=10; i++) {
-        const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid #3a3a3a';
-        tr.innerHTML = `
-            <td style="padding:10px;">${1000 + i}</td>
-            <td style="padding:10px;">Item_Entry_${i}</td>
-            <td style="padding:10px;">2024-10-${i < 10 ? '0'+i : i}</td>
-            <td style="padding:10px;"><span style="color:#0a8276; font-weight:bold;">Active</span></td>
-        `;
-        tbody.appendChild(tr);
+    // Normalize newlines
+    const text = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+
+        if (char === '"') {
+            if (insideQuote && nextChar === '"') {
+                currentCell += '"'; // Escaped quote
+                i++;
+            } else {
+                insideQuote = !insideQuote;
+            }
+        } else if (char === delimiter && !insideQuote) {
+            currentRow.push(currentCell);
+            currentCell = '';
+        } else if (char === '\n' && !insideQuote) {
+            currentRow.push(currentCell);
+            rows.push(currentRow);
+            currentRow = [];
+            currentCell = '';
+        } else {
+            currentCell += char;
+        }
     }
-    
+    // Push last cell/row if exists
+    if (currentCell || currentRow.length > 0) {
+        currentRow.push(currentCell);
+        rows.push(currentRow);
+    }
+
+    // Performance Guard: Limit rows for preview to prevent browser freezing
+    const MAX_PREVIEW_ROWS = 2000;
+    const displayRows = rows.slice(0, MAX_PREVIEW_ROWS);
+
+    // --- DOM GENERATION ---
+    const thead = document.createElement('thead');
+    const tbody = document.createElement('tbody');
+
+    displayRows.forEach((rowCols, rowIndex) => {
+        const tr = document.createElement('tr');
+        
+        rowCols.forEach((cellData, colIndex) => {
+            const cell = rowIndex === 0 ? document.createElement('th') : document.createElement('td');
+            
+            // Clean up styling
+            cell.textContent = cellData.trim();
+            cell.style.border = '1px solid #3a3a3a';
+            cell.style.padding = '6px 10px';
+            cell.style.whiteSpace = 'nowrap';
+            cell.style.maxWidth = '300px';
+            cell.style.overflow = 'hidden';
+            cell.style.textOverflow = 'ellipsis';
+            
+            if (rowIndex === 0) {
+                // Header Styling
+                cell.style.backgroundColor = '#2d2d2d';
+                cell.style.fontWeight = 'bold';
+                cell.style.position = 'sticky'; // Sticky Header
+                cell.style.top = '0';
+                cell.style.zIndex = '2';
+                cell.style.borderBottom = '2px solid #555';
+            } else {
+                // Body Styling
+                // Excel-like row numbering column logic could go here
+                cell.style.backgroundColor = rowIndex % 2 === 0 ? '#1e1e1e' : '#252525'; // Zebra striping
+            }
+
+            tr.appendChild(cell);
+        });
+        
+        if (rowIndex === 0) thead.appendChild(tr);
+        else tbody.appendChild(tr);
+    });
+
     table.appendChild(thead);
     table.appendChild(tbody);
-    tableWrapper.appendChild(table);
-    
-    const note = document.createElement('div');
-    note.textContent = `Preview of first 10 rows from ${filename}`;
-    note.style.cssText = 'margin-top:10px; color:#666; font-size:12px; font-style:italic;';
-    tableWrapper.appendChild(note);
-    
-    return tableWrapper;
+    wrapper.appendChild(table);
+
+    // Add footer note if truncated
+    if (rows.length > MAX_PREVIEW_ROWS) {
+        const note = document.createElement('div');
+        note.style.padding = '10px';
+        note.style.color = '#888';
+        note.style.fontStyle = 'italic';
+        note.style.textAlign = 'center';
+        note.textContent = `Preview truncated. Showing first ${MAX_PREVIEW_ROWS} of ${rows.length} rows.`;
+        wrapper.appendChild(note);
+    }
+
+    return wrapper;
 }
 
 // ---------------------------------------------------------
@@ -910,6 +1107,45 @@ function getIconForFile(filename) {
     if (['zip','rar','7z'].includes(ext)) return '📦';
     if (['html','css','js','py','java','c','cpp'].includes(ext)) return '💻';
     return '📄';
+}
+
+// Global state for document search: 'none', 'searchDoc', 'searchdocAll'
+globalThis.docSearchState = 'none'; 
+
+// Helper function to update Button UI and Placeholder based on state
+function updateDocSearchUI(state) {
+    const btn = document.getElementById('documentSearch');
+    const input = document.getElementById('userInput');
+    
+    if (!btn || !input) return;
+
+    // 1. Remove all active classes
+    btn.classList.remove('state-my-doc', 'state-all-doc', 'active'); 
+
+    // 2. Apply new state style and text
+    globalThis.docSearchState = state;
+
+    switch (state) {
+        case 'searchDoc':
+            btn.classList.add('state-my-doc'); // Green
+            btn.title = "Searching: Selected Documents";
+            input.placeholder = "Ask about Selected documents...";
+            console.log("Search Mode: Selected Documents");
+            break;
+            
+        case 'searchdocAll':
+            btn.classList.add('state-all-doc'); // Purple
+            btn.title = "Searching: ENTIRE Knowledge Base";
+            input.placeholder = "Ask the KNOWLEDGE BASE...";
+            console.log("Search Mode: ALL Documents");
+            break;
+            
+        default: // 'none'
+            btn.title = "Document Search: OFF";
+            input.placeholder = "Ask any question...";
+            console.log("Search Mode: OFF");
+            break;
+    }
 }
 
 window.showPreprocessDialog = showPreprocessDialog;

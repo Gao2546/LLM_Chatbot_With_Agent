@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS chat_history (
     message TEXT NOT NULL,
     chat_mode VARCHAR(255),
     chat_model VARCHAR(255),
+    doc_search_method VARCHAR(255),
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_chat_user
         FOREIGN KEY (user_id)
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     object_name TEXT UNIQUE NOT NULL, -- Stores the unique key in MinIO
     mime_type VARCHAR(255),
     file_size_bytes BIGINT,
+    active_users INTEGER[] DEFAULT ARRAY[]::INTEGER[], -- <<< NEW COLUMN FOR ACTIVE USERS
     uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_file_user
@@ -484,9 +486,9 @@ async function getUserByEmail(email: string) {
 }
 
 
-async function newChatHistory(userId: number) {
-  const query = 'INSERT INTO chat_history (user_id, message) VALUES ($1, \'\') RETURNING id';
-  const values = [userId];
+async function newChatHistory(userId: number, selectedDocSearchMethod: string) {
+  const query = 'INSERT INTO chat_history (user_id, message, doc_search_method) VALUES ($1, \'\', $2) RETURNING id';
+  const values = [userId, selectedDocSearchMethod];
 
   try {
     const result = await pool.query(query, values);
@@ -524,7 +526,7 @@ async function listChatHistory(userId: number) {
 }
 
 async function readChatHistory(chatId: number) {
-  const query = 'SELECT message, timestamp, chat_mode, chat_model FROM chat_history WHERE id = $1';
+  const query = 'SELECT message, timestamp, chat_mode, chat_model, doc_search_method FROM chat_history WHERE id = $1';
   const values = [chatId];
 
   try {
@@ -787,7 +789,7 @@ async function deleteAllGuestUsersAndChats() {
 
 async function getFilesByChatId(chatId: number) {
   const query = `
-    SELECT id, file_name, object_name, mime_type, file_size_bytes, uploaded_at 
+    SELECT id, file_name, object_name, mime_type, file_size_bytes, active_users, uploaded_at 
     FROM uploaded_files 
     WHERE chat_history_id = $1 
     ORDER BY uploaded_at DESC
@@ -800,6 +802,80 @@ async function getFilesByChatId(chatId: number) {
     throw error;
   }
 }
+
+// =================================================================================
+// ⭐ NEW FUNCTIONS FOR ACTIVE USERS MANAGEMENT ⭐
+// =================================================================================
+
+/**
+ * Appends a user ID to the active_users array for a specific file.
+ * Prevents duplicates (only adds if not already present).
+ */
+async function addActiveUserToFile(fileId: number, userId: number) {
+  const query = `
+    UPDATE uploaded_files
+    SET active_users = CASE
+        WHEN NOT ($1 = ANY(active_users)) THEN array_append(active_users, $1)
+        ELSE active_users
+    END
+    WHERE id = $2
+    RETURNING active_users;
+  `;
+  try {
+    const result = await pool.query(query, [userId, fileId]);
+    return result.rows[0]?.active_users || [];
+  } catch (error) {
+    console.error(`Error adding active user ${userId} to file ${fileId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Removes a user ID from the active_users array for a specific file.
+ */
+async function removeActiveUserFromFile(fileId: number, userId: number) {
+  const query = `
+    UPDATE uploaded_files
+    SET active_users = array_remove(active_users, $1)
+    WHERE id = $2
+    RETURNING active_users;
+  `;
+  try {
+    const result = await pool.query(query, [userId, fileId]);
+    return result.rows[0]?.active_users || [];
+  } catch (error) {
+    console.error(`Error removing active user ${userId} from file ${fileId}:`, error);
+    throw error;
+  }
+}
+
+async function getDocSearchStatus(chatID: number) {
+  const query = 'SELECT doc_search_method FROM chat_history WHERE id = $1';
+  const values = [chatID];
+
+  try {
+    const result = await pool.query(query, values);
+    console.log(`DB: Retrieved document search method for chat history ${chatID}: ${result.rows[0]?.doc_search_method ?? null}`);
+    return result.rows[0]?.doc_search_method ?? null;
+  } catch (error) {
+    console.error('Error getting document search method:', error);
+    throw error;
+  }
+}
+
+async function setDocSearchStatus(chatID: number, method: string) {
+  const query = 'UPDATE chat_history SET doc_search_method = $1 WHERE id = $2';
+  const values = [method, chatID];
+
+  try {
+    await pool.query(query, values);
+    console.log(`DB: Document search method for chat history ${chatID} updated to ${method}`);
+  } catch (error) {
+    console.error('Error setting document search method:', error);
+    throw error;
+  }
+}
+
 
 // These startup cleanup functions can be run if needed.
 // await deleteAllGuestUsersAndChats();
@@ -839,6 +915,10 @@ export {
   getFileInfoByObjectName, // <-- Added new function here
   deleteFile,
   getFilesByChatId,
+  addActiveUserToFile,
+  removeActiveUserFromFile,
+  getDocSearchStatus,
+  setDocSearchStatus,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

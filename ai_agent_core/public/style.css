@@ -416,24 +416,65 @@ thinking {
 }
 
 /* --- NEW: Document Search Button Styles --- */
+
+/* --- Base Button Style (None/Default State) --- */
 #documentSearch {
-    border-right: none !important; /* Remove old separator border */
-    border-radius: 8px !important;
-    align-self: center !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    opacity: 0.7;
+    position: relative;
 }
 
-#documentSearch.active {
-    background-color: rgba(10, 130, 118, 0.2) !important;
-    color: #0a8276 !important;
+/* Default Icon: Search */
+/* This ensures that when no state class is present, it shows the search glass */
+#documentSearch i::before {
+    content: "\f002"; /* FontAwesome code for 'fa-search' */
 }
 
+/* Base Hover */
 #documentSearch:hover {
     background-color: #4a4a4a;
     color: #e0e0e0;
+    opacity: 1;
 }
 
-#documentSearch.active:hover {
-    background-color: #086b61;
+/* --- STATE 1: My Documents (Local/Focus) --- */
+/* Meaning: Selected, Active, Current Context */
+#documentSearch.state-my-doc {
+    background-color: rgba(10, 130, 118, 0.2) !important; /* Subtle Teal Background */
+    color: #0a8276 !important; /* Theme Teal Text */
+    border-color: #0a8276 !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 10px rgba(10, 130, 118, 0.1);
+}
+
+#documentSearch.state-my-doc:hover {
+    background-color: #0a8276 !important;
+    color: white !important;
+}
+
+/* Icon: Check Mark */
+#documentSearch.state-my-doc i::before {
+    content: "\f00c" !important; /* Force override */
+}
+
+/* --- STATE 2: All Documents (Global/Broad) --- */
+/* Meaning: World, Network, Everything */
+#documentSearch.state-all-doc {
+    background-color: rgba(92, 139, 214, 0.2) !important; /* Subtle Blue Background */
+    color: #5c8bd6 !important; /* Slate Blue Text */
+    border-color: #5c8bd6 !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 10px rgba(92, 139, 214, 0.1);
+}
+
+#documentSearch.state-all-doc:hover {
+    background-color: #5c8bd6 !important;
+    color: white !important;
+}
+
+/* Icon: Globe */
+#documentSearch.state-all-doc i::before {
+    content: "\f0ac" !important; /* Force override */
 }
 
 /* --- UPDATE: User Input Styling to fit with button --- */
@@ -1593,23 +1634,27 @@ strong {
 
 /* The container for the status icon */
 .pp-doc-status {
-    width: 16px;
-    height: 16px;
-    margin-right: 10px; /* Space between status and delete button */
-    display: none;      /* Hidden by default */
+    width: 18px;
+    height: 18px;
+    margin-right: 10px; 
+    display: none; /* Hidden by default */
     flex-shrink: 0;
 }
 
-/* The loading spinner style */
+/* When active, show it */
+.pp-doc-status.pp-loading {
+    display: inline-block;
+}
+
+/* The loading spinner style (Rotating Ring) */
 .pp-loading {
-    display: inline-block; /* Make visible */
-    border: 2px solid rgba(10, 130, 118, 0.2); /* Faint Teal Track */
-    border-top: 2px solid #0a8276; /* Bright Teal Spinner */
+    box-sizing: border-box;
+    border: 2px solid rgba(10, 130, 118, 0.2); /* Faint track */
+    border-top: 2px solid #0a8276; /* Active color */
     border-radius: 50%;
     animation: ppSpin 0.8s linear infinite;
 }
 
-/* Keyframes for rotation */
 @keyframes ppSpin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }

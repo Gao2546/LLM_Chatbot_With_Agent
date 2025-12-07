@@ -54,7 +54,9 @@ from vllm.inputs.data import TextPrompt
 
 dotenv.load_dotenv()
 
-LOCAL = os.getenv("LOCAL",True)
+LOCAL = os.getenv("LOCAL", True)
+
+LOCAL = True if LOCAL == "True" else False
 
 # Function to calculate parameter memory
 def get_model_memory(model):
@@ -1295,7 +1297,7 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 #  DEEPINFRA FUNCTION (Updated)
 # ==============================================================================
 
-def DeepInfraInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "deepseek-ai/DeepSeek-OCR") -> str:
+def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "deepseek-ai/DeepSeek-OCR") -> str:
     """
     Perform inference using DeepInfra's OpenAI-compatible API.
     This version supports optional MULTIPLE image input for VLM, resizing,
@@ -2796,7 +2798,236 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
             conn.close()
 
 
+# ==============================================================================
+#  SEARCH BY ACTIVE USER FUNCTIONS (METHOD: searchDoc)
+# ==============================================================================
 
+def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5):
+    """
+    Legacy Text Search: Finds text chunks in files where the user is an 'active_user'.
+    """
+    # Encode query
+    query_embedding = encode_text_for_embedding(query_text)
+    query_vector = f"[{', '.join(map(str, query_embedding))}]"
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn: raise Exception("DB Connection failed")
+        cur = conn.cursor()
+
+        # JOIN uploaded_files and filter by active_users array using ANY()
+        query = """
+            SELECT
+                t1.id,
+                t2.file_name,
+                t1.extracted_text,
+                t1.embedding <=> %s AS distance
+            FROM document_embeddings AS t1
+            INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
+            WHERE %s = ANY(t2.active_users)
+            ORDER BY distance
+            LIMIT %s
+        """
+        cur.execute(query, (query_vector, user_id, top_k))
+        results = cur.fetchall()
+        cur.close()
+
+        return [
+            {'id': row[0], 'file_name': row[1], 'text': row[2], 'distance': row[3]}
+            for row in results
+        ]
+    except Exception as e:
+        print(f"Error in search_similar_documents_by_active_user: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+    """
+    New Page Search: Finds document pages (images) in files where the user is an 'active_user'.
+    """
+    # 1. Generate Query Embedding (CLIP/Jina)
+    if not LOCAL:
+        query_embedding = get_image_embedding_jinna_api(text=query_text)
+    else:
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+
+    if not query_embedding: return []
+
+    query_vector = f"[{', '.join(map(str, query_embedding))}]"
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn: raise Exception("DB Connection failed")
+        cur = conn.cursor()
+
+        # 2. Search DB (Filter by active_users)
+        query = """
+            SELECT 
+                t1.id AS page_embedding_id, 
+                t2.file_name, 
+                t2.object_name,
+                t1.page_number,
+                t1.embedding <-> %s AS distance
+            FROM document_page_embeddings AS t1
+            INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
+            WHERE %s = ANY(t2.active_users)
+              AND (t1.embedding <-> %s) <= %s
+            ORDER BY distance
+            LIMIT %s
+        """
+        cur.execute(query, (query_vector, user_id, query_vector, threshold, top_k))
+        results = cur.fetchall()
+        cur.close()
+
+        # 3. Normalize & Filter (Same logic as standard search)
+        if not results: return []
+
+        all_distances = [row[4] for row in results]
+        min_dist = min(all_distances)
+        max_dist = max(all_distances)
+        dist_range = max_dist - min_dist
+        
+        processed_results = []
+        for row in results:
+            original_distance = row[4]
+            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'normalized_distance': normalized_distance
+            })
+        
+        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
+        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        
+        return final_filtered_results
+
+    except Exception as e:
+        print(f"Error in search_similar_pages_by_active_user: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5):
+    """
+    Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
+    """
+    # Encode query
+    query_embedding = encode_text_for_embedding(query_text)
+    query_vector = f"[{', '.join(map(str, query_embedding))}]"
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn: raise Exception("DB Connection failed")
+        cur = conn.cursor()
+
+        # JOIN uploaded_files and filter by active_users array using ANY()
+        query = """
+            SELECT
+                t1.id,
+                t2.file_name,
+                t1.extracted_text,
+                t1.embedding <=> %s AS distance
+            FROM document_embeddings AS t1
+            INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
+            WHERE %s = t2.chat_history_id
+            ORDER BY distance
+            LIMIT %s
+        """
+        cur.execute(query, (query_vector, -1, top_k))
+        results = cur.fetchall()
+        cur.close()
+
+        return [
+            {'id': row[0], 'file_name': row[1], 'text': row[2], 'distance': row[3]}
+            for row in results
+        ]
+    except Exception as e:
+        print(f"Error in search_similar_documents_by_active_user_all: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+    """
+    New Page Search: Finds document pages (images) in all files where the user is an 'active_user'.
+    """
+    # 1. Generate Query Embedding (CLIP/Jina)
+    if not LOCAL:
+        query_embedding = get_image_embedding_jinna_api(text=query_text)
+    else:
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+
+    if not query_embedding: return []
+
+    query_vector = f"[{', '.join(map(str, query_embedding))}]"
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn: raise Exception("DB Connection failed")
+        cur = conn.cursor()
+
+        # 2. Search DB (Filter by active_users)
+        query = """
+            SELECT 
+                t1.id AS page_embedding_id, 
+                t2.file_name, 
+                t2.object_name,
+                t1.page_number,
+                t1.embedding <-> %s AS distance
+            FROM document_page_embeddings AS t1
+            INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
+            WHERE %s = t2.chat_history_id
+              AND (t1.embedding <-> %s) <= %s
+            ORDER BY distance
+            LIMIT %s
+        """
+        cur.execute(query, (query_vector, -1, query_vector, threshold, top_k))
+        results = cur.fetchall()
+        cur.close()
+
+        # 3. Normalize & Filter (Same logic as standard search)
+        if not results: return []
+
+        all_distances = [row[4] for row in results]
+        min_dist = min(all_distances)
+        max_dist = max(all_distances)
+        dist_range = max_dist - min_dist
+        
+        processed_results = []
+        for row in results:
+            original_distance = row[4]
+            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'normalized_distance': normalized_distance
+            })
+        
+        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
+        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        return final_filtered_results
+    except Exception as e:
+        print(f"Error in search_similar_pages_by_active_user_all: {e}")
+        return []
+    finally:
+        if conn: conn.close()
 
 # def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
 #     """
@@ -3006,7 +3237,7 @@ def process_pages_with_vlm(search_results: List[Dict[str, Any]], original_query:
         # 2. Extract the specific page as an image
         # Page number is 1-indexed in DB, convert to 0-indexed for fitz
         page_num_0_idx = page_num_1_idx - 1 
-        image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
+        image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
         
         if image_bytes:
             image_bytes_list.append(image_bytes)
@@ -3166,6 +3397,7 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
     
     reference_text = "\n".join(page_references)
     prompt = f"""
+file name : {file_name}
 Based on the following {len(image_bytes_list)} document pages:
 {reference_text}
 
@@ -3184,6 +3416,8 @@ Provide your response in Markdown format, following the tagging guidelines provi
             image_bytes_list=image_bytes_list,
             model_name="Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
         )
+        print("DeepInfra VLM response received.")
+        print(vlm_response)
     else:
          # System prompt for OpenRouter VLM
         system_prompt = ("You're an image expert."
@@ -3197,8 +3431,24 @@ Provide your response in Markdown format, following the tagging guidelines provi
             system_prompt=system_prompt,
         )
         vlm_response = "\n\n".join(vlm_response)
+    # for batch processing
+
+    # response_vlm_list = []
+    # for idx, resp in enumerate(vlm_response):
+    #     response_vlm_list.append({
+    #         'id': search_results[idx].get('page_embedding_id'),
+    #         'file_name': search_results[idx].get('file_name'),
+    #         # 'object_name': search_results[idx].get('object_name'),
+    #         # 'page_number': search_results[idx].get('page_number'),
+    #         'text': resp,
+    #         'distance': search_results[idx].get('distance'),
+    #         # 'normalized_distance': search_results[idx].get('normalized_distance'),
+    #         # 'description': resp
+    #     })
+    # vlm_response = "\n\n".join(vlm_response)
     print("✅ VLM processing complete.")
     
+    # return vlm_response
     return vlm_response
 
 
