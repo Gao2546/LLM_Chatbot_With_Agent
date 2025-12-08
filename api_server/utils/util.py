@@ -84,9 +84,30 @@ def clear_gpu():
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
+# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
 # model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
+
+# 1. Define the 4-bit configuration
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",      # Normalized Float 4 (best for accuracy)
+    bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
+    bnb_4bit_use_double_quant=True  # Saves a bit more memory
+)
+
+# 2. Load the model with the config
+model = SentenceTransformer(
+    "jinaai/jina-embeddings-v4",
+    trust_remote_code=True,
+    model_kwargs={
+        "default_task": "retrieval",
+        "quantization_config": bnb_config,
+        "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
+    },
+    # Note: 'device=device' is removed because device_map="auto" handles it
+    # device="cpu"
+)
 clear_gpu()
 # model = LLM(
 #     model="jinaai/jina-embeddings-v4-vllm-retrieval",
@@ -157,7 +178,9 @@ clear_gpu()
 
 # model = SentenceTransformer(modules=[base_model], device = device)
 
-# uses_mem = get_model_memory(model)
+print(model)
+
+uses_mem = get_model_memory(model)
 
 # Now move to GPU
 # model.to(device)
@@ -1768,8 +1791,10 @@ Output only the descriptive paragraph. No introductory text.
 
             # Encode text
             # Task 'retrieval.query' optimizes the embedding for finding matching documents
+            # model.to(device)
             with torch.no_grad():
                 embedding = model.encode([search_text], task="retrieval",convert_to_numpy=True)
+                # model.to("cpu")
                 clear_gpu()
             
             # Convert numpy array to list
@@ -1788,8 +1813,10 @@ Output only the descriptive paragraph. No introductory text.
             # Encode images (Batch processing is handled automatically by SentenceTransformer)
             # Task 'retrieval.passage' optimizes the embedding for being indexed
             # Note: Ensure the specific Jina model supports image inputs (like Jina-CLIP or specific V4 variants)
+            # model.to(device)
             with torch.no_grad():
                 embeddings = model.encode(pil_images,batch_size=1, convert_to_numpy=True) # task="retrieval.passage" is implied for non-query inputs usually, or add if model supports
+                # model.to("cpu")
                 clear_gpu()
             
             print(f"✅ Generated {len(embeddings)} Jina v4 embeddings for images.")
@@ -2531,7 +2558,9 @@ def encode_text_for_embedding(text: str) -> list[float]:
     
     # --- FALLBACK: Original SentenceTransformer logic ---
     print("Generating embedding using local SentenceTransformer model.")
-    embedding = model.encode(text,device='cpu',task='retrieval')
+    # model.to(device)
+    embedding = model.encode(text,device=device,task='retrieval')
+    # model.to("cpu")
     return embedding.tolist()
 
 def clean_text(input_text: str) -> str:
@@ -3547,6 +3576,7 @@ def ollama_describe_image(image_bytes: Union[bytes, List[bytes]], model: str = "
     Returns:
         Description text(s) or error message(s).
     """
+    clear_gpu()
     if isinstance(image_bytes, bytes):
         images = [image_bytes]
         single = True
@@ -3580,7 +3610,7 @@ def ollama_describe_image(image_bytes: Union[bytes, List[bytes]], model: str = "
         except Exception as e:
             results.append(f"An unexpected error occurred: {e}")
         print(f"Description: {results[0]}")
-    
+    clear_gpu()
     return results[0] if single else results
 
 def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str = "llava", embed_model: str = "nomic-embed-text", prompt: str = "Describe this image in detail.") -> List[List[float]]:
