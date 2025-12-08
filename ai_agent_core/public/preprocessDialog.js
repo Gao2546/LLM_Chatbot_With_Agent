@@ -256,7 +256,7 @@ async function showPreprocessDialog() {
         const inputs = document.querySelectorAll('.pp-input, .pp-textarea');
         inputs.forEach(input => input.value = '');
         // Remove active class from all items
-        document.querySelectorAll('.pp-doc-item').forEach(item => item.classList.remove('active'));
+        // document.querySelectorAll('.pp-doc-item').forEach(item => item.classList.remove('active'));
         const preview = document.getElementById('pp-preview-view');
         const form = document.getElementById('pp-form-view');
         if(preview && form) {
