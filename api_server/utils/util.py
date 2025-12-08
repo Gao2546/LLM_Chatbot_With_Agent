@@ -920,7 +920,7 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     if not LOCAL:
         response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
-        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b", prompt=prompt, system_prompt=system_prompt)
+        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:4b-instruct", prompt=prompt, system_prompt=system_prompt)
     return response
 
 # ==============================================================================
@@ -1301,7 +1301,7 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
             final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
             vlm_response += ollama_describe_image(
                 image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
-                model="qwen3-vl:2b",
+                model="qwen3-vl:4b-instruct",
                 prompt=final_user_prompt,
                 system_prompt=vlm_system_prompt
                 )
@@ -3455,7 +3455,7 @@ Provide your response in Markdown format, following the tagging guidelines provi
         prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
         vlm_response = ollama_describe_image(
             image_bytes=image_bytes_list,
-            model="qwen3-vl:2b",
+            model="qwen3-vl:4b-instruct",
             prompt=prompt,
             system_prompt=system_prompt,
         )
