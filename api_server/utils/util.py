@@ -3602,8 +3602,8 @@ def ollama_describe_image(image_bytes: Union[bytes, List[bytes]], model: str = "
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            print("Raw output")
-            print(data)
+            # print("Raw output")
+            # print(data)
             results.append(data.get("response", "No description generated."))
         except requests.exceptions.RequestException as e:
             results.append(f"Error calling Ollama vision API: {e}")
