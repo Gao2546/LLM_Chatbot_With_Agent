@@ -55,6 +55,7 @@ from vllm.inputs.data import TextPrompt
 dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
+API_OLLAMA = os.getenv("API_OLLAMA", "http://127.0.0.1:11434/api/generate")
 
 LOCAL = True if LOCAL == "True" else False
 
@@ -84,99 +85,33 @@ def clear_gpu():
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
-# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
+model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
 # model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
 
+# Quantization model
+
 # 1. Define the 4-bit configuration
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",      # Normalized Float 4 (best for accuracy)
-    bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
-    bnb_4bit_use_double_quant=True  # Saves a bit more memory
-)
-
-# 2. Load the model with the config
-model = SentenceTransformer(
-    "jinaai/jina-embeddings-v4",
-    trust_remote_code=True,
-    model_kwargs={
-        "default_task": "retrieval",
-        "quantization_config": bnb_config,
-        "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
-    },
-    # Note: 'device=device' is removed because device_map="auto" handles it
-    # device="cpu"
-)
-clear_gpu()
-# model = LLM(
-#     model="jinaai/jina-embeddings-v4-vllm-retrieval",
-#     task="auto",
-#     override_pooler_config=PoolerConfig(pooling_type="ALL", normalize=False),
-#     dtype="float16",
-# )
-# quantization_config = BitsAndBytesConfig(
-#     load_in_8bit=True,
-#     llm_int8_threshold=6.0,  # Adjust if needed for your use case
-#     llm_int8_has_fp16_weights=True,
-#     llm_int8_enable_fp32_cpu_offload=True,
+# bnb_config = BitsAndBytesConfig(
+#     load_in_4bit=True,
+#     bnb_4bit_quant_type="nf4",      # Normalized Float 4 (best for accuracy)
+#     bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
+#     bnb_4bit_use_double_quant=True  # Saves a bit more memory
 # )
 
-# quantization_config = BitsAndBytesConfig(
-#     load_in_4bit=True,  # Enable 4-bit
-#     bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
-#     bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
-#     bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
-#     bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
-# )
-
-# model = AutoModel.from_pretrained(
-#                 "nvidia/llama-nemoretriever-colembed-1b-v1",
-#                 device_map='cpu',#'cuda' if torch.cuda.is_available() else 'cpu',
-#                 trust_remote_code=True,
-#                 torch_dtype=torch.bfloat16,
-#                 quantization_config=quantization_config,
-#                 attn_implementation="flash_attention_2",
-#                 revision='1f0fdea7f5b19532a750be109b19072d719b8177'
-#             ).eval()
-# print("Model loaded successfully.")
-# model.to(device)
-# print(model)
-# print("Load model to device.")
-
-# processor = AutoProcessor.from_pretrained(
-#     "nvidia/llama-nemoretriever-colembed-1b-v1",
-#     trust_remote_code=True,
-#     revision='1f0fdea7f5b19532a750be109b19072d719b8177'
-# )
-
-# Optional: Configure 8-bit quantization (default settings work for most cases)
-# quantization_config = BitsAndBytesConfig(
-#     load_in_8bit=True,
-#     llm_int8_threshold=6.0,  # Adjust if needed for your use case
-#     llm_int8_has_fp16_weights=True,
-#     llm_int8_enable_fp32_cpu_offload=True,
-# )
-
-# Step 1: Configure INT4 quantization (signed 4-bit integers)
-# quantization_config = BitsAndBytesConfig(
-#     load_in_4bit=True,  # Enable 4-bit
-#     bnb_4bit_quant_type="nf4",  # Specifically INT4 (signed integers; use "nf4" if you want normalized floats instead)
-#     bnb_4bit_compute_dtype=torch.float16,  # Dequantize/compute in FP16 for better speed and accuracy
-#     bnb_4bit_use_double_quant=True,  # Optional: Nested quantization for ~0.4 extra bits savings
-#     bnb_4bit_quant_storage=torch.uint8  # Internal storage format (doesn't affect output precision)
-# )
-
-# base_model = AutoModel.from_pretrained(
+# # 2. Load the model with the config
+# model = SentenceTransformer(
 #     "jinaai/jina-embeddings-v4",
 #     trust_remote_code=True,
-#     quantization_config=quantization_config,
-#     device_map="cpu",  # Automatically maps to GPU (or CPU if needed)
-#     torch_dtype=torch.float16,  # Combine with FP16 for better perf
-#     # attn_implementation="sdpa"
+#     model_kwargs={
+#         "default_task": "retrieval",
+#         "quantization_config": bnb_config,
+#         "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
+#     },
+#     # Note: 'device=device' is removed because device_map="auto" handles it
+#     # device="cpu"
 # )
-
-# model = SentenceTransformer(modules=[base_model], device = device)
+clear_gpu()
 
 print(model)
 
@@ -3280,133 +3215,188 @@ def process_pages_with_vlm(search_results: List[Dict[str, Any]], original_query:
     # 3. Send all images to the VLM
     print(f"Sending {len(image_bytes_list)} images to VLM...")
 
+#     system_prompt = (
+# """You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
+
+# **Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
+
+# Your response must be a single, complete Markdown document representing the source file.
+
+# ### Your Guiding Principles
+
+# 1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
+
+# 2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
+
+#       * Headings (e.g., `# Title`, `## Subtitle`)
+#       * Paragraphs (plain text)
+#       * Lists (bulleted `*` or numbered `1.`)
+#       * Code blocks (using \`\`\` fences)
+#       * Bold (`**text**`) and Italic (`*text*`) styling.
+#       * Any and all text labels, captions, or annotations, in the exact place they appear.
+
+# 3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
+
+#       * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
+#       * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
+#       * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
+#           * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
+#           * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
+#       * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
+#       * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
+
+# 4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
+
+#       * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
+#         ```markdown
+#         <table>
+#         | Header 1 | Header 2 |
+#         |---|---|
+#         | Data 1 | Data 2 |
+#         </table>
+#         ```
+#       * **Charts:**
+#         ```markdown
+#         <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
+#         ```
+#       * **Images/Photos:**
+#         ```markdown
+#         <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
+#         ```
+#       * **Diagrams/Schematics (Your Most Important Tag):**
+#         ```markdown
+#         <diagram>
+#         A hyper-detailed, connection-by-connection transcription of the schematic.
+#         **Component 1 (e.g., Arduino):**
+#         * Pin 1 connects to...
+#         * Pin 2 connects to Resistor R1...
+#         **Component 2 (e.g., 7-Segment Display):**
+#         * Pin 'A' connects to the other end of Resistor R1...
+#         * Pin 'Common' connects to GND...
+#         (This transcription must trace all connections literally from the image.)
+#         </diagram>
+#         ```
+#       * **Logos:**
+#         ```markdown
+#         <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
+#         ```
+#       * **Signatures:**
+#         ```markdown
+#         <signature>A handwritten, illegible signature in blue ink.</signature>
+#         ```
+#       * **Stamps:**
+#         ```markdown
+#         <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
+#         ```
+
+# -----
+
+# ### *** Note ***
+# You must extract all content from the document.
+
+# ### Gold-Standard Example (Your Target Quality)
+
+# The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
+
+# **Your required output must be exactly in this format and at this level of detail:**
+
+# ```markdown
+# <diagram>
+# A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
+
+# **Connections from Arduino Board:**
+
+# * **To 7-Segment Display (via 300-ohm resistors):**
+#     * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
+#     * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
+#     * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
+#     * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
+#     * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
+#     * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
+#     * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
+# * **To Dip Switch 1 (Pull-Up Configuration):**
+#     * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
+#     * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
+#     * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
+#     * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
+#     * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
+
+# **Component Connections:**
+
+# * **7-Segment Display:**
+#     * Segments A, B, C, D, E, F, and G are connected as described above.
+#     * The common cathode pin (at the bottom) is connected to GND.
+# * **Dip Switch 1 ("ดิปสวิตช์1"):**
+#     * This is an 8-position switch block.
+#     * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
+#     * The other side of all 8 switches is connected to a common GND line.
+# * **Pull-Up Resistors (10K-ohm x 8):**
+#     * There are 8 10K-ohm resistors.
+#     * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
+#     * The other end of all 8 resistors is connected to a common +5V line.
+
+# **Power Pins:**
+# * The Arduino board shows a "USB JACK".
+# * A power pin block shows 3.3V, 5V, GND, GND, VIN.
+# * Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
+# </diagram>
+
+# รูปที่ 1
+
+# Lab 1
+# Dip Switch and 7-Segment
+
+# อุปกรณ์
+# 1. Arduino Board
+# 2. Digital Experiment Board
+# 3. 7-Segment Board
+
+# Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
+# 1.1 ต่อวงจร ตามรูปที่ 1
+# 1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
+# ```""")
     system_prompt = (
-"""You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
+"""You are an expert Document Analyst AI. Your task is to convert document images into structured Markdown sequentially (top-to-bottom).
 
-**Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
+**CORE DIRECTIVE: Literal, verbatim extraction only. DO NOT summarize, interpret, or omit any content.**
 
-Your response must be a single, complete Markdown document representing the source file.
+### Operational Rules
+1.  **Sequential Order:** Transcribe elements exactly as they appear (top-to-bottom, left-to-right).
+2.  **Verbatim Text:** Extract all text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
+3.  **Visual Deconstruction (CRITICAL):**
+    *   Convert visual elements (charts, diagrams) into text descriptions within specific tags.
+    *   **For Schematics/Diagrams:** You must perform a **component-by-component connection trace**. Explicitly state every pin and wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Never summarize the diagram's purpose; describe its structure.
 
-### Your Guiding Principles
+### Required Tags
+Use these tags to enclose literal descriptions of non-text elements:
+*   `<diagram>`: Detailed schematic connection tracing.
+*   `<table>`: Markdown tables.
+*   `<chart>`: Type, axes, legend, and data points.
+*   `<image>`, `<logo>`, `<signature>`, `<stamp>`: Literal visual description.
 
-1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
-
-2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
-
-      * Headings (e.g., `# Title`, `## Subtitle`)
-      * Paragraphs (plain text)
-      * Lists (bulleted `*` or numbered `1.`)
-      * Code blocks (using \`\`\` fences)
-      * Bold (`**text**`) and Italic (`*text*`) styling.
-      * Any and all text labels, captions, or annotations, in the exact place they appear.
-
-3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
-
-      * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
-      * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
-      * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
-          * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
-          * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
-      * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
-      * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
-
-4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
-
-      * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
-        ```markdown
-        <table>
-        | Header 1 | Header 2 |
-        |---|---|
-        | Data 1 | Data 2 |
-        </table>
-        ```
-      * **Charts:**
-        ```markdown
-        <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
-        ```
-      * **Images/Photos:**
-        ```markdown
-        <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
-        ```
-      * **Diagrams/Schematics (Your Most Important Tag):**
-        ```markdown
-        <diagram>
-        A hyper-detailed, connection-by-connection transcription of the schematic.
-        **Component 1 (e.g., Arduino):**
-        * Pin 1 connects to...
-        * Pin 2 connects to Resistor R1...
-        **Component 2 (e.g., 7-Segment Display):**
-        * Pin 'A' connects to the other end of Resistor R1...
-        * Pin 'Common' connects to GND...
-        (This transcription must trace all connections literally from the image.)
-        </diagram>
-        ```
-      * **Logos:**
-        ```markdown
-        <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
-        ```
-      * **Signatures:**
-        ```markdown
-        <signature>A handwritten, illegible signature in blue ink.</signature>
-        ```
-      * **Stamps:**
-        ```markdown
-        <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
-        ```
-
------
-
-### *** Note ***
-You must extract all content from the document.
-
-### Gold-Standard Example (Your Target Quality)
-
-The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
-
-**Your required output must be exactly in this format and at this level of detail:**
+### Gold-Standard Output Example
+**Output must match this level of detail:**
 
 ```markdown
 <diagram>
-A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
+A detailed circuit schematic showing connections between an Arduino-style board, a 7-Segment display, and a Dip Switch block.
 
-**Connections from Arduino Board:**
+**Connections:**
+* **Arduino to 7-Segment:**
+    * Pin A0 connects to a 300-ohm resistor -> 'A' segment pin.
+    * Pin A1 connects to a 300-ohm resistor -> 'B' segment pin.
+    * [List continues for all pins...]
+* **Arduino to Dip Switch (Pull-Up):**
+    * Pin 0/PD0 connects to Switch 1 and a 10K resistor to +5V.
+    * Pin 1/PD1 connects to Switch 2 and a 10K resistor to +5V.
+    * [List continues for all pins...]
 
-* **To 7-Segment Display (via 300-ohm resistors):**
-    * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
-    * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
-    * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
-    * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
-    * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
-    * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
-    * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
-* **To Dip Switch 1 (Pull-Up Configuration):**
-    * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
-    * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
-    * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
-    * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
-    * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
-    * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
-    * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
-    * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
-
-**Component Connections:**
-
-* **7-Segment Display:**
-    * Segments A, B, C, D, E, F, and G are connected as described above.
-    * The common cathode pin (at the bottom) is connected to GND.
-* **Dip Switch 1 ("ดิปสวิตช์1"):**
-    * This is an 8-position switch block.
-    * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
-    * The other side of all 8 switches is connected to a common GND line.
-* **Pull-Up Resistors (10K-ohm x 8):**
-    * There are 8 10K-ohm resistors.
-    * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
-    * The other end of all 8 resistors is connected to a common +5V line.
-
-**Power Pins:**
-* The Arduino board shows a "USB JACK".
-* A power pin block shows 3.3V, 5V, GND, GND, VIN.
-* Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
+**Components:**
+* **Dip Switch:** 8-position block. Common side connects to GND.
+* **Resistors:** 8x 10K-ohm (Pull-up) and 7x 300-ohm (Current limiting).
 </diagram>
 
 รูปที่ 1
@@ -3421,8 +3411,37 @@ Dip Switch and 7-Segment
 
 Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
 1.1 ต่อวงจร ตามรูปที่ 1
-1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
+1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง...
 ```""")
+    
+    system_prompt = (
+"""You are an expert Document Analyst AI converting images to structured Markdown.
+
+**CORE DIRECTIVE: Extract content sequentially and verbatim. NO summarization, interpretation, or omission.**
+
+### Operational Rules
+1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
+2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
+3.  **Visual Deconstruction (CRITICAL):**
+    *   Convert visuals into literal text descriptions inside specific tags.
+    *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
+
+### Required Tags
+*   `<diagram>`: Detailed schematic connection tracing.
+*   `<table>`: Markdown tables.
+*   `<chart>`: Type, axes, legend, and data points.
+*   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+""") #**********************************************
+    
+#     system_prompt = (
+# """You are a Document Analyst AI converting images to Markdown.
+
+# **DIRECTIVE: Extract all content sequentially and verbatim. DO NOT summarize.**
+
+# 1. **Text:** Transcribe exactly as written, preserving Markdown formatting (Headers, Lists, Code).
+# 2. **Visuals:** Describe structure literally within tags: `<table>`, `<chart>`, `<image>`.
+# 3. **Diagrams (CRITICAL):** Inside `<diagram>`, you must trace every connection pin-by-pin (e.g., "Pin A connects to Resistor R1..."). Describe the wiring details, not the concept.
+# """)
     
     reference_text = "\n".join(page_references)
     prompt = f"""
@@ -3432,30 +3451,35 @@ Based on the following {len(image_bytes_list)} document pages:
 
 Please extract data to markdown (keep all original data ignore not match content) for use to answer the question:
 "{original_query}"
+*** Do not answer the question. ***
 
 Provide your response in Markdown format, following the tagging guidelines provided in the system prompt.
 """
 
     # Use OpenRouterInference, which now accepts a list of images
     if not LOCAL:
-        # vlm_response = OpenRouterInference
+        # system_prompt = ("You're an image expert."
+        #                  "If the image contains text, extract and summarize it...")
+        # # Prompt for OpenRouter VLM
+        # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+        # vlm_response = OpenRouterInference(
         vlm_response = DeepInfraInference(
             prompt=prompt,
             system_prompt=system_prompt,
             image_bytes_list=image_bytes_list,
-            model_name="Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            model_name= 'Qwen/Qwen2.5-VL-32B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
         )
         print("DeepInfra VLM response received.")
         print(vlm_response)
     else:
-         # System prompt for OpenRouter VLM
-        system_prompt = ("You're an image expert."
-                         "If the image contains text, extract and summarize it...")
-        # Prompt for OpenRouter VLM
-        prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+        #  # System prompt for OpenRouter VLM
+        # system_prompt = ("You're an image expert."
+        #                  "If the image contains text, extract and summarize it...")
+        # # Prompt for OpenRouter VLM
+        # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
         vlm_response = ollama_describe_image(
             image_bytes=image_bytes_list,
-            model="qwen3-vl:4b-instruct",
+            model="qwen3-vl:2b-instruct",
             prompt=prompt,
             system_prompt=system_prompt,
         )
@@ -3508,7 +3532,7 @@ def ollama_generate_text(prompt: Union[str, List[str]], model: str = "llama3.2:3
     
     results = []
     for p in prompts:
-        url = "http://localhost:11434/api/generate"
+        url = API_OLLAMA
         payload = {
             "model": model,
             "prompt": p,
@@ -3589,7 +3613,7 @@ def ollama_describe_image(image_bytes: Union[bytes, List[bytes]], model: str = "
         import base64
         base64_image = base64.b64encode(img_bytes).decode('utf-8')
         
-        url = "http://localhost:11434/api/generate"
+        url = API_OLLAMA
         payload = {
             "model": model,
             "prompt": prompt,

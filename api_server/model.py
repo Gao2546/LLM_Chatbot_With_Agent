@@ -938,6 +938,7 @@ def search_similar_api_unified():
     1. 'none' (Default): Search only the current chat history.
     2. 'searchDoc': Search ALL files where the current user is in 'active_users'.
     """
+    u_time = time.time()
     clear_gpu()
     data = request.get_json()
     
@@ -1064,7 +1065,7 @@ def search_similar_api_unified():
         final_output.append(vlm_summary)
 
     print(f" - final_output: {final_output}")
-
+    print(f"Process time: {time.time() - u_time}s")
     return jsonify({"results": final_output})
 
 # --- NEW RAG ENDPOINT ---
