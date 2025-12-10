@@ -17,6 +17,7 @@ services:
       - PGPORT=5432
       - IS_DOCKER=true
       - API_APP=http://app:3000
+      - API_OLLAMA=http://ollama:11434/api/generate
       # Pass the OpenAI API key from the host environment or a .env file
       # Ensure OPENAI_API_KEY is set in your environment before running docker-compose up
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
