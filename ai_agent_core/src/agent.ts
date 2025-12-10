@@ -8,6 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
+import { saveVerifiedAnswer, searchVerifiedAnswers, updateAnswerRating, getAnswerVerifications } from './db.js';
 
 dotenv.config();
 
@@ -35,7 +36,11 @@ import pool, {
     setUserActiveStatus,
     uploadFile, // Import the new MinIO upload function
     getFileInfoByObjectName,
-    getFileByObjectName
+    getFileByObjectName,
+    saveQuestionAttachment,
+    getQuestionAttachments,
+    getQuestionAttachmentData,
+    deleteQuestionAttachment
 } from './db.js';
 import { callToolFunction, GetSocketIO } from "./api.js"
 
@@ -130,7 +135,106 @@ const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
 let io: SocketIOServer;
 const router = express.Router();
 export default async function agentRouters(ios: SocketIOServer) {
-  io = ios
+  io = ios;
+
+  // === Verified Answers Endpoints ===
+
+  // ① Rate Answer
+  router.post('/rate-answer', async (req, res) => {
+    try {
+      const { question, answer, rating, userName } = req.body;
+      
+      if (!question || !answer || rating === undefined) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      // สร้าง embedding จาก Python API server (สำหรับ verified_answers ต้อง 384 dimensions)
+      const embeddingRes = await axios.post(
+        `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
+        { 
+          text: question,
+          dimensions: 384  // ← ต้องเป็น 384 dimensions สำหรับ verified_answers table
+        }
+      );
+      const embedding = embeddingRes.data.embedding;
+
+      // ตรวจสอบ dimensions
+      if (embedding.length !== 384) {
+        throw new Error(`Invalid embedding dimensions: expected 384, got ${embedding.length}`);
+      }
+
+      // บันทึกคะแนน
+      const result = await saveVerifiedAnswer(question, answer, embedding, undefined, rating, userName);
+      await updateAnswerRating(result.answerId);
+
+      res.json({ success: true, answerId: result.answerId });
+    } catch (error) {
+      console.error('Error rating answer:', error);
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  // ③ Search Verified Answers
+  router.post('/search-verified-answers', async (req, res) => {
+    try {
+      const { question, threshold, limit } = req.body;
+      
+      if (!question) {
+        return res.status(400).json({ error: 'Question required' });
+      }
+
+      // สร้าง embedding (สำหรับ verified_answers ต้อง 384 dimensions)
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      console.log(`Calling embedding API at ${API_SERVER_URL}/encode_embedding...`);
+      
+      let embedding: number[] = [];
+      try {
+        const embeddingRes = await axios.post(
+          `${API_SERVER_URL}/encode_embedding`,
+          { 
+            text: question,
+            dimensions: 384  // ← ต้องเป็น 384 dimensions
+          },
+          { timeout: 30000 } // 30 second timeout
+        );
+        
+        // ตรวจสอบว่า response มี embedding หรือไม่
+        if (!embeddingRes.data || !embeddingRes.data.embedding) {
+          throw new Error('API response missing embedding data');
+        }
+        embedding = embeddingRes.data.embedding;
+        console.log(`Got embedding with ${embedding.length} dimensions`);
+      } catch (apiError: any) {
+        console.error('Failed to get embedding from API:', apiError.message);
+        return res.status(503).json({ 
+          error: `Python API Server unavailable: ${apiError.message}. Please ensure api_server is running on ${API_SERVER_URL}` 
+        });
+      }
+
+      // ตรวจสอบว่า embedding ไม่ว่าง
+      if (!embedding || embedding.length === 0) {
+        return res.status(500).json({ error: 'Question embedding must not be empty - API returned empty embedding' });
+      }
+
+      // ตรวจสอบ dimensions
+      if (embedding.length !== 384) {
+        console.warn(`Warning: Expected 384 dimensions, got ${embedding.length}. Proceeding anyway...`);
+      }
+
+      // ค้นหา
+      const results = await searchVerifiedAnswers(embedding, threshold || 0.7, limit || 5);
+
+      res.json({ success: true, results });
+    } catch (error) {
+      console.error('Error searching verified answers:', error);
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  // ④ Get All Verified Answers
+  // ⑤ Get Verifications for Answer
+  // Removed old /get-verifications/:answerId route - use GET /api/get-verifications/:questionId instead
+  
   return router;
 }
 
@@ -201,6 +305,21 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 });
 
 // =================================================================================
+// FILE PROCESSING HELPER FUNCTIONS
+// =================================================================================
+
+// Helper function to determine file type from MIME type
+function getFileTypeFromMime(mimeType: string | undefined): string {
+    if (!mimeType) return 'file';
+    
+    if (mimeType.startsWith('image/')) return 'image';
+    if (['text/csv', 'application/json', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(mimeType)) return 'table';
+    if (['application/pdf', 'application/msword', 'text/plain', 'text/markdown', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mimeType)) return 'document';
+    
+    return 'file';
+}
+
+// =================================================================================
 // UPDATED /upload ENDPOINT TO USE MINIO
 // =================================================================================
 router.post('/upload', upload.array('files'), async (req, res) => {
@@ -214,6 +333,21 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     }
 
     try {
+        // 0. Analyze and cleanup files
+        console.log(`\n📁 Processing ${files.length} files...`);
+        const fileMetadata = files.map(file => ({
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size,
+            fileType: getFileTypeFromMime(file.mimetype),
+            isImage: file.mimetype?.startsWith('image/'),
+            isTable: ['text/csv', 'application/json', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(file.mimetype),
+            isDocument: ['application/pdf', 'application/msword', 'text/plain', 'text/markdown'].includes(file.mimetype)
+        }));
+
+        console.log('📊 File Analysis:');
+        console.log(JSON.stringify(fileMetadata, null, 2));
+
         // 1. Upload files to MinIO and store records in PostgreSQL
         // for (const file of files) {
         //     console.log(`Uploading ${file.originalname} to MinIO...`);
@@ -228,20 +362,58 @@ router.post('/upload', upload.array('files'), async (req, res) => {
         // }
         // console.log("All files successfully uploaded to MinIO.");
 
-        // 2. Forward files to the Python processing server
+        // 2. Forward files to the Python processing server with organized structure
         const form = new FormData();
         form.append('user_id', userId);
         form.append('chat_history_id', chatId);
         form.append('text', text);
         form.append('processing_mode', 'legacy_text') //legacy_text or new_page_image
+        form.append('file_metadata', JSON.stringify(fileMetadata));
+
+        // Organize files by type
+        const organizedFiles = {
+            images: [] as Express.Multer.File[],
+            tables: [] as Express.Multer.File[],
+            documents: [] as Express.Multer.File[],
+            other: [] as Express.Multer.File[]
+        };
 
         for (const file of files) {
-            // Append the buffer directly instead of creating a read stream
+            if (file.mimetype?.startsWith('image/')) {
+                organizedFiles.images.push(file);
+            } else if (['text/csv', 'application/json', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(file.mimetype)) {
+                organizedFiles.tables.push(file);
+            } else if (['application/pdf', 'application/msword', 'text/plain', 'text/markdown'].includes(file.mimetype)) {
+                organizedFiles.documents.push(file);
+            } else {
+                organizedFiles.other.push(file);
+            }
+        }
+
+        // Add organized files to form
+        organizedFiles.images.forEach((file, idx) => {
+            form.append(`image_${idx}`, file.buffer, file.originalname);
+        });
+
+        organizedFiles.tables.forEach((file, idx) => {
+            form.append(`table_${idx}`, file.buffer, file.originalname);
+        });
+
+        organizedFiles.documents.forEach((file, idx) => {
+            form.append(`document_${idx}`, file.buffer, file.originalname);
+        });
+
+        organizedFiles.other.forEach((file, idx) => {
+            form.append(`file_${idx}`, file.buffer, file.originalname);
+        });
+
+        // Add all files for backward compatibility
+        for (const file of files) {
             form.append('files', file.buffer, file.originalname);
         }
 
         const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        console.log(`Forwarding to Python server at ${API_SERVER_URL}/process...`);
+        console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
         const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
             headers: form.getHeaders()
         });
@@ -325,8 +497,33 @@ router.post('/message', async (req : Request, res : Response) => {
     const controller = new AbortController();
     runningRequests.set(requestId, controller);
     const socket = io.sockets.sockets.get(socketId);
-    const systemInformation : resultsT = await callToolFunction('GetSystemInformation', {}, socketId);
-    const systemInformationJSON = await JSON.parse(systemInformation.content[0].text);
+    
+    // Get system information with timeout and fallback
+    let systemInformation : resultsT = { content: [{ type: 'text', text: '{"os":"Unknown","system_hardware":"Unknown","current_directory":"Unknown","time":"' + new Date().toISOString() + '"}' }] };
+    try {
+      // Set a timeout for system information call
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('System information call timed out')), 5000)
+      );
+      systemInformation = await Promise.race([
+        callToolFunction('GetSystemInformation', {}, socketId),
+        timeoutPromise
+      ]) as resultsT;
+    } catch (e) {
+      console.warn('Could not get system information, using defaults:', e);
+      // Continue with default system information
+    }
+    
+    // Safe parsing with fallback
+    let systemInformationJSON: any = { os: 'Unknown', system_hardware: 'Unknown', current_directory: 'Unknown', time: new Date().toISOString() };
+    try {
+        if (systemInformation?.content?.[0]?.text) {
+            systemInformationJSON = JSON.parse(systemInformation.content[0].text);
+        }
+    } catch (e) {
+        console.warn('Could not parse system information, using defaults');
+    }
+    
     let setting_prompt;
     setting_prompt = setting_prompts + "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n`
     
@@ -340,40 +537,44 @@ router.post('/message', async (req : Request, res : Response) => {
     let serch_doc = ""
 
     if (currentChatId){
-      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-      const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: userMessage,
-          user_id: userId,
-          chat_history_id: currentChatId,
-          top_k: 20,
-          top_k_pages: 5,
-          top_k_text: 5,
-          threshold: 2.0
-        }),
-        signal: controller.signal,
-      });
-
-      const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
-      if (result_similar_TopK && result_similar_TopK.results){
-        result_similar_TopK.results.forEach(doc => {
-          try {
-            console.log("type : ")
-            console.log(typeof doc)
-            if (typeof doc != "string"){
-              console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
-              serch_doc += doc.text + "\n\n";
-            }
-            else if (typeof doc == "string"){
-              serch_doc += "";
-            }
-          } catch (error) {
-            console.error(`Error processing document ${doc.file_name}:`, error);
-            serch_doc += doc + "\n\n";
-          }
+      try {
+        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+        const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: userMessage,
+            user_id: userId,
+            chat_history_id: currentChatId,
+            top_k: 20,
+            top_k_pages: 5,
+            top_k_text: 5,
+            threshold: 2.0
+          }),
+          signal: controller.signal,
         });
+
+        const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
+        if (result_similar_TopK && result_similar_TopK.results){
+          result_similar_TopK.results.forEach(doc => {
+            try {
+              console.log("type : ")
+              console.log(typeof doc)
+              if (typeof doc != "string"){
+                console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+                serch_doc += doc.text + "\n\n";
+              }
+              else if (typeof doc == "string"){
+                serch_doc += "";
+              }
+            } catch (error) {
+              console.error(`Error processing document ${doc.file_name}:`, error);
+              serch_doc += doc + "\n\n";
+            }
+          });
+        }
+      } catch (error) {
+        console.warn('Could not fetch similar documents, continuing without RAG:', error);
       }
     }
     console.log(serch_doc);
@@ -1066,7 +1267,17 @@ router.post('/edit-message', async (req, res) => {
 
   // Now regenerate the response
   const systemInformation : resultsT = await callToolFunction('GetSystemInformation', {}, socketId);
-  const systemInformationJSON = await JSON.parse(systemInformation.content[0].text);
+  
+  // Safe parsing with fallback
+  let systemInformationJSON: any = { os: 'Unknown', system_hardware: 'Unknown', current_directory: 'Unknown', time: new Date().toISOString() };
+  try {
+      if (systemInformation?.content?.[0]?.text) {
+          systemInformationJSON = JSON.parse(systemInformation.content[0].text);
+      }
+  } catch (e) {
+      console.warn('Could not parse system information, using defaults');
+  }
+  
   let setting_prompt;
   setting_prompt = setting_prompts + "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n`;
 
@@ -1078,33 +1289,37 @@ router.post('/edit-message', async (req, res) => {
     let serch_doc = ""
 
     if (chatId){
-      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-      const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: newMessage,
-          user_id: userId,
-          chat_history_id: chatId,
-          top_k: 20,
-          top_k_pages: 5,
-          top_k_text: 5,
-          threshold: 2.0
-        }),
-        signal: controller.signal,
-      });
-
-      const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
-      if (result_similar_TopK && result_similar_TopK.results){
-        result_similar_TopK.results.forEach(doc => {
-          try {
-            console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
-            serch_doc += doc.text + "\n\n";
-          } catch (error) {
-            console.error(`Error processing document ${doc.file_name}:`, error);
-            serch_doc += doc + "\n\n";
-          }
+      try {
+        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+        const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: newMessage,
+            user_id: userId,
+            chat_history_id: chatId,
+            top_k: 20,
+            top_k_pages: 5,
+            top_k_text: 5,
+            threshold: 2.0
+          }),
+          signal: controller.signal,
         });
+
+        const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
+        if (result_similar_TopK && result_similar_TopK.results){
+          result_similar_TopK.results.forEach(doc => {
+            try {
+              console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+              serch_doc += doc.text + "\n\n";
+            } catch (error) {
+              console.error(`Error processing document ${doc.file_name}:`, error);
+              serch_doc += doc + "\n\n";
+            }
+          });
+        }
+      } catch (error) {
+        console.warn('Could not fetch similar documents, continuing without RAG:', error);
       }
     }
     console.log(serch_doc);
@@ -1885,5 +2100,1061 @@ router.post("/save_img", upload.single("file"), async (req: Request, res: Respon
   } catch (err) {
     console.error("❌ Error saving file to MinIO:", err);
     return res.status(500).json({ error: "Failed to save file to object storage" });
+  }
+});
+
+// =================================================================================
+// NEW: RATING AND VERIFICATION ENDPOINTS
+// =================================================================================
+
+// POST /api/rate-answer - Save answer rating to PostgreSQL
+router.post('/rate-answer', async (req: Request, res: Response) => {
+  try {
+    const { question, answer, rating, userName } = req.body;
+    const userId = req.session.user?.id;
+
+    if (!question || !answer || rating === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Get embedding from Python API
+    let questionEmbedding: number[] = [];
+    try {
+      const apiUrl = process.env.API_SERVER_URL;
+      if (apiUrl) {
+        const embedRes = await fetch(`${apiUrl}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: question, dimensions: 384 })
+        });
+        if (embedRes.ok) {
+          const embedData: any = await embedRes.json();
+          questionEmbedding = embedData.embedding || [];
+        }
+      }
+    } catch (e) {
+      console.warn('Could not get embedding for question:', e);
+      // Continue without embedding
+    }
+
+    // Save to database using verifiedAnswers function
+    let result;
+    try {
+      result = await saveVerifiedAnswer(question, answer, questionEmbedding, userId, rating, userName);
+    } catch (dbError) {
+      console.error('Database error in saveVerifiedAnswer:', dbError);
+      return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
+    }
+    
+    if (result && result.answerId) {
+      // Update rating statistics
+      try {
+        await updateAnswerRating(result.answerId);
+      } catch (e) {
+        console.warn('Error updating rating (non-fatal):', e);
+      }
+    }
+
+    res.json({ success: true, message: 'Rating saved successfully' });
+
+  } catch (error) {
+    console.error('Error rating answer:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// Configure multer for file uploads
+const uploadFiles = multer({
+  storage: multer.memoryStorage(), // Store files in memory for direct DB insertion
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit per file
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept specific file types
+    const allowedMimes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type: ${file.mimetype}`));
+    }
+  }
+});
+
+// POST /api/verify-answer - Save verified answer with comment and file attachments
+router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Request, res: Response) => {
+  try {
+    // Handle both FormData (with files) and JSON
+    let question, answer, comment, userName, rating, verificationType, requestedDepartments;
+    let files: Express.Multer.File[] = [];
+
+    // Check if request has multipart form data
+    if (req.is('multipart/form-data') && (req as any).files) {
+      // File upload case
+      files = (req as any).files;
+      question = req.body.question;
+      answer = req.body.answer;
+      comment = req.body.comment || '';
+      userName = req.body.userName || 'Anonymous';
+      rating = req.body.rating ?? 1;
+      verificationType = req.body.verificationType || 'self';
+      requestedDepartments = req.body.requestedDepartments ? JSON.parse(req.body.requestedDepartments) : [];
+    } else {
+      // JSON case (no files)
+      ({ question, answer, comment, userName, rating = 1, verificationType = 'self', requestedDepartments = [] } = req.body);
+    }
+
+    const userId = req.session.user?.id;
+
+    if (!question || !answer) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Validate rating value
+    const validRatings = [-1, 0, 1];
+    const validatedRating = validRatings.includes(parseInt(rating)) ? parseInt(rating) : 1;
+
+    if (!validRatings.includes(validatedRating)) {
+      return res.status(400).json({ success: false, error: 'Invalid rating value. Must be -1, 0, or 1' });
+    }
+
+    // Get embedding from Python API
+    let questionEmbedding: number[] = [];
+    try {
+      const apiUrl = process.env.API_SERVER_URL;
+      if (apiUrl) {
+        const embedRes = await fetch(`${apiUrl}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: question })
+        });
+        if (embedRes.ok) {
+          const embedData: any = await embedRes.json();
+          questionEmbedding = embedData.embedding || [];
+        }
+      }
+    } catch (e) {
+      console.warn('Could not get embedding for question:', e);
+      // Continue without embedding
+    }
+
+    // Save verified answer to database
+    let result;
+    try {
+      result = await saveVerifiedAnswer(
+        question, 
+        answer, 
+        questionEmbedding, 
+        userId, 
+        validatedRating, 
+        userName || 'Anonymous', 
+        comment || '',
+        verificationType,
+        requestedDepartments
+      );
+    } catch (dbError) {
+      console.error('Database error in saveVerifiedAnswer:', dbError);
+      return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
+    }
+    
+    if (result && result.answerId) {
+      // Handle file attachments
+      if (files && files.length > 0) {
+        try {
+          for (const file of files) {
+            await saveQuestionAttachment(
+              result.answerId,
+              file.originalname,
+              file.buffer,
+              file.mimetype,
+              file.size,
+              userName || 'Anonymous'
+            );
+            console.log(`Attachment saved: ${file.originalname} for question ${result.answerId}`);
+          }
+        } catch (fileError) {
+          console.error('Error saving file attachments:', fileError);
+          // Don't fail the entire request, just log the warning
+          console.warn('File attachments could not be saved, but question was created successfully');
+        }
+      }
+      
+      // Update rating statistics
+      try {
+        await updateAnswerRating(result.answerId);
+      } catch (e) {
+        console.warn('Error updating rating (non-fatal):', e);
+      }
+      
+      if (comment) {
+        console.log('Verification saved with comment:', comment);
+      }
+      
+      console.log(`Verification type: ${verificationType}, Requested departments: ${requestedDepartments.join(', ')}`);
+    }
+
+    res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
+
+  } catch (error) {
+    console.error('Error verifying answer:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/question-attachments/:questionId - Get list of attachments for a question
+router.get('/question-attachments/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    const attachments = await getQuestionAttachments(parseInt(questionId));
+    res.json({ success: true, attachments });
+  } catch (error) {
+    console.error('Error fetching attachments:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/attachment-download/:attachmentId - Download attachment file
+router.get('/attachment-download/:attachmentId', async (req: Request, res: Response) => {
+  try {
+    const { attachmentId } = req.params;
+    const attachment = await getQuestionAttachmentData(parseInt(attachmentId));
+    
+    if (!attachment) {
+      return res.status(404).json({ success: false, error: 'Attachment not found' });
+    }
+
+    // Set response headers for file download
+    res.setHeader('Content-Type', attachment.mime_type);
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.file_name}"`);
+    res.setHeader('Content-Length', attachment.file_data.length);
+
+    // Send file data
+    res.send(attachment.file_data);
+  } catch (error) {
+    console.error('Error downloading attachment:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/attachment-preview/:attachmentId - Preview attachment file (inline)
+router.get('/attachment-preview/:attachmentId', async (req: Request, res: Response) => {
+  try {
+    const { attachmentId } = req.params;
+    const attachment = await getQuestionAttachmentData(parseInt(attachmentId));
+    
+    if (!attachment) {
+      return res.status(404).json({ success: false, error: 'Attachment not found' });
+    }
+
+    // Set response headers for inline preview (not download)
+    res.setHeader('Content-Type', attachment.mime_type);
+    res.setHeader('Content-Disposition', `inline; filename="${attachment.file_name}"`);
+    res.setHeader('Content-Length', attachment.file_data.length);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    // Send file data
+    res.send(attachment.file_data);
+  } catch (error) {
+    console.error('Error previewing attachment:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/increment-view - Increment view count for a question
+router.post('/increment-view', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.body;
+    
+    if (!questionId) {
+      return res.status(400).json({ success: false, error: 'Missing questionId' });
+    }
+
+    await pool.query(
+      `UPDATE verified_answers SET views = COALESCE(views, 0) + 1 WHERE id = $1`,
+      [questionId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error incrementing view:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/get-all-verified-answers - Get all verified answers with calculated scores
+router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
+  try {
+    const currentUserId = req.session.user?.id || null;
+    
+    // Use a single query with CTEs to get all data efficiently
+    const result = await pool.query(`
+      WITH verification_stats AS (
+        SELECT 
+          verified_answer_id,
+          COALESCE(SUM(CAST(rating AS FLOAT)), 0) as verification_score,
+          COUNT(*) as rating_count,
+          COALESCE(AVG(CAST(rating AS FLOAT)), 0) as avg_rating,
+          ARRAY_AGG(DISTINCT verification_type) FILTER (WHERE verification_type IS NOT NULL) as verification_types,
+          (ARRAY_AGG(commenter_name ORDER BY created_at ASC))[1] as first_user_name,
+          (ARRAY_AGG(user_id ORDER BY created_at ASC))[1] as creator_user_id
+        FROM answer_verifications
+        GROUP BY verified_answer_id
+      ),
+      vote_stats AS (
+        SELECT 
+          question_id,
+          COALESCE(SUM(vote), 0) as vote_score
+        FROM question_votes
+        GROUP BY question_id
+      )
+      SELECT 
+        va.id,
+        va.question,
+        va.answer,
+        va.created_at,
+        COALESCE(va.views, 0) as views,
+        COALESCE(vs.verification_score, 0) as verification_score,
+        COALESCE(vts.vote_score, 0) as vote_score,
+        COALESCE(vs.rating_count, 0) as rating_count,
+        COALESCE(vs.avg_rating, 0) as avg_rating,
+        COALESCE(vs.first_user_name, 'Anonymous') as user_name,
+        vs.creator_user_id,
+        COALESCE(vs.verification_types, ARRAY[]::VARCHAR[]) as verification_types,
+        va.requested_departments as requested_departments_list,
+        va.verification_type,
+        va.tags,
+        va.department
+      FROM verified_answers va
+      LEFT JOIN verification_stats vs ON va.id = vs.verified_answer_id
+      LEFT JOIN vote_stats vts ON va.id = vts.question_id
+      ORDER BY (COALESCE(vs.verification_score, 0) + COALESCE(vts.vote_score, 0)) DESC, va.created_at DESC
+      LIMIT 100
+    `);
+
+    console.log('✅ Query result rows:', result.rows.length);
+    if (result.rows.length > 0) {
+      console.log('📊 First row:', JSON.stringify(result.rows[0], null, 2));
+    }
+
+    const answers = result.rows.map(row => {
+      // Calculate combined score
+      const score = (parseFloat(row.verification_score) || 0) + (parseFloat(row.vote_score) || 0);
+      
+      // Determine if this is pending (request type with no positive rating)
+      const verificationTypes = row.verification_types || [];
+      const isPending = verificationTypes.includes('request') && score <= 0;
+      const isVerified = (parseInt(row.rating_count) || 0) > 0 && score > 0;
+      
+      return {
+        id: row.id,
+        question: row.question,
+        answer: row.answer,
+        score: score,
+        rating_count: parseInt(row.rating_count) || 0,
+        avg_rating: parseFloat(row.avg_rating) || 0,
+        views: parseInt(row.views) || 0,
+        user_name: row.user_name || 'Anonymous',
+        user_id: row.creator_user_id,
+        created_at: row.created_at,
+        verification_type: row.verification_type,
+        requested_departments: row.requested_departments_list || [],
+        verification_types: verificationTypes,
+        requested_departments_list: row.requested_departments_list || [],
+        status: isPending ? '⏳ Pending' : (isVerified ? '✓ Verified' : 'Unverified'),
+        is_pending: isPending,
+        is_verified: isVerified,
+        answered_by_user: false // Will be filled below if needed
+      };
+    });
+
+    // If user is logged in, get their verifications
+    if (currentUserId) {
+      const userVerifications = await pool.query(
+        `SELECT DISTINCT verified_answer_id FROM answer_verifications WHERE user_id = $1`,
+        [currentUserId]
+      );
+      const userVerifiedIds = new Set(userVerifications.rows.map(r => r.verified_answer_id));
+      answers.forEach(answer => {
+        answer.answered_by_user = userVerifiedIds.has(answer.id);
+      });
+    }
+
+    res.json({ success: true, results: answers, answers });
+  } catch (error) {
+    console.error('Error fetching verified answers:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/search-verified-answers - Search verified answers
+router.post('/search-verified-answers', async (req: Request, res: Response) => {
+  try {
+    const { question, threshold = 0.7, limit = 20 } = req.body;
+
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing question parameter' });
+    }
+
+    // Get embedding from Python API
+    let questionEmbedding: number[] = [];
+    try {
+      const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: question })
+      });
+      const embedData: any = await embedRes.json();
+      questionEmbedding = embedData.embedding || [];
+    } catch (e) {
+      console.warn('Could not get embedding:', e);
+      // Return all verified answers if embedding fails
+      const result = await pool.query(`
+        SELECT 
+          va.id,
+          va.question,
+          va.answer,
+          COALESCE(SUM(av.rating), 0) as score,
+          COUNT(av.id) as rating_count,
+          COALESCE(AVG(CAST(av.rating AS FLOAT)), 0) as avg_rating
+        FROM verified_answers va
+        LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+        GROUP BY va.id
+        ORDER BY score DESC
+        LIMIT $1
+      `, [limit]);
+
+      return res.json({ 
+        success: true, 
+        results: result.rows.map(row => ({
+          id: row.id,
+          question: row.question,
+          answer: row.answer,
+          score: row.score || 0,
+          avg_rating: row.avg_rating || 0
+        }))
+      });
+    }
+
+    // Search similar verified answers
+    const results = await searchVerifiedAnswers(questionEmbedding, threshold, limit);
+
+    // Enrich with score calculations
+    const enrichedResults = results.map((r: any) => ({
+      ...r,
+      score: r.score || 0,
+      avg_rating: r.avg_rating || 0
+    }));
+
+    res.json({ success: true, results: enrichedResults });
+  } catch (error) {
+    console.error('Error searching verified answers:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/verified-answers - Fetch verified answers
+router.get('/verified-answers', async (req: Request, res: Response) => {
+  try {
+    const { question } = req.query;
+
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing question parameter' });
+    }
+
+    // Get embedding from Python API
+    let questionEmbedding: number[] = [];
+    try {
+      const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: question })
+      });
+      const embedData: any = await embedRes.json();
+      questionEmbedding = embedData.embedding || [];
+    } catch (e) {
+      console.warn('Could not get embedding:', e);
+      return res.status(500).json({ success: false, error: 'Could not generate embedding' });
+    }
+
+    // Search similar verified answers
+    const results = await searchVerifiedAnswers(questionEmbedding, 0.7, 5);
+
+    res.json({ success: true, results });
+
+  } catch (error) {
+    console.error('Error fetching verified answers:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/get-verifications/:questionId - Get all verifications/ratings for a question
+router.get('/get-verifications/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    
+    const result = await pool.query(
+      `SELECT av.id, av.user_id, av.commenter_name as username, av.rating, 
+              av.comment, av.verification_type, av.requested_departments,
+              av.created_at as "createdAt",
+              va.due_date as "dueDate"
+       FROM answer_verifications av
+       LEFT JOIN verified_answers va ON av.verified_answer_id = va.id
+       WHERE av.verified_answer_id = $1
+       ORDER BY av.created_at DESC`,
+      [questionId]
+    );
+    
+    const verifications = result.rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      username: row.username || 'Anonymous',
+      rating: row.rating,
+      comment: row.comment,
+      verificationType: row.verification_type,
+      requestedDepartments: row.requested_departments || [],
+      createdAt: row.createdAt,
+      dueDate: row.dueDate
+    }));
+    
+    res.json({ success: true, verifications });
+  } catch (error) {
+    console.error('❌ Error fetching verifications:', error);
+    res.json({ success: true, verifications: [] });
+  }
+});
+
+// POST /api/rate-answer - Rate an answer (quick rating without full verification)
+router.post('/rate-answer', async (req: Request, res: Response) => {
+  try {
+    const { questionId, rating, userId, username } = req.body;
+    
+    if (!questionId || rating === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    
+    // Check if user already rated
+    const existingRating = await pool.query(
+      `SELECT id FROM answer_verifications WHERE verified_answer_id = $1 AND user_id = $2`,
+      [questionId, userId]
+    );
+    
+    if (existingRating.rows.length > 0) {
+      // Update existing rating
+      await pool.query(
+        `UPDATE answer_verifications SET rating = $1, created_at = NOW() WHERE id = $2`,
+        [rating, existingRating.rows[0].id]
+      );
+    } else {
+      // Insert new rating
+      await pool.query(
+        `INSERT INTO answer_verifications (verified_answer_id, user_id, commenter_name, rating, verification_type, created_at)
+         VALUES ($1, $2, $3, $4, 'rating', NOW())`,
+        [questionId, userId, username || 'Anonymous', rating]
+      );
+    }
+    
+    // Update avg_rating in verified_answers
+    const scoreResult = await pool.query(
+      `SELECT COALESCE(AVG(CAST(rating AS FLOAT)), 0) as avg_rating, COUNT(*) as rating_count 
+       FROM answer_verifications WHERE verified_answer_id = $1`,
+      [questionId]
+    );
+    
+    await pool.query(
+      `UPDATE verified_answers SET avg_rating = $1, rating_count = $2 WHERE id = $3`,
+      [scoreResult.rows[0].avg_rating, scoreResult.rows[0].rating_count, questionId]
+    );
+    
+    res.json({ 
+      success: true, 
+      newScore: scoreResult.rows[0].total_score,
+      ratingCount: scoreResult.rows[0].rating_count 
+    });
+  } catch (error) {
+    console.error('Error rating answer:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/get-comments/:questionId - Get comments for a question
+router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    console.log(`📝 Fetching comments for question ${questionId}`);
+    
+    // Fetch comments from comments table
+    const commentsResult = await pool.query(
+      `SELECT id, question_id, user_id, username, text, department, attachments, created_at as "createdAt", 'comment' as source
+       FROM comments 
+       WHERE question_id = $1
+       ORDER BY created_at DESC`,
+      [questionId]
+    );
+    
+    console.log(`Found ${commentsResult.rows.length} comments from comments table`);
+    
+    // Fetch verification comments from answer_verifications table
+    // Include all verifications (with or without comment text)
+    const verificationsResult = await pool.query(
+      `SELECT id, verified_answer_id as question_id, user_id, commenter_name as username, 
+              comment as text, created_at as "createdAt", rating, verification_type, requested_departments, 'verification' as source
+       FROM answer_verifications 
+       WHERE verified_answer_id = $1 AND rating = 1`,
+      [questionId]
+    );
+    
+    console.log(`Found ${verificationsResult.rows.length} verification comments`);
+    
+    // Format verification comments to match comment structure
+    const formattedVerifications = verificationsResult.rows.map(v => ({
+      ...v,
+      department: v.requested_departments && v.requested_departments.length > 0 ? v.requested_departments[0] : null,
+      attachments: []
+    }));
+
+    // Combine both sources and sort by date
+    const allComments = [...commentsResult.rows, ...formattedVerifications]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    console.log(`Returning ${allComments.length} total comments`);
+    res.json({ success: true, comments: allComments });
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    res.json({ success: true, comments: [] });
+  }
+});
+
+// POST /api/add-comment - Add a comment to a question
+router.post('/add-comment', async (req: Request, res: Response) => {
+  try {
+    const { questionId, userId, username, text, department, attachments = [] } = req.body;
+    
+    console.log('Received add-comment request:', { questionId, userId, username, text, department, attachments });
+    
+    if (!questionId || !text) {
+      console.error('Missing required fields:', { questionId, text });
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Save comment to database with department and attachments
+    const result = await pool.query(
+      `INSERT INTO comments (question_id, user_id, username, text, department, attachments, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING id, question_id, user_id, username, text, department, attachments, created_at as "createdAt", 'comment' as source`,
+      [questionId, userId || null, username || 'Anonymous', text, department || null, JSON.stringify(attachments)]
+    );
+
+    console.log('Comment saved successfully:', result.rows[0]);
+    res.json({ success: true, comment: result.rows[0] });
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/vote-question/:questionId - Vote on a question (upvote/downvote)
+router.post('/vote-question/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    const { vote } = req.body; // vote: 1 (upvote), -1 (downvote), 0 (remove vote)
+    const userId = req.session.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Login required' });
+    }
+
+    if (![-1, 0, 1].includes(vote)) {
+      return res.status(400).json({ success: false, error: 'Invalid vote value' });
+    }
+
+    // Check if user has already voted
+    const existingVote = await pool.query(
+      `SELECT vote FROM question_votes WHERE question_id = $1 AND user_id = $2`,
+      [questionId, userId]
+    );
+
+    let userVote = vote;
+
+    if (existingVote.rows.length > 0) {
+      const oldVote = existingVote.rows[0].vote;
+      
+      // If clicking the same vote, remove it (toggle off)
+      if (oldVote === vote) {
+        await pool.query(
+          `DELETE FROM question_votes WHERE question_id = $1 AND user_id = $2`,
+          [questionId, userId]
+        );
+        userVote = 0;
+      } else {
+        // Update to new vote
+        await pool.query(
+          `UPDATE question_votes SET vote = $1, voted_at = NOW() WHERE question_id = $2 AND user_id = $3`,
+          [vote, questionId, userId]
+        );
+      }
+    } else {
+      // Insert new vote
+      await pool.query(
+        `INSERT INTO question_votes (question_id, user_id, vote, voted_at) VALUES ($1, $2, $3, NOW())`,
+        [questionId, userId, vote]
+      );
+    }
+
+    // Calculate total score from votes
+    const scoreResult = await pool.query(
+      `SELECT COALESCE(SUM(vote), 0) as total_votes FROM question_votes WHERE question_id = $1`,
+      [questionId]
+    );
+
+    const newScore = parseInt(scoreResult.rows[0].total_votes);
+
+    // Note: verified_answers uses avg_rating for answer verifications
+    // Vote score is calculated on the fly when displaying questions
+
+    res.json({ success: true, score: newScore, userVote });
+  } catch (error) {
+    console.error('Error voting on question:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/increment-view - Increment view count for a question
+router.post('/increment-view', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.body;
+    
+    if (!questionId) {
+      return res.status(400).json({ success: false, error: 'Question ID required' });
+    }
+
+    // Update views in verified_answers table
+    await pool.query(
+      `UPDATE verified_answers SET views = COALESCE(views, 0) + 1 WHERE id = $1`,
+      [questionId]
+    );
+    
+    res.json({ success: true, message: 'View count incremented' });
+  } catch (error) {
+    console.error('Error incrementing view:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/reload-page - Get current user info
+router.get('/reload-page', async (req: Request, res: Response) => {
+  try {
+    const userId = req.session.user?.id;
+    const username = req.session.user?.username || 'Guest';
+    
+    res.json({ 
+      success: true, 
+      userId: userId || null,
+      username: username 
+    });
+  } catch (error) {
+    console.error('Error reloading page:', error);
+    res.json({ 
+      success: false, 
+      userId: null, 
+      username: 'Guest' 
+    });
+  }
+});
+
+// GET /api/get-verification-status/:questionId - Get verification timeline for a question
+router.get('/get-verification-status/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    console.log('📋 Getting verification status for question:', questionId);
+
+    // Get all verifications for this question
+    const result = await pool.query(`
+      SELECT 
+        COALESCE(verified_answer_id, 0) as question_id,
+        user_id,
+        commenter_name,
+        verification_type,
+        requested_departments,
+        rating,
+        comment,
+        created_at,
+        COALESCE(due_date, NULL) as due_date
+      FROM answer_verifications
+      WHERE verified_answer_id = $1
+      ORDER BY created_at DESC
+    `, [questionId]);
+
+    const verifications = result.rows;
+    console.log('Found verifications:', verifications.length);
+
+    // Get requested departments status
+    const requestResult = await pool.query(`
+      SELECT DISTINCT requested_departments
+      FROM answer_verifications
+      WHERE verified_answer_id = $1 AND requested_departments IS NOT NULL
+    `, [questionId]);
+
+    const requestedDepts = new Set<string>();
+    requestResult.rows.forEach(row => {
+      if (row.requested_departments) {
+        row.requested_departments.forEach((dept: string) => requestedDepts.add(dept));
+      }
+    });
+
+    // Build verification status for each department
+    const statusByDept: any = {};
+    requestedDepts.forEach(dept => {
+      statusByDept[dept] = {
+        department: dept,
+        status: 'waiting', // waiting, verified, rejected
+        verifiedBy: null,
+        verifiedDate: null,
+        dueDate: null,
+        rating: null
+      };
+    });
+
+    // Update with actual verification data
+    verifications.forEach(v => {
+      if (v.requested_departments && v.rating !== null) {
+        v.requested_departments.forEach((dept: string) => {
+          if (statusByDept[dept]) {
+            statusByDept[dept].status = v.rating > 0 ? 'verified' : (v.rating < 0 ? 'rejected' : 'waiting');
+            statusByDept[dept].verifiedBy = v.commenter_name;
+            statusByDept[dept].verifiedDate = v.created_at;
+            statusByDept[dept].dueDate = v.due_date;
+            statusByDept[dept].rating = v.rating;
+          }
+        });
+      }
+    });
+
+    // Get due dates from first verification request for each department
+    verifications.forEach(v => {
+      if (v.requested_departments && v.verification_type === 'request') {
+        v.requested_departments.forEach((dept: string) => {
+          if (statusByDept[dept] && !statusByDept[dept].dueDate) {
+            statusByDept[dept].dueDate = v.due_date;
+          }
+        });
+      }
+    });
+
+    res.json({ 
+      success: true, 
+      questionId, 
+      status: Object.values(statusByDept),
+      allVerifications: verifications
+    });
+    
+    console.log('✅ Verification status response sent:', Object.values(statusByDept).length, 'departments');
+  } catch (error) {
+    console.error('❌ Error getting verification status:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/request-verifications - Request verification from departments
+router.post('/request-verifications', async (req: Request, res: Response) => {
+  try {
+    const { questionId, departments } = req.body;
+    const userId = req.session.user?.id;
+
+    if (!questionId || !departments || !Array.isArray(departments)) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Create verification request for each department
+    const promises = departments.map(dept => 
+      pool.query(`
+        INSERT INTO answer_verifications 
+        (verified_answer_id, user_id, commenter_name, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, 'request', $4, NOW())
+        ON CONFLICT DO NOTHING
+      `, [questionId, userId, `Request-${new Date().getTime()}`, [dept]])
+    );
+
+    await Promise.all(promises);
+
+    res.json({ success: true, message: `Verification requested from ${departments.join(', ')}` });
+  } catch (error) {
+    console.error('Error requesting verification:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/upload-comment-files - Upload comment files
+router.post('/upload-comment-files', upload.array('files'), async (req: Request, res: Response) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    const userId = req.session.user?.id || 0;
+    
+    console.log('📎 Upload comment files request:', {
+      filesCount: files?.length || 0,
+      userId: userId
+    });
+    
+    if (!files || files.length === 0) {
+      console.log('⚠️ No files received');
+      return res.json({ success: true, files: [] });
+    }
+
+    const uploadedFiles = [];
+
+    for (const file of files) {
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomString = Math.random().toString(36).substring(7);
+      const fileExtension = file.originalname.split('.').pop();
+      const uniqueFilename = `comment_${timestamp}_${randomString}.${fileExtension}`;
+      const objectName = `comments/${userId}/${uniqueFilename}`;
+
+      // Upload to MinIO
+      await minioClient.putObject(
+        minioBucketName,
+        objectName,
+        file.buffer,
+        file.size,
+        { 'Content-Type': file.mimetype }
+      );
+
+      console.log(`Uploaded comment file: ${objectName}`);
+
+      // Create accessible URL
+      const fileUrl = `/api/storage/${objectName}`;
+
+      uploadedFiles.push({
+        name: file.originalname,
+        url: fileUrl,
+        size: file.size,
+        type: file.mimetype
+      });
+    }
+
+    res.json({ success: true, files: uploadedFiles });
+  } catch (error) {
+    console.error('Error uploading comment files:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/submit-verified-answer - Submit a new question with different verification types
+router.post('/submit-verified-answer', async (req: Request, res: Response) => {
+  try {
+    console.log('📨 POST /submit-verified-answer received');
+    console.log('📨 Body:', JSON.stringify(req.body));
+    console.log('📨 Session:', req.session.user ? 'has user' : 'no user');
+    
+    const { question, answer, tags, verificationType, requestedDepartments, dueDate } = req.body;
+    const userId = req.session.user?.id || null; // Allow anonymous submission
+    const username = req.session.user?.username || 'Anonymous';
+    const userDept = req.session.user?.department || 'General';
+
+    if (!question || !answer) {
+      console.error('❌ Missing question or answer');
+      return res.status(400).json({ error: 'Question and answer are required' });
+    }
+
+    console.log('📝 Creating question:', { verificationType, userDept, requestedDepartments, userId, username });
+
+    // Insert the question
+    const tagsArray = Array.isArray(tags) ? tags : [];
+    const result = await pool.query(`
+      INSERT INTO verified_answers 
+      (question, answer, tags, department, verification_type, requested_departments, due_date, created_by, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      RETURNING *;
+    `, [
+      question, 
+      answer, 
+      tagsArray, 
+      userDept,
+      verificationType || 'staging',
+      requestedDepartments || null,
+      dueDate || null,
+      username
+    ]);
+
+    const newQuestion = result.rows[0];
+    console.log('✅ Question created:', newQuestion.id);
+
+    // If self-verify, add an automatic verification
+    if (verificationType === 'self' && userId) {
+      await pool.query(`
+        INSERT INTO answer_verifications 
+        (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'self', $6, NOW());
+      `, [newQuestion.id, userId, username, 1, 'Self-verified by department', [userDept]]);
+      console.log('✅ Self-verification added');
+    } else if (verificationType === 'request') {
+      // For request verification, add a record to track the verification request
+      await pool.query(`
+        INSERT INTO answer_verifications 
+        (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'request', $6, NOW());
+      `, [newQuestion.id, userId || null, username, 0, 'Verification request pending', requestedDepartments || []]);
+      console.log('✅ Request verification added');
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Question created successfully',
+      question: newQuestion
+    });
+  } catch (error) {
+    console.error('Error creating question:', error);
+    res.status(500).json({ error: String(error) });
+  }
+});
+
+// POST /api/submit-verification - Submit verification for an answer
+router.post('/submit-verification', async (req: Request, res: Response) => {
+  try {
+    const { questionId, rating, comment, department } = req.body;
+    const userId = req.session.user?.id || 1; // Use guest user ID if not authenticated
+    const userDept = department || req.session.user?.department || 'General';
+    const commenterName = req.session.user?.username || 'Anonymous';
+
+    if (!questionId || rating === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    if (![1, 0, -1].includes(rating)) {
+      return res.status(400).json({ success: false, error: 'Invalid rating' });
+    }
+
+    console.log('📋 Submitting verification:', { questionId, rating, userDept, department, userId, commenterName });
+
+    // Insert or update verification
+    const result = await pool.query(`
+      INSERT INTO answer_verifications 
+      (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
+      VALUES ($1, $2, $3, $4, $5, 'verification', $6, NOW())
+      ON CONFLICT (verified_answer_id, user_id) DO UPDATE SET
+        rating = $4,
+        comment = $5,
+        requested_departments = $6,
+        created_at = NOW()
+      RETURNING *;
+    `, [questionId, userId, commenterName, rating, comment || null, [userDept]]);
+
+    console.log('✅ Verification saved:', result.rows[0].id);
+
+    res.json({ 
+      success: true, 
+      message: 'Verification submitted successfully',
+      verification: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error submitting verification:', error);
+    res.status(500).json({ success: false, error: String(error) });
   }
 });

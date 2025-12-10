@@ -25,7 +25,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: ai_agent_with_McpProtocol/Dockerfile
+      dockerfile: ai_agent_core/Dockerfile
     # image: ai_agent_app:latest
     ports:
       - "3000:3000"
@@ -36,6 +36,7 @@ services:
       # Add any other necessary environment variables here
     depends_on:
       - db
+      - minio
       # - api_server
     networks:
       - app-network

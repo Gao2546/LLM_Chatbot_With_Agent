@@ -145,9 +145,18 @@ def upload_file_to_minio_and_db(user_id: int, chat_history_id: int, file_name: s
     file_size = len(file_bytes)
     object_name = f"user_{user_id}/chat_{chat_history_id}/{int(time.time())}-{file_name}"
     
+    print(f"📦 DEBUG upload_file_to_minio_and_db:")
+    print(f"  - user_id: {user_id}")
+    print(f"  - chat_history_id: {chat_history_id}")
+    print(f"  - file_name: {file_name}")
+    print(f"  - file_size: {file_size} bytes")
+    print(f"  - mime_type: {mime_type}")
+    print(f"  - object_name: {object_name}")
+    
     conn = None
     try:
         # 1. Upload to MinIO
+        print("  - Attempting MinIO upload...")
         file_stream = io.BytesIO(file_bytes)
         minio_client.put_object(
             minio_bucket_name,
@@ -159,6 +168,7 @@ def upload_file_to_minio_and_db(user_id: int, chat_history_id: int, file_name: s
         print(f"✅ MinIO: File '{object_name}' uploaded successfully.")
 
         # 2. Insert record into PostgreSQL
+        print("  - Attempting DB insert...")
         conn = get_db_connection()
         if not conn:
             raise Exception("Could not connect to database")
@@ -181,6 +191,8 @@ def upload_file_to_minio_and_db(user_id: int, chat_history_id: int, file_name: s
 
     except Exception as e:
         print(f"❌ Error during file upload process: {e}")
+        import traceback
+        traceback.print_exc()
         # Attempt to clean up MinIO object if DB insert fails or MinIO fails
         try:
             minio_client.remove_object(minio_bucket_name, object_name)
@@ -1208,6 +1220,73 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
         return vlm_response
     
 # ==============================================================================
+#  OLLAMA FUNCTION (NEW)
+# ==============================================================================
+
+def OllamaInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "llava") -> str:
+    """
+    Perform inference using Ollama's local API.
+    This version supports optional MULTIPLE image input for VLM (models like llava).
+    
+    Args:
+        prompt: The user prompt.
+        system_prompt: The system prompt to guide the model.
+        image_bytes_list: Optional LIST of image bytes for VLM processing.
+        model_name: The name of the Ollama model to use (e.g., 'llava', 'llama2-vision').
+    
+    Returns:
+        The model's response as a string, or an error message.
+    """
+    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    api_url = f"{ollama_host}/api/generate"
+    
+    # Prepare the prompt with images if provided
+    full_prompt = prompt
+    
+    if image_bytes_list:
+        print(f"Processing {len(image_bytes_list)} images for Ollama VLM...")
+        # For Ollama, we can embed base64 images in the prompt
+        for idx, image_bytes in enumerate(image_bytes_list):
+            try:
+                base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                full_prompt += f"\n[Image {idx + 1}]: (base64 image data attached)"
+            except Exception as e:
+                print(f"Error encoding image {idx}: {e}")
+                full_prompt += f"\n[Image {idx + 1} processing failed]"
+    
+    # Add system prompt context
+    if system_prompt:
+        full_prompt = system_prompt + "\n\n" + full_prompt
+    
+    try:
+        # Ollama API request
+        response = requests.post(
+            api_url,
+            json={
+                "model": model_name,
+                "prompt": full_prompt,
+                "stream": False,
+                "temperature": 0.0,
+            },
+            timeout=300  # 5 minute timeout for complex queries
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Ollama returns response in 'response' field
+        return data.get('response', 'No response from Ollama')
+    
+    except requests.exceptions.ConnectionError:
+        return f"Error: Could not connect to Ollama at {ollama_host}. Make sure Ollama is running."
+    except requests.exceptions.RequestException as e:
+        return f"Error calling Ollama API: {e}"
+    except (KeyError, IndexError) as e:
+        return f"Error parsing Ollama response: {e}. Full response: {response.text if response else 'No response'}"
+    except Exception as e:
+        return f"An unexpected error occurred with Ollama: {e}"
+
+
+# ==============================================================================
 #  DEEPINFRA FUNCTION (Updated)
 # ==============================================================================
 
@@ -1693,11 +1772,24 @@ Output only the descriptive paragraph. No introductory text.
 #  LEGACY & NEW: DATABASE SAVE/SEARCH
 # ==============================================================================
     
-def encode_text_for_embedding(text: str) -> list[float]:
+def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[float]:
     """
-    Convert text into an embedding vector using the DeepInfra API.
-    (Original function, unchanged)
+    Convert text into an embedding vector.
+    
+    Args:
+        text: ข้อความที่ต้องการ embedding
+        target_dimensions: จำนวน dimensions ที่ต้องการ (default: 1024 สำหรับ verified_answers)
+                          - 384: ใช้ sentence-transformers/all-MiniLM-L6-v2 (เร็ว, RAG เก่า)
+                          - 1024: ใช้ jinaai/jina-embeddings-v4 (ดี, verified_answers)
+    
+    Returns:
+        list[float]: embedding vector
     """
+    # ตรวจสอบว่า text ว่างหรือไม่
+    if not text or not text.strip():
+        print(f"❌ ERROR: Empty text provided!")
+        raise ValueError("Cannot create embedding from empty text")
+    
     # --- NEW: Use DeepInfra for embeddings ---
     if os.getenv("DEEPINFRA_API_KEY"):
         embeddings_list = DeepInfraEmbedding(inputs=[text])
@@ -1738,10 +1830,21 @@ def save_vector_to_db(user_id, chat_history_id, uploaded_file_id, file_name, tex
     try:
         # Clean text before inserting
         text = clean_text(text)
+        
+        print(f"🔍 DEBUG save_vector_to_db:")
+        print(f"  - user_id: {user_id}")
+        print(f"  - chat_history_id: {chat_history_id}")
+        print(f"  - uploaded_file_id: {uploaded_file_id}")
+        print(f"  - file_name: {file_name}")
+        print(f"  - text length: {len(text)}")
+        print(f"  - embedding dims: {len(embedding)}")
+        print(f"  - page_number: {page_number}")
 
         conn = get_db_connection()
         if not conn:
-            raise Exception("Could not connect to database")
+            raise Exception("❌ Could not connect to database")
+        
+        print(f"✅ Database connection established")
         
         cur = conn.cursor()
 
@@ -1749,19 +1852,28 @@ def save_vector_to_db(user_id, chat_history_id, uploaded_file_id, file_name, tex
             INSERT INTO document_embeddings (user_id, chat_history_id, uploaded_file_id, extracted_text, embedding, page_number)
             VALUES (%s, %s, %s, %s, %s, %s)
         """
+        
+        print(f"🔍 Executing query with parameters: user_id={user_id}, chat_history_id={chat_history_id}, uploaded_file_id={uploaded_file_id}")
 
         cur.execute(query, (user_id, chat_history_id, uploaded_file_id, text, vector_literal, page_number))
 
         conn.commit()
         cur.close()
-        print("✅ Legacy vector saved to database (page: -1).")
+        print("✅ Legacy vector saved to database successfully (page: -1).")
+        return True
+        
     except Exception as e:
-        print("❌ Failed to save legacy vector:", e)
+        print(f"❌ Failed to save legacy vector: {e}")
+        import traceback
+        traceback.print_exc()
         if conn:
             conn.rollback()
+        return False
+        
     finally:
         if conn:
             conn.close()
+            print("✅ Database connection closed")
 
 # --- NEW: Save Page Vector Function ---
 def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_number, embedding):

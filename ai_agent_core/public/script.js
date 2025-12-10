@@ -2,6 +2,10 @@ let socket = io({ serveClient: false });
 const userId = null; // Replace with the actual user ID
 // socket.emit('pong');
 
+// ===== GLOBAL TRACKING FOR COMPLETE RESPONSES =====
+let lastAgentResponse = ''; // This will be updated ONLY when full response arrives
+let isCurrentlyStreaming = false;
+
 socket.on('connect', () => {
     console.log('Connected to server via Socket.IO');
 });
@@ -12,16 +16,21 @@ socket.on('ping', () => {
 });
 
 socket.on('StreamText', (text) => {
-    console.log('Received stream text from server');
-    // socket.emit('pong');
-    displayMarkdownMessageStream(text,window.messageElementStream)
+    console.log('📨 Received StreamText chunk (PARTIAL):', text.substring(0, 50) + '...', 'length:', text.length);
+    isCurrentlyStreaming = true;
+    if (window.messageElementStream) {
+        // Store accumulated text - don't mark as complete yet
+        window.messageElementStream.dataset.streamingText = text;
+        window.messageElementStream.dataset.isStreamComplete = false;
+    }
+    displayMarkdownMessageStream(text, window.messageElementStream)
 });
 
 socket.on('CallTool', async (toolName, toolParameters, callback) => {
   console.log(`Call Tool \nTool Name: ${toolName}`);
 
-  const baseURL = 'http://localhost:3333/files';
-  const baseSysURL = 'http://localhost:3333/system'
+  const baseURL = 'http://host.docker.internal:3333/files';
+  const baseSysURL = 'http://host.docker.internal:3333/system'
 
   try {
     switch (toolName) {
@@ -342,11 +351,28 @@ function updateFileList() {
         for (let i = 0; i < dt.files.length; i++) {
             const file = dt.files[i];
             const fileItem = document.createElement('div');
-            fileItem.textContent = file.name;
+            
+            // Get file type and icon
+            const fileType = getFileType(file.type, file.name);
+            const fileIcon = getFileIcon(fileType);
+            const fileSize = formatFileSize(file.size);
+            
+            // Create rich file display
+            fileItem.className = 'file-item-display';
+            fileItem.innerHTML = `
+                <span class="file-icon">${fileIcon}</span>
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-meta">${fileSize} • ${fileType}</div>
+                </div>
+                <button class="file-remove-btn" data-file-name="${file.name}">✕</button>
+            `;
             fileItem.setAttribute('data-file-name', file.name);
             
             // Add click event to remove file
-            fileItem.addEventListener('click', function() {
+            const removeBtn = fileItem.querySelector('.file-remove-btn');
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 removeFile(file.name);
             });
             
@@ -355,6 +381,37 @@ function updateFileList() {
     } else {
         selectedFilesDiv.style.display = 'none';
     }
+}
+
+// Helper function to get file type
+function getFileType(mimeType, fileName) {
+    const ext = fileName.split('.').pop().toLowerCase();
+    
+    if (mimeType.startsWith('image/')) return 'Image';
+    if (['csv', 'xlsx', 'xls', 'json'].includes(ext)) return 'Table/Data';
+    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return 'Document';
+    
+    return 'File';
+}
+
+// Helper function to get file icon
+function getFileIcon(fileType) {
+    const icons = {
+        'Image': '🖼️',
+        'Table/Data': '📊',
+        'Document': '📄',
+        'File': '📎'
+    };
+    return icons[fileType] || '📎';
+}
+
+// Helper function to format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
 function clearSelectedFiles() {
@@ -872,6 +929,9 @@ async function sendMessage() {
         return;
     }
 
+    // Store the user message for rating/verify functions
+    window.lastUserMessage = currentMessage;
+
     // displayMessage(currentMessage, 'user-message'); // Display initial user message
     displayMarkdownMessage(currentMessage, 'user-message'); // Display initial user message
     // userInput.value = ''; // Clear input field
@@ -967,6 +1027,8 @@ async function sendMessage() {
             console.log(`Loop iteration ${loopCount}, Mode: ${selectedMode}, sending message:`, currentMessage.substring(0, 100) + "..."); // Log message start and mode
             
             window.messageElementStream = createMarkdownMessageStreamElement('agent-message')
+            // Store the user question with the AI response element for later use in verify/rate
+            window.messageElementStream.dataset.userQuestion = currentMessage;
             const sessionResponse = await fetch('/auth/session');
             const sessionData = await sessionResponse.json();
             console.log(socket.id + sessionData.currChatId)
@@ -1043,10 +1105,21 @@ async function sendMessage() {
             const data = await response.json();
 
             if (data.response) {
-                agentResponse = data.response; // Store the response
+                agentResponse = data.response; // Store the FULL response
                 attempt_completion = data.attempt_completion;
                 followup_question = data.followup_question;
                 img_url = data.img_url;
+                
+                // ===== UPDATE GLOBAL RESPONSE VARIABLE WITH COMPLETE ANSWER =====
+                lastAgentResponse = agentResponse;
+                isCurrentlyStreaming = false;
+                
+                // Also update dataset as backup
+                if (window.messageElementStream) {
+                    window.messageElementStream.dataset.fullText = agentResponse;
+                    window.messageElementStream.dataset.isStreamComplete = true;
+                }
+                
                 // Display the agent's response, unless it's the final completion signal
                 if (followup_question) {
                     displayMarkdownMessage(agentResponse, 'agent-message');
@@ -1163,6 +1236,41 @@ function displayMessage(text, className) {
         messageElement.appendChild(editButton);
     }
     
+    // Add Verify + Community buttons for AI messages
+    if (className === 'ai-message') {
+        const buttonsDiv = document.createElement('div');
+        buttonsDiv.className = 'message-buttons';
+        buttonsDiv.style.display = 'none';
+        
+        const verifyBtn = document.createElement('button');
+        verifyBtn.innerHTML = '✓';
+        verifyBtn.className = 'action-button verify-button';
+        verifyBtn.title = 'Verify';
+        verifyBtn.style.display = 'none';
+        verifyBtn.onclick = () => verifyAnswer(text);
+        
+        const communityBtn = document.createElement('button');
+        communityBtn.innerHTML = '🌐';
+        communityBtn.className = 'action-button community-button';
+        communityBtn.title = 'View community';
+        communityBtn.style.display = 'none';
+        communityBtn.onclick = () => goToCommunity(text);
+        
+        buttonsDiv.appendChild(verifyBtn);
+        buttonsDiv.appendChild(communityBtn);
+        
+        messageElement.addEventListener('mouseenter', () => {
+            verifyBtn.style.display = 'inline-flex';
+            communityBtn.style.display = 'inline-flex';
+        });
+        messageElement.addEventListener('mouseleave', () => {
+            verifyBtn.style.display = 'none';
+            communityBtn.style.display = 'none';
+        });
+        
+        messageElement.appendChild(buttonsDiv);
+    }
+    
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to bottom
 }
@@ -1274,6 +1382,7 @@ function displayMarkdownMessage(text, className) {
     const messageElement = document.createElement('div');
     messageElement.innerHTML = html;
     messageElement.className = className;
+    messageElement.dataset.fullText = text; // Store the full text for later use
     
     // Add copy button for agent messages
     if (className === 'agent-message') {
@@ -1283,17 +1392,37 @@ function displayMarkdownMessage(text, className) {
         copyButton.title = 'Copy message';
         copyButton.style.display = 'none'; // Hidden by default
         
-        // Show button on hover
+        // Verify button
+        const verifyBtn = document.createElement('button');
+        verifyBtn.innerHTML = '✓';
+        verifyBtn.className = 'action-button verify-button';
+        verifyBtn.title = 'Verify';
+        verifyBtn.style.display = 'none';
+        verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
+        
+        // Community button
+        const communityBtn = document.createElement('button');
+        communityBtn.innerHTML = '🌐';
+        communityBtn.className = 'action-button community-button';
+        communityBtn.title = 'View community';
+        communityBtn.style.display = 'none';
+        communityBtn.onclick = () => goToCommunity(messageElement.dataset.fullText || text);
+        
+        // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
             copyButton.style.display = 'inline-flex';
+            verifyBtn.style.display = 'inline-flex';
+            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             copyButton.style.display = 'none';
+            verifyBtn.style.display = 'none';
+            communityBtn.style.display = 'none';
         });
         
         // Copy button click handler
         copyButton.addEventListener('click', () => {
-            navigator.clipboard.writeText(text).then(() => {
+            navigator.clipboard.writeText(messageElement.dataset.fullText || text).then(() => {
                 // Show feedback
                 copyButton.innerHTML = '<i class="fas fa-check"></i>';
                 setTimeout(() => {
@@ -1305,6 +1434,8 @@ function displayMarkdownMessage(text, className) {
         });
         
         messageElement.appendChild(copyButton);
+        messageElement.appendChild(verifyBtn);
+        messageElement.appendChild(communityBtn);
     }
 
     // Add edit button for user messages
@@ -1370,39 +1501,95 @@ function displayMarkdownMessage(text, className) {
 
 
 function displayMarkdownMessageStream(text, messageElement) {
+    if (!messageElement) return;
+    
+    // Check if content div already exists
+    let contentDiv = messageElement.querySelector('.message-content');
+    if (!contentDiv) {
+        // Create content div for markdown (first time)
+        contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        messageElement.insertBefore(contentDiv, messageElement.firstChild);
+        // Store in separate attribute for streaming
+        messageElement.dataset.streamingText = text;
+    } else {
+        // Update streaming text (will be overridden by response data later)
+        messageElement.dataset.streamingText = text;
+    }
+    
+    // Update content (this will be called multiple times as stream comes in)
     const html = markdown.render(text);
-    messageElement.innerHTML = html;
+    contentDiv.innerHTML = html;
 
-    // Add copy button for agent messages
-    const copyButton = document.createElement('button');
-    copyButton.innerHTML = '<i class="fas fa-copy"></i>';
-    copyButton.className = 'copy-button';
-    copyButton.title = 'Copy message';
-    copyButton.style.display = 'none'; // Hidden by default
-    
-    // Show button on hover
-    messageElement.addEventListener('mouseenter', () => {
-        copyButton.style.display = 'inline-flex';
-    });
-    messageElement.addEventListener('mouseleave', () => {
-        copyButton.style.display = 'none';
-    });
-    
-    // Copy button click handler
-    copyButton.addEventListener('click', () => {
-        navigator.clipboard.writeText(text).then(() => {
-            // Show feedback
-            copyButton.innerHTML = '<i class="fas fa-check"></i>';
-            setTimeout(() => {
-                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
-            }, 1000);
-        }).catch(err => {
-            console.error('Failed to copy text: ', err);
+    // Check if buttons already added to messageElement
+    if (!messageElement.querySelector('.copy-button')) {
+
+        // Add copy button for agent messages
+        const copyButton = document.createElement('button');
+        copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+        copyButton.className = 'copy-button';
+        copyButton.title = 'Copy message';
+        copyButton.style.display = 'none'; // Hidden by default
+        
+        // Verify button
+        const verifyBtn = document.createElement('button');
+        verifyBtn.innerHTML = '✓';
+        verifyBtn.className = 'action-button verify-button';
+        verifyBtn.title = 'Verify';
+        verifyBtn.style.display = 'none';
+        verifyBtn.onclick = function() { 
+            // Always use the GLOBAL lastAgentResponse first (has the FULL answer from API)
+            // Then fallback to messageElement.dataset.fullText, then streaming text, then local text
+            const answer = lastAgentResponse || messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
+            console.log('🔵 DEBUG verifyBtn click:', { 
+                source: lastAgentResponse ? 'lastAgentResponse' : (messageElement.dataset.fullText ? 'dataset.fullText' : (messageElement.dataset.streamingText ? 'streamingText' : 'text param')),
+                answerLength: answer.length, 
+                answerPreview: answer.substring(0, 100) 
+            });
+            verifyAnswer(answer, this); 
+        };
+        
+        // Community button
+        const communityBtn = document.createElement('button');
+        communityBtn.innerHTML = '🌐';
+        communityBtn.className = 'action-button community-button';
+        communityBtn.title = 'View community';
+        communityBtn.style.display = 'none';
+        communityBtn.onclick = function() { 
+            const answer = messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
+            goToCommunity(answer); 
+        };
+        
+        // Add buttons directly to messageElement
+        messageElement.appendChild(copyButton);
+        messageElement.appendChild(verifyBtn);
+        messageElement.appendChild(communityBtn);
+        
+        // Show buttons on hover
+        messageElement.addEventListener('mouseenter', () => {
+            copyButton.style.display = 'inline-flex';
+            verifyBtn.style.display = 'inline-flex';
+            communityBtn.style.display = 'inline-flex';
         });
-    });
-    
-    messageElement.appendChild(copyButton);
-    
+        messageElement.addEventListener('mouseleave', () => {
+            copyButton.style.display = 'none';
+            verifyBtn.style.display = 'none';
+            communityBtn.style.display = 'none';
+        });
+        
+        // Copy button click handler
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(messageElement.dataset.fullText || text).then(() => {
+                // Show feedback
+                copyButton.innerHTML = '<i class="fas fa-check"></i>';
+                setTimeout(() => {
+                    copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+    }
 
     // Only auto-scroll if user is already at (or near) the bottom
     const threshold = 300; // px, how close to bottom counts as "at the bottom"
@@ -2352,3 +2539,629 @@ window.confirmDirectoryChange = confirmDirectoryChange;
 window.filterItemsForChange = filterItemsForChange;
 window.selectDirectoryForChange = selectDirectoryForChange;
 
+// === Verified Answers Functions ===
+async function rateAnswer(answerText, rating) {
+    const lastUserMessage = window.lastUserMessage || 'Unknown question';
+    
+    console.log(`Rating: ${rating}, Answer: ${answerText.substring(0, 50)}...`);
+    
+    try {
+        // Fetch current session data
+        const sessionResponse = await fetch('/auth/session');
+        if (!sessionResponse.ok) {
+            alert('ข้อผิดพลาด: ไม่สามารถดึงข้อมูลการเข้าสู่ระบบได้');
+            return;
+        }
+        const sessionData = await sessionResponse.json();
+        const userName = sessionData?.username || 'Anonymous';
+        
+        const response = await fetch('/api/rate-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: lastUserMessage,
+                answer: answerText,
+                rating: rating,
+                userName: userName
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            alert('เกิดข้อผิดพลาด: ' + (errorData.error || `Server error (${response.status})`));
+            return;
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('ขอบคุณสำหรับการให้คะแนน!');
+        } else {
+            alert('เกิดข้อผิดพลาด: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error rating answer:', error);
+        alert('ข้อผิดพลาดในการส่ง: ' + error.message);
+    }
+}
+
+async function verifyAnswer(answerText, verifyBtn) {
+    // Try to get user question from the message element's stored data, fallback to window.lastUserMessage
+    let lastUserMessage = 'Unknown question';
+    let messageElement = null;
+    
+    if (verifyBtn && verifyBtn.closest) {
+        messageElement = verifyBtn.closest('[class*="message"]');
+        if (messageElement && messageElement.dataset.userQuestion) {
+            lastUserMessage = messageElement.dataset.userQuestion;
+        }
+    }
+    
+    if (lastUserMessage === 'Unknown question') {
+        lastUserMessage = window.lastUserMessage || 'Unknown question';
+    }
+    
+    // ===== USE GLOBAL RESPONSE (most reliable source) =====
+    let finalAnswer = lastAgentResponse || answerText;
+    
+    if (!finalAnswer || finalAnswer.length === 0) {
+        console.error('Error: finalAnswer is empty!');
+        alert('Error: Response is empty. Please try again.');
+        return;
+    }
+    
+    // PROTECTION: Check if stream is complete
+    if (messageElement && messageElement.dataset.isStreamComplete === 'false') {
+        alert('⏳ โปรดรอให้ response มาสมบูรณ์ก่อน verify...');
+        return;
+    }
+    
+    // Show the verify modal
+    showVerifyModal(lastUserMessage, finalAnswer, verifyBtn);
+}
+
+// Show Verify Modal (Community-style)
+function showVerifyModal(question, answer, verifyBtn) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('verifyModal');
+    if (existingModal) existingModal.remove();
+    
+    // Available tags
+    const availableTags = ['PRVX 4', 'D1', 'Handler', 'V9300', 'Prober', 'Tester', 'AI', 'Sensor'];
+    
+    // Available departments
+    const departments = ['WT', 'FT', 'PE', 'QA', 'IT', 'MFG', 'ENG', 'RnD'];
+    
+    // Create modal HTML
+    const modalHTML = `
+        <div class="verify-modal show" id="verifyModal">
+            <div class="verify-modal-content">
+                <div class="verify-modal-header">
+                    <div class="verify-modal-title">
+                        <i class="fas fa-check-circle"></i>
+                        Verify Answer
+                    </div>
+                    <button class="verify-modal-close" id="verifyModalClose">&times;</button>
+                </div>
+                
+                <div class="verify-info-box">
+                    <i class="fas fa-info-circle"></i>
+                    <span>การ Verify จะบันทึกคำถาม-คำตอบนี้ไปยัง Community เพื่อให้ผู้อื่นสามารถค้นหาและใช้งานได้</span>
+                </div>
+                
+                <div class="verify-preview-section">
+                    <div class="verify-preview-label">
+                        <i class="fas fa-question-circle"></i> Question
+                    </div>
+                    <div class="verify-preview-box question" id="verifyQuestion">${escapeHtml(question)}</div>
+                </div>
+                
+                <div class="verify-preview-section">
+                    <div class="verify-preview-label">
+                        <i class="fas fa-comment-dots"></i> Answer Preview
+                    </div>
+                    <div class="verify-preview-box answer" id="verifyAnswer">${escapeHtml(answer.substring(0, 500))}${answer.length > 500 ? '...' : ''}</div>
+                </div>
+                
+                <div class="verify-score-section">
+                    <div class="verify-score-label">
+                        <i class="fas fa-thumbs-up"></i> Rate this answer:
+                    </div>
+                    <div class="verify-score-buttons">
+                        <button type="button" class="rating-btn" data-rating="-1">❌ Incorrect</button>
+                        <button type="button" class="rating-btn" data-rating="0">➖ Neutral</button>
+                        <button type="button" class="rating-btn" data-rating="1">✓ Correct</button>
+                    </div>
+                    <input type="hidden" id="verifyScore" value="0">
+                </div>
+                
+                <div class="verify-tags-section">
+                    <div class="verify-tags-label">
+                        <i class="fas fa-tags"></i> Select Tags (Optional)
+                    </div>
+                    <div class="verify-tags-grid" id="verifyTagsGrid">
+                        ${availableTags.map(tag => `
+                            <div class="verify-tag-item" data-tag="${tag}">${tag}</div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="verify-comment-section">
+                    <div class="verify-comment-label">
+                        <i class="fas fa-edit"></i> Comment (Optional)
+                    </div>
+                    <textarea class="verify-comment-input" id="verifyComment" placeholder="เพิ่มหมายเหตุหรือคอมเมนต์..."></textarea>
+                </div>
+                
+                <div class="verify-type-section">
+                    <div class="verify-type-label">Verification type</div>
+                    <div class="verify-radio-group">
+                        <label class="verify-radio-item">
+                            <input type="radio" name="verificationType" value="self" checked>
+                            <span class="verify-radio-text">Verify this answer "by my department"</span>
+                            <span class="verify-dept-badge" id="userDeptBadge">WT</span>
+                        </label>
+                        <label class="verify-radio-item">
+                            <input type="radio" name="verificationType" value="request">
+                            <span class="verify-radio-text">Request verification from other department(s)</span>
+                        </label>
+                    </div>
+                    
+                    <div class="verify-dept-select-wrapper" id="deptSelectWrapper" style="display: none;">
+                        <div class="verify-dept-dropdown" id="deptDropdown">
+                            <div class="verify-dept-dropdown-header" id="deptDropdownHeader">
+                                <span class="verify-dept-dropdown-text" id="deptDropdownText">Select department(s)...</span>
+                                <span class="verify-dept-dropdown-arrow">▼</span>
+                            </div>
+                            <div class="verify-dept-dropdown-menu" id="deptDropdownMenu">
+                                ${departments.map(dept => `
+                                    <label class="verify-dept-dropdown-item">
+                                        <input type="checkbox" name="requestDept" value="${dept}">
+                                        <span class="verify-dept-checkbox-box"></span>
+                                        <span class="verify-dept-checkbox-text">${dept}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="verify-checkbox-section">
+                    <label class="verify-checkbox-item">
+                        <input type="checkbox" id="notifyCheckbox">
+                        <span class="verify-checkbox-text">Notify me when the answer is verified</span>
+                    </label>
+                </div>
+                
+                <div class="verify-modal-actions">
+                    <button class="verify-btn-cancel" id="verifyBtnCancel">Cancel</button>
+                    <button class="verify-btn-submit" id="verifyBtnSubmit">
+                        <i class="fas fa-check"></i> Submit Review
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Get modal elements
+    const modal = document.getElementById('verifyModal');
+    const closeBtn = document.getElementById('verifyModalClose');
+    const cancelBtn = document.getElementById('verifyBtnCancel');
+    const submitBtn = document.getElementById('verifyBtnSubmit');
+    const tagsGrid = document.getElementById('verifyTagsGrid');
+    const deptSelectWrapper = document.getElementById('deptSelectWrapper');
+    const deptDropdownHeader = document.getElementById('deptDropdownHeader');
+    const deptDropdownMenu = document.getElementById('deptDropdownMenu');
+    const deptDropdownText = document.getElementById('deptDropdownText');
+    
+    // Dropdown toggle handler
+    deptDropdownHeader.addEventListener('click', () => {
+        deptDropdownMenu.classList.toggle('show');
+        deptDropdownHeader.classList.toggle('open');
+    });
+    
+    // Update dropdown text when checkboxes change
+    deptDropdownMenu.addEventListener('change', () => {
+        const checked = Array.from(document.querySelectorAll('input[name="requestDept"]:checked'));
+        if (checked.length > 0) {
+            deptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
+            deptDropdownText.classList.add('has-selection');
+        } else {
+            deptDropdownText.textContent = 'Select department(s)...';
+            deptDropdownText.classList.remove('has-selection');
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.verify-dept-dropdown')) {
+            deptDropdownMenu.classList.remove('show');
+            deptDropdownHeader.classList.remove('open');
+        }
+    });
+    
+    // Selected tags array
+    let selectedTags = [];
+    
+    // Tag selection handler
+    tagsGrid.addEventListener('click', (e) => {
+        const tagItem = e.target.closest('.verify-tag-item');
+        if (tagItem) {
+            const tag = tagItem.dataset.tag;
+            if (tagItem.classList.contains('selected')) {
+                tagItem.classList.remove('selected');
+                selectedTags = selectedTags.filter(t => t !== tag);
+            } else {
+                tagItem.classList.add('selected');
+                selectedTags.push(tag);
+            }
+        }
+    });
+    
+    // Radio button handler for verification type
+    const radioButtons = document.querySelectorAll('input[name="verificationType"]');
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'request') {
+                deptSelectWrapper.style.display = 'block';
+            } else {
+                deptSelectWrapper.style.display = 'none';
+            }
+        });
+    });
+    
+    // Rating buttons handler
+    const ratingBtns = document.querySelectorAll('.rating-btn');
+    ratingBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const rating = btn.dataset.rating;
+            document.getElementById('verifyScore').value = rating;
+            
+            // Update visual state
+            ratingBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    
+    // Set default rating to 0 (Neutral)
+    const defaultBtn = document.querySelector('[data-rating="0"]');
+    if (defaultBtn) {
+        defaultBtn.click();
+    }
+    
+    // Department checkboxes are now handled via querySelectorAll on submit
+    
+    // Close modal function
+    function closeModal() {
+        modal.classList.remove('show');
+        setTimeout(() => modal.remove(), 300);
+    }
+    
+    // Close handlers
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Escape key close
+    document.addEventListener('keydown', function escHandler(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    });
+    
+    // Submit handler
+    submitBtn.addEventListener('click', async () => {
+        const comment = document.getElementById('verifyComment').value.trim();
+        const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
+        const selectedDepts = Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
+        const notifyMe = document.getElementById('notifyCheckbox').checked;
+        const score = parseInt(document.getElementById('verifyScore').value) || 80;
+        
+        // Disable button while processing
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        
+        try {
+            // Fetch current session data
+            const sessionResponse = await fetch('/auth/session');
+            if (!sessionResponse.ok) {
+                alert('ข้อผิดพลาด: ไม่สามารถดึงข้อมูลการเข้าสู่ระบบได้');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+                return;
+            }
+            const sessionData = await sessionResponse.json();
+            const userName = sessionData?.username || 'Anonymous';
+            
+            const response = await fetch('/api/verify-answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question: question,
+                    answer: answer,
+                    comment: comment || '',
+                    userName: userName,
+                    rating: score,
+                    tags: selectedTags,
+                    verificationType: verificationType,
+                    requestedDepartments: selectedDepts,
+                    notifyOnVerified: notifyMe
+                })
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                alert('เกิดข้อผิดพลาด: ' + (errorData.error || `Server error (${response.status})`));
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+                return;
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                // Show success state
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submitted!';
+                submitBtn.style.background = '#28a745';
+                
+                // Show checkmark feedback on verify button
+                if (verifyBtn) {
+                    const originalText = verifyBtn.innerHTML;
+                    verifyBtn.innerHTML = '✓';
+                    verifyBtn.style.opacity = '0.7';
+                    setTimeout(() => {
+                        verifyBtn.innerHTML = originalText;
+                        verifyBtn.style.opacity = '1';
+                    }, 2000);
+                }
+                
+                // Close modal after delay
+                setTimeout(() => {
+                    closeModal();
+                }, 1000);
+            } else {
+                alert('เกิดข้อผิดพลาด: ' + (data.error || 'Unknown error'));
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+            }
+        } catch (error) {
+            console.error('Error verifying answer:', error);
+            alert('ข้อผิดพลาดในการส่ง: ' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+        }
+    });
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function goToCommunity(answerText) {
+    window.lastUserMessage = window.lastUserMessage || 'Unknown question';
+    window.open('/community.html?search=' + encodeURIComponent(window.lastUserMessage), '_blank');
+}
+
+// ===== CREATE QUESTION FUNCTIONS =====
+
+// List of available departments
+const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'PE', 'QA', 'IT'];
+
+// Initialize departments list when page loads
+function initializeDepartmentsList() {
+    const departmentsList = document.getElementById('departmentsList');
+    if (departmentsList) {
+        departmentsList.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+            <label class="dept-checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" class="dept-checkbox" value="${dept}" style="cursor: pointer;">
+                <span>${dept}</span>
+            </label>
+        `).join('');
+    }
+}
+
+// Call on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeDepartmentsList);
+} else {
+    initializeDepartmentsList();
+}
+
+// Submit to Staging Ground
+async function submitToStaging() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+    const tags = document.getElementById('questionTags').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: title,
+                answer: body,
+                tags: tags,
+                verificationType: 'staging'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Question submitted to staging ground!');
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit question'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting question: ' + error.message);
+    }
+}
+
+// Request verification from other departments
+function requestVerification() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    // Store current data for submission
+    window.currentQuestion = {
+        title: title,
+        body: body,
+        tags: document.getElementById('questionTags').value.trim()
+    };
+
+    // Open modal
+    document.getElementById('requestModal').style.display = 'flex';
+}
+
+// Close request modal
+function closeRequestModal() {
+    document.getElementById('requestModal').style.display = 'none';
+}
+
+// Submit request verification
+async function submitRequest() {
+    const checkboxes = document.querySelectorAll('.dept-checkbox:checked');
+    const selectedDepts = Array.from(checkboxes).map(cb => cb.value);
+    const dueDate = document.getElementById('requestDueDate').value;
+
+    if (selectedDepts.length === 0) {
+        alert('Please select at least one department!');
+        return;
+    }
+
+    if (!window.currentQuestion) {
+        alert('Error: Question data not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: window.currentQuestion.title,
+                answer: window.currentQuestion.body,
+                tags: window.currentQuestion.tags,
+                verificationType: 'request',
+                requestedDepartments: selectedDepts,
+                dueDate: dueDate || null
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Verification request sent to ' + selectedDepts.join(', ') + '!');
+            closeRequestModal();
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            // Reset checkboxes
+            document.querySelectorAll('.dept-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('requestDueDate').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit request'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting request: ' + error.message);
+    }
+}
+
+// Self verify
+function selfVerify() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    // Store current data for submission
+    window.currentQuestion = {
+        title: title,
+        body: body,
+        tags: document.getElementById('questionTags').value.trim()
+    };
+
+    // Open modal
+    document.getElementById('selfVerifyModal').style.display = 'flex';
+}
+
+// Close self verify modal
+function closeSelfVerifyModal() {
+    document.getElementById('selfVerifyModal').style.display = 'none';
+}
+
+// Submit self verify
+async function submitSelfVerify() {
+    const answer = document.getElementById('selfVerifyAnswer').value.trim();
+
+    if (!answer) {
+        alert('Please provide an answer!');
+        return;
+    }
+
+    if (!window.currentQuestion) {
+        alert('Error: Question data not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: window.currentQuestion.title,
+                answer: answer,
+                tags: window.currentQuestion.tags,
+                verificationType: 'self'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Answer verified and submitted by your department!');
+            closeSelfVerifyModal();
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            document.getElementById('selfVerifyAnswer').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit verification'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting verification: ' + error.message);
+    }
+}

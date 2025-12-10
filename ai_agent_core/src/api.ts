@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import { Readable } from 'stream';
 import FormData from 'form-data';
 import * as fs from 'fs';
+import { saveVerifiedAnswer, searchVerifiedAnswers, updateAnswerRating, getAnswerVerifications } from './db.js';
 
 
 dotenv.config();
@@ -290,18 +291,184 @@ async function searchByDuckDuckGo(query: string, maxResults: number) {
   }
 }
 
+// === File/Image/Table Cleanup & Processing ===
+// Function to organize files for model processing
+async function organizeFilesForProcessing(filePaths: string[]) {
+  const organized = {
+    images: [] as string[],
+    tables: [] as string[],
+    documents: [] as string[],
+    other: [] as string[]
+  };
+
+  for (const filePath of filePaths) {
+    const ext = filePath.toLowerCase().split('.').pop() || '';
+    
+    // Image files
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) {
+      organized.images.push(filePath);
+    }
+    // Table/Spreadsheet files
+    else if (['csv', 'xlsx', 'xls', 'json'].includes(ext)) {
+      organized.tables.push(filePath);
+    }
+    // Document files
+    else if (['pdf', 'docx', 'doc', 'txt', 'md'].includes(ext)) {
+      organized.documents.push(filePath);
+    }
+    // Other files
+    else {
+      organized.other.push(filePath);
+    }
+  }
+
+  return organized;
+}
+
+// Function to prepare file metadata for model
+async function prepareFileMetadata(filePaths: string[]) {
+  const metadata = [];
+
+  for (const filePath of filePaths) {
+    try {
+      const stat = fs.statSync(filePath);
+      const fileName = path.basename(filePath);
+      const ext = fileName.split('.').pop() || 'unknown';
+      
+      metadata.push({
+        name: fileName,
+        path: filePath,
+        size: stat.size,
+        type: getFileType(ext),
+        extension: ext,
+        createdAt: stat.birthtime,
+        modifiedAt: stat.mtime
+      });
+    } catch (error) {
+      console.error(`Error reading file metadata for ${filePath}:`, error);
+    }
+  }
+
+  return metadata;
+}
+
+// Helper function to determine file type
+function getFileType(ext: string): string {
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+  const tableExts = ['csv', 'xlsx', 'xls', 'json'];
+  const docExts = ['pdf', 'docx', 'doc', 'txt', 'md', 'odt', 'rtf'];
+  
+  if (imageExts.includes(ext.toLowerCase())) return 'image';
+  if (tableExts.includes(ext.toLowerCase())) return 'table';
+  if (docExts.includes(ext.toLowerCase())) return 'document';
+  return 'file';
+}
+
+// Function to cleanup and format file content for processing
+async function cleanupFileForModel(filePath: string): Promise<string> {
+  try {
+    const ext = filePath.toLowerCase().split('.').pop() || '';
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+
+    if (['csv', 'json'].includes(ext)) {
+      // For CSV/JSON: parse and format as structured data
+      if (ext === 'csv') {
+        const lines = fileContent.split('\n').filter(l => l.trim());
+        return `[CSV File: ${path.basename(filePath)}]\n${lines.join('\n')}`;
+      } else if (ext === 'json') {
+        try {
+          const parsed = JSON.parse(fileContent);
+          return `[JSON File: ${path.basename(filePath)}]\n${JSON.stringify(parsed, null, 2)}`;
+        } catch {
+          return fileContent;
+        }
+      }
+    }
+    
+    if (['txt', 'md'].includes(ext)) {
+      // For text files: clean up whitespace
+      return fileContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join('\n');
+    }
+
+    return fileContent;
+  } catch (error) {
+    console.error(`Error cleaning up file ${filePath}:`, error);
+    return '';
+  }
+}
+
+// Function to prepare files summary for model context
+async function prepareFileSummaryForModel(filePaths: string[]): Promise<string> {
+  let summary = '';
+  const organized = await organizeFilesForProcessing(filePaths);
+  
+  if (organized.images.length > 0) {
+    summary += `\n📷 Images (${organized.images.length}): ${organized.images.map(p => path.basename(p)).join(', ')}\n`;
+  }
+  
+  if (organized.tables.length > 0) {
+    summary += `📊 Tables/Data (${organized.tables.length}): ${organized.tables.map(p => path.basename(p)).join(', ')}\n`;
+  }
+  
+  if (organized.documents.length > 0) {
+    summary += `📄 Documents (${organized.documents.length}): ${organized.documents.map(p => path.basename(p)).join(', ')}\n`;
+  }
+  
+  if (organized.other.length > 0) {
+    summary += `📦 Other Files (${organized.other.length}): ${organized.other.map(p => path.basename(p)).join(', ')}\n`;
+  }
+
+  return summary;
+}
+
 async function processFiles(text: string, filePaths: string[], userId: string, chatHistoryId: string) {
   try {
+    // Step 1: Organize files by type
+    const organized = await organizeFilesForProcessing(filePaths);
+    console.log('Organized files:', organized);
+
+    // Step 2: Prepare file metadata
+    const metadata = await prepareFileMetadata(filePaths);
+    console.log('File metadata:', metadata);
+
+    // Step 3: Create form data with organized structure
     const formData = new FormData();
     formData.append('text', text);
     formData.append('user_id', userId);
     formData.append('chat_history_id', chatHistoryId);
+    formData.append('file_metadata', JSON.stringify(metadata));
 
+    // Step 4: Process each file type appropriately
     for (const filePath of filePaths) {
-      const fileStream = fs.createReadStream(filePath);
-      formData.append('files', fileStream, { filename: path.basename(filePath) });
+      const fileName = path.basename(filePath);
+      const fileType = getFileType(filePath.split('.').pop() || '');
+      
+      try {
+        // For documents and text files, add cleaned content
+        if (['document', 'table'].includes(fileType) && fs.existsSync(filePath)) {
+          const cleanContent = await cleanupFileForModel(filePath);
+          formData.append(`${fileType}_content`, cleanContent, { filename: fileName });
+        }
+
+        // For images, add the file directly
+        if (fileType === 'image' && fs.existsSync(filePath)) {
+          const fileStream = fs.createReadStream(filePath);
+          formData.append('images', fileStream, { filename: fileName });
+        }
+
+        // For all files, add the file stream
+        const fileStream = fs.createReadStream(filePath);
+        formData.append('files', fileStream, { filename: fileName });
+      } catch (err) {
+        console.error(`Error adding file ${fileName} to form data:`, err);
+      }
     }
 
+    // Step 5: Send organized data to API server
     const response = await fetch(`${process.env.API_SERVER_URL}/process`, {
       method: 'POST',
       body: formData,
@@ -776,7 +943,63 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
     case 'ask_followup_question':
         return await AskFollowupQuestion(toolParameters.question, toolParameters.follow_up);
 
+    // --- Verified Answers Tool Cases ---
+    case 'SearchVerifiedAnswers':
+      if (!Array.isArray(toolParameters.question_embedding)) throw new Error('SearchVerifiedAnswers requires question_embedding array.');
+      return await SearchVerifiedAnswers(toolParameters.question_embedding, toolParameters.threshold || 0.7, toolParameters.limit || 5);
+
+    case 'SaveVerifiedAnswer':
+      if (typeof toolParameters.question !== 'string' || typeof toolParameters.answer !== 'string') {
+        throw new Error('SaveVerifiedAnswer requires question and answer.');
+      }
+      return await SaveVerifiedAnswer(
+        toolParameters.question,
+        toolParameters.answer,
+        toolParameters.question_embedding,
+        toolParameters.user_id,
+        toolParameters.rating,
+        toolParameters.commenter_name
+      );
+
     default:
       throw new Error(`Tool function '${toolName}' not found.`);
+  }
+}
+
+// === Verified Answers Functions ===
+
+async function SearchVerifiedAnswers(questionEmbedding: number[], threshold: number = 0.7, limit: number = 5) {
+  try {
+    const results = await searchVerifiedAnswers(questionEmbedding, threshold, limit);
+    return {
+      success: true,
+      results: results.map(r => ({
+        id: r.id,
+        question: r.question,
+        answer: r.answer,
+        rating: r.avg_rating,
+        verified_count: r.verified_count,
+        similarity: r.similarity
+      }))
+    };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function SaveVerifiedAnswer(
+  question: string,
+  answer: string,
+  questionEmbedding: number[],
+  userId?: number,
+  rating: number = 1,
+  commenterName: string = 'Anonymous'
+) {
+  try {
+    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, userId, rating, commenterName);
+    await updateAnswerRating(result.answerId);
+    return { success: true, answerId: result.answerId };
+  } catch (error) {
+    return { success: false, error: String(error) };
   }
 }

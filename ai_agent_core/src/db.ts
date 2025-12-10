@@ -155,6 +155,118 @@ END
 $$;
 `;
 
+// === PGVECTOR EXTENSION ===
+const enablePgvectorQuery = `
+CREATE EXTENSION IF NOT EXISTS vector;
+`;
+
+// === VERIFIED ANSWERS TABLES ===
+const createVerifiedAnswersTableQuery = `
+CREATE TABLE IF NOT EXISTS verified_answers (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    tags TEXT[],
+    department VARCHAR(255),
+    verification_type VARCHAR(50) DEFAULT 'staging',
+    question_embedding VECTOR(384),
+    avg_rating FLOAT DEFAULT 0,
+    verified_count INT DEFAULT 0,
+    rating_count INT DEFAULT 0,
+    views INT DEFAULT 0,
+    requested_departments TEXT[],
+    due_date TIMESTAMP,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_updated_at TIMESTAMP DEFAULT NOW()
+);
+`;
+
+const createVerifiedAnswersIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_verified_answers_embedding 
+ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
+`;
+
+const createAnswerVerificationsTableQuery = `
+CREATE TABLE IF NOT EXISTS answer_verifications (
+    id SERIAL PRIMARY KEY,
+    verified_answer_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    user_id INT,
+    rating INT CHECK (rating IN (-1, 0, 1)),
+    comment TEXT,
+    commenter_name VARCHAR(255),
+    verification_type VARCHAR(50) DEFAULT 'self',
+    requested_departments TEXT[],
+    due_date TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+`;
+
+const createAnswerVerificationsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_answer_verifications_answer 
+ON answer_verifications(verified_answer_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_verifications_unique 
+ON answer_verifications(verified_answer_id, user_id);
+`;
+
+// Comments table for Q&A
+const createCommentsTableQuery = `
+CREATE TABLE IF NOT EXISTS comments (
+    id SERIAL PRIMARY KEY,
+    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    user_id INT,
+    username VARCHAR(255),
+    text TEXT NOT NULL,
+    department VARCHAR(255),
+    attachments JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+`;
+
+const createCommentsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_comments_question 
+ON comments(question_id);
+`;
+
+// Question Votes table for Stack Overflow style voting
+const createQuestionVotesTableQuery = `
+CREATE TABLE IF NOT EXISTS question_votes (
+    id SERIAL PRIMARY KEY,
+    question_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    vote INTEGER NOT NULL CHECK (vote IN (-1, 1)),
+    voted_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(question_id, user_id),
+    FOREIGN KEY (question_id) REFERENCES verified_answers(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+`;
+
+const createQuestionVotesIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_question_votes_question_id ON question_votes(question_id);
+CREATE INDEX IF NOT EXISTS idx_question_votes_user_id ON question_votes(user_id);
+`;
+
+// Question Attachments table for file uploads in Q&A
+const createQuestionAttachmentsTableQuery = `
+CREATE TABLE IF NOT EXISTS question_attachments (
+    id SERIAL PRIMARY KEY,
+    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    file_name VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(100),
+    file_data BYTEA NOT NULL,
+    file_size_bytes BIGINT,
+    uploaded_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+`;
+
+const createQuestionAttachmentsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_question_attachments_question 
+ON question_attachments(question_id);
+`;
+
 // Note: Guest support columns are now integrated into the main createUsersTableQuery
 // to simplify initialization. This block is no longer strictly necessary if starting fresh.
 const alterGuestSupportQuery = `
@@ -195,7 +307,31 @@ async function ensureMinIOBucketExists() {
 }
 
 async function initializeDatabase() {
+  const maxRetries = 30; // 30 retries * 1 second = 30 seconds max wait
+  let retries = 0;
+
+  while (retries < maxRetries) {
+    try {
+      // Test database connection first
+      await pool.query('SELECT 1');
+      console.log('DB: Database connection successful');
+      break;
+    } catch (error) {
+      retries++;
+      if (retries >= maxRetries) {
+        console.error('Error: Could not connect to database after 30 retries');
+        throw error;
+      }
+      console.log(`DB: Waiting for database... (attempt ${retries}/${maxRetries})`);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
   try {
+    // Enable pgvector extension first
+    await pool.query(enablePgvectorQuery);
+    console.log('DB: pgvector extension enabled');
+
     await pool.query(createUsersTableQuery);
     console.log('DB: Users table created or already exists');
 
@@ -212,17 +348,134 @@ async function initializeDatabase() {
     await pool.query(createDocumentPageEmbeddingsTableQuery);
     console.log('DB: Document page embeddings table created or already exists');
 
+    // === VERIFIED ANSWERS INITIALIZATION ===
+    await pool.query(createVerifiedAnswersTableQuery);
+    console.log('DB: Verified answers table created or already exists');
+
+    await pool.query(createVerifiedAnswersIndexQuery);
+    console.log('DB: Verified answers index created or already exists');
+
+    // Drop old constraint if exists and add new one
+    try {
+      await pool.query(`
+        ALTER TABLE answer_verifications 
+        DROP CONSTRAINT IF EXISTS answer_verifications_rating_check;
+      `);
+      console.log('DB: Dropped old rating constraint');
+    } catch (e: any) {
+      console.log('DB: Could not drop old constraint (may not exist):', e.message);
+    }
+
+    // Add new constraint for rating (-1, 0, 1)
+    try {
+      await pool.query(`
+        ALTER TABLE answer_verifications 
+        ADD CONSTRAINT answer_verifications_rating_check 
+        CHECK (rating IN (-1, 0, 1));
+      `);
+      console.log('DB: Added new rating constraint for answer_verifications');
+    } catch (e: any) {
+      console.log('DB: Constraint already exists or error:', e.message);
+    }
+
+    await pool.query(createAnswerVerificationsTableQuery);
+    console.log('DB: Answer verifications table created or already exists');
+
+    await pool.query(createAnswerVerificationsIndexQuery);
+    console.log('DB: Answer verifications index created or already exists');
+
+    // Create comments table
+    await pool.query(createCommentsTableQuery);
+    console.log('DB: Comments table created or already exists');
+
+    await pool.query(createCommentsIndexQuery);
+    console.log('DB: Comments index created or already exists');
+
+    // Create question votes table
+    await pool.query(createQuestionVotesTableQuery);
+    console.log('DB: Question votes table created or already exists');
+
+    await pool.query(createQuestionVotesIndexQuery);
+    console.log('DB: Question votes indexes created or already exists');
+
+    // Create question attachments table
+    await pool.query(createQuestionAttachmentsTableQuery);
+    console.log('DB: Question attachments table created or already exists');
+
+    await pool.query(createQuestionAttachmentsIndexQuery);
+    console.log('DB: Question attachments index created or already exists');
+    // Add verification_type and requested_departments columns if not exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='verification_type'
+        ) THEN
+          ALTER TABLE answer_verifications ADD COLUMN verification_type VARCHAR(50) DEFAULT 'self';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='requested_departments'
+        ) THEN
+          ALTER TABLE answer_verifications ADD COLUMN requested_departments TEXT[];
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='due_date'
+        ) THEN
+          ALTER TABLE answer_verifications ADD COLUMN due_date TIMESTAMP;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: verification_type, requested_departments, and due_date columns added');
+
+    // Add views column if not exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='views'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN views INT DEFAULT 0;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: Views column added to verified_answers table');
+
     await pool.query(alterUsersTableQuery);
     console.log('DB: Foreign key added to users table');
+    console.log('✅ Database initialization complete!');
     
   } catch (error) {
     console.error('Error creating tables:', error);
+    throw error;
   }
 }
 
 // --- Initialize services on startup ---
-await initializeDatabase();
-await ensureMinIOBucketExists();
+(async () => {
+  try {
+    await initializeDatabase();
+    console.log('✅ Database initialization complete');
+  } catch (error) {
+    console.error('❌ FATAL: Database initialization failed:', error);
+    process.exit(1);
+  }
+})();
+
+(async () => {
+  try {
+    await ensureMinIOBucketExists();
+    console.log('✅ MinIO bucket initialization complete');
+  } catch (error) {
+    console.error('⚠️ Warning: MinIO bucket initialization failed:', error);
+    // Don't exit for MinIO, it's less critical
+  }
+})();
 
 // --- MinIO File Operation Functions ---
 
@@ -722,6 +975,203 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
   }
 }
 
+// ===================================
+// === VERIFIED ANSWERS FUNCTIONS ===
+// ===================================
+
+/**
+ * ① บันทึกคำตอบที่ verified
+ * Saves a verified answer with question embedding and rating verification
+ */
+async function saveVerifiedAnswer(
+  question: string,
+  answer: string,
+  questionEmbedding: number[],
+  userId?: number,
+  rating?: number,
+  commenterName?: string,
+  comment?: string,
+  verificationType?: string,
+  requestedDepartments?: string[]
+) {
+  try {
+    // First, check if this answer already exists (by question + answer)
+    const existingAnswer = await pool.query(
+      `SELECT id FROM verified_answers 
+       WHERE question = $1 AND answer = $2 
+       LIMIT 1`,
+      [question, answer]
+    );
+
+    let answerId: number;
+
+    if (existingAnswer.rows.length > 0) {
+      // Answer already exists - get its ID
+      answerId = existingAnswer.rows[0].id;
+      
+      // Update verification_type and requested_departments if provided
+      if (verificationType || requestedDepartments) {
+        await pool.query(
+          `UPDATE verified_answers 
+           SET verification_type = $1, requested_departments = $2
+           WHERE id = $3`,
+          [verificationType || 'self', requestedDepartments || [], answerId]
+        );
+      }
+    } else {
+      // Answer doesn't exist - create new one
+      // Format embedding as PostgreSQL vector string (allow NULL if no embedding)
+      let embeddingStr = null;
+      if (questionEmbedding && questionEmbedding.length > 0) {
+        embeddingStr = `[${questionEmbedding.join(',')}]`;
+      }
+      const result = await pool.query(
+        `INSERT INTO verified_answers (question, answer, question_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments)
+         VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+         RETURNING id`,
+        [question, answer, embeddingStr, 0, verificationType || 'self', requestedDepartments || []]
+      );
+      answerId = result.rows[0].id;
+    }
+
+    // Determine actual rating based on verification type
+    // If requesting verification from others, set rating to 0 (pending)
+    const actualRating = verificationType === 'request' ? 0 : (rating ?? 1);
+
+    // Check if this user already rated this answer
+    if (userId && rating !== undefined) {
+      const userRating = await pool.query(
+        `SELECT id FROM answer_verifications 
+         WHERE verified_answer_id = $1 AND user_id = $2 
+         LIMIT 1`,
+        [answerId, userId]
+      );
+
+      if (userRating.rows.length > 0) {
+        // User already rated this answer - update instead of insert
+        await pool.query(
+          `UPDATE answer_verifications 
+           SET rating = $1, commenter_name = $2, comment = $3, verification_type = $4, requested_departments = $5
+           WHERE verified_answer_id = $6 AND user_id = $7`,
+          [actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || [], answerId, userId]
+        );
+      } else {
+        // New rating from this user
+        await pool.query(
+          `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [answerId, userId, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
+        );
+      }
+    } else if (rating !== undefined) {
+      // Anonymous user - always allow new rating
+      await pool.query(
+        `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [answerId, null, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
+      );
+    }
+
+    return { success: true, answerId };
+  } catch (error) {
+    console.error('Error saving verified answer:', error);
+    throw error;
+  }
+}
+
+/**
+ * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
+ * Searches for verified answers using vector similarity
+ */
+async function searchVerifiedAnswers(
+  questionEmbedding: number[],
+  threshold: number = 0.7,
+  limit: number = 5
+) {
+  try {
+    // Validate embedding
+    if (!questionEmbedding || questionEmbedding.length === 0) {
+      console.warn('Empty embedding provided, returning empty results');
+      return [];
+    }
+
+    // Format embedding as PostgreSQL vector string
+    const embeddingStr = `[${questionEmbedding.join(',')}]`;
+
+    const result = await pool.query(
+      `SELECT 
+        id,
+        question,
+        answer,
+        avg_rating,
+        verified_count,
+        rating_count,
+        1 - (question_embedding <-> $1) as similarity
+       FROM verified_answers
+       WHERE 1 - (question_embedding <-> $1) > $2
+       ORDER BY similarity DESC, avg_rating DESC
+       LIMIT $3`,
+      [embeddingStr, threshold, limit]
+    );
+
+    return result.rows;
+  } catch (error) {
+    console.error('Error searching verified answers:', error);
+    throw error;
+  }
+}
+
+/**
+ * ③ ดึงคะแนนและคอมเมนต์
+ * Retrieves ratings and comments for a verified answer
+ */
+async function getAnswerVerifications(answerId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT commenter_name, rating, comment, created_at
+       FROM answer_verifications
+       WHERE verified_answer_id = $1
+       ORDER BY created_at DESC`,
+      [answerId]
+    );
+
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting verifications:', error);
+    throw error;
+  }
+}
+
+/**
+ * ④ อัปเดตคะแนนเฉลี่ย
+ * Updates the average rating and statistics for a verified answer
+ */
+async function updateAnswerRating(answerId: number) {
+  try {
+    const result = await pool.query(
+      `UPDATE verified_answers
+       SET avg_rating = (
+         SELECT AVG(rating) FROM answer_verifications WHERE verified_answer_id = $1
+       ),
+       verified_count = (
+         SELECT COUNT(DISTINCT user_id) FROM answer_verifications WHERE verified_answer_id = $1 AND rating > 0
+       ),
+       rating_count = (
+         SELECT COUNT(*) FROM answer_verifications WHERE verified_answer_id = $1
+       ),
+       last_updated_at = NOW()
+       WHERE id = $1
+       RETURNING avg_rating, verified_count, rating_count`,
+      [answerId]
+    );
+
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error updating rating:', error);
+    throw error;
+  }
+}
+
 /**
  * Iterates through ALL guest users and deletes them.
  */
@@ -750,8 +1200,104 @@ async function deleteAllGuestUsersAndChats() {
 // These startup cleanup functions can be run if needed.
 // await deleteAllGuestUsersAndChats();
 
+// ===================================
+// === QUESTION ATTACHMENTS FUNCTIONS ===
+// ===================================
 
-// --- EXPORTS ---
+/**
+ * Saves a file attachment to a question
+ * @param questionId The ID of the question
+ * @param fileName The name of the file
+ * @param fileData The file data as Buffer
+ * @param mimeType The MIME type of the file
+ * @param fileSizeBytes The size of the file in bytes
+ * @param uploadedBy The username of who uploaded the file
+ * @returns The ID of the attachment record
+ */
+async function saveQuestionAttachment(
+  questionId: number,
+  fileName: string,
+  fileData: Buffer,
+  mimeType: string,
+  fileSizeBytes: number,
+  uploadedBy: string
+): Promise<number> {
+  try {
+    const result = await pool.query(
+      `INSERT INTO question_attachments (question_id, file_name, mime_type, file_data, file_size_bytes, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [questionId, fileName, mimeType, fileData, fileSizeBytes, uploadedBy]
+    );
+    return result.rows[0].id;
+  } catch (error) {
+    console.error('Error saving question attachment:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets all attachments for a question
+ * @param questionId The ID of the question
+ * @returns Array of attachment metadata (excluding file_data)
+ */
+async function getQuestionAttachments(questionId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT id, file_name, mime_type, file_size_bytes, uploaded_by, created_at 
+       FROM question_attachments 
+       WHERE question_id = $1 
+       ORDER BY created_at DESC`,
+      [questionId]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting question attachments:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets a specific attachment file data
+ * @param attachmentId The ID of the attachment
+ * @returns Object with file_name, mime_type, and file_data (Buffer)
+ */
+async function getQuestionAttachmentData(attachmentId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT file_name, mime_type, file_data 
+       FROM question_attachments 
+       WHERE id = $1`,
+      [attachmentId]
+    );
+    if (result.rows.length === 0) {
+      throw new Error(`Attachment with ID ${attachmentId} not found`);
+    }
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error getting question attachment data:', error);
+    throw error;
+  }
+}
+
+/**
+ * Deletes an attachment from a question
+ * @param attachmentId The ID of the attachment
+ */
+async function deleteQuestionAttachment(attachmentId: number): Promise<void> {
+  try {
+    await pool.query(
+      `DELETE FROM question_attachments WHERE id = $1`,
+      [attachmentId]
+    );
+    console.log(`DB: Attachment ${attachmentId} deleted`);
+  } catch (error) {
+    console.error('Error deleting question attachment:', error);
+    throw error;
+  }
+}
+
+// These startup cleanup functions can be run if needed.
 export {
   // User Functions
   createUser,
@@ -778,12 +1324,24 @@ export {
   setChatModel,
   getChatModel,
 
-  // File Functions (New)
+  // File Functions
   uploadFile,
   getFile,
-  getFileByObjectName, // <-- Added new function here
-  getFileInfoByObjectName, // <-- Added new function here
+  getFileByObjectName,
+  getFileInfoByObjectName,
   deleteFile,
+
+  // Verified Answers Functions (จากเดิม verifiedAnswers.ts)
+  saveVerifiedAnswer,
+  searchVerifiedAnswers,
+  getAnswerVerifications,
+  updateAnswerRating,
+
+  // Question Attachments Functions
+  saveQuestionAttachment,
+  getQuestionAttachments,
+  getQuestionAttachmentData,
+  deleteQuestionAttachment,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

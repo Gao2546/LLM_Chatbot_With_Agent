@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Create Question - Q&A Community</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
+    <link rel="stylesheet" href="community.css?v=5.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/atom-one-dark.min.css">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <script src="https://cdn.jsdelivr.net/npm/tinymce@6/tinymce.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Auth Container (Top Right) -->
+    <div class="auth-container">
+        <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
+        <a href="auth/login" class="login-button" id="loginBtn">Login</a>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar -->
+        <div id="chatList">
+            <div class="btn-sidebar-container"></div>
+            
+            <!-- Infineon Logo -->
+            <div class="sidebar-logo">
+                <img src="image.png" alt="Infineon Logo" class="infineon-logo">
+            </div>
+            
+            <!-- Navigation -->
+            <a href="/" class="community-nav-button">
+                <i class="fas fa-robot"></i> AI Chat
+            </a>
+            <a href="/community.html" class="community-nav-button" style="margin-top: 10px;">
+                <i class="fas fa-comments"></i> Q&A Community
+            </a>
+
+            <!-- Filter By Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Filter By</div>
+                <a href="/community.html" class="sidebar-link">All questions</a>
+                <a href="/community.html" class="sidebar-link">My Questions</a>
+                <a href="/community.html" class="sidebar-link">My Answers</a>
+                <a href="/community.html" class="sidebar-link">Pending review</a>
+                <a href="/community.html" class="sidebar-link">Unverified</a>
+            </div>
+
+            <!-- Tags Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Tags</div>
+                <div id="tagsList" class="sidebar-tags-grid">
+                    <span class="sidebar-tag-item" data-tag="PRVX 4">PRVX 4</span>
+                    <span class="sidebar-tag-item" data-tag="D1">D1</span>
+                    <span class="sidebar-tag-item" data-tag="Handler">Handler</span>
+                    <span class="sidebar-tag-item" data-tag="V9300">V9300</span>
+                    <span class="sidebar-tag-item" data-tag="Prober">Prober</span>
+                    <span class="sidebar-tag-item" data-tag="Tester">Tester</span>
+                    <span class="sidebar-tag-item" data-tag="AI">AI</span>
+                    <span class="sidebar-tag-item" data-tag="Sensor">Sensor</span>
+                </div>
+            </div>
+
+            <!-- Theme Toggle Button -->
+            <div class="theme-toggle-container">
+                <button id="themeToggleBtn" class="theme-toggle-btn" title="Change Theme">
+                    <i class="fas fa-palette"></i>
+                    <span id="themeLabel">Dark</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div id="chatbox">
+            <!-- Header -->
+            <h1 class="header1">
+                <button id="toggleSidebarButton"><i class="fas fa-bars"></i></button>
+                Create Question
+            </h1>
+
+            <!-- Content -->
+            <div class="contain-overflow">
+                <div class="content-wrapper" style="max-width: 900px; margin: 0 auto; padding: 20px;">
+
+                    <!-- Title Field -->
+                    <div class="form-section">
+                        <label class="form-label">
+                            Title<span style="color: red;">*</span>
+                        </label>
+                        <p class="form-hint">Be specific and imagine you're asking a question to another person.</p>
+                        <input type="text" id="questionTitle" class="form-input" placeholder="e.g. How to optimize database queries?">
+                    </div>
+
+                    <!-- Body Field -->
+                    <div class="form-section">
+                        <label class="form-label">
+                            Body<span style="color: red;">*</span>
+                        </label>
+                        <p class="form-hint">Include all the information someone would need to answer your question.</p>
+                        <div style="flex: 1;">
+                            <textarea id="questionBody" class="form-textarea" placeholder="Include details about your question..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- File Upload Button (Between Body and Tags) -->
+                    <div class="form-section">
+                        <input type="file" id="fileInput" multiple style="display: none;" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt">
+                        <label for="fileInput" class="file-upload-btn-small" title="Attach files to your question">
+                            <i class="fas fa-paperclip"></i> Attach Files
+                        </label>
+                        <!-- Selected Files List -->
+                        <div id="filesList" style="display: none; margin-top: 12px;">
+                            <!-- Files will be added here dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Tags Field -->
+                    <div class="form-section">
+                        <label class="form-label">
+                            Tags
+                        </label>
+                        <p class="form-hint">Add up to 5 tags to describe what your question is about (optional).</p>
+                        <div class="tags-input-container">
+                            <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #999;"></i>
+                            <input type="text" id="questionTags" class="form-input" placeholder="e.g. (laravel html ajax)" style="padding-left: 35px;">
+                        </div>
+                    </div>
+
+                    <!-- Verification Type Selection -->
+                    <div class="form-section">
+                        <label class="form-label">
+                            Verification type<span style="color: red;">*</span>
+                        </label>
+                        <p class="form-hint">Choose how you want this answer to be verified.</p>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px;">
+                            <!-- Option 1: Self Verify -->
+                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 15px; border: 1px solid #ddd; border-radius: 4px; transition: all 0.2s;">
+                                <input type="radio" name="verificationType" value="self" checked style="margin-top: 3px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600; margin-bottom: 4px;">Verify this answer "by my department"</div>
+                                    <div style="font-size: 13px; color: #666;">Submit answer that's verified by your department</div>
+                                </div>
+                            </label>
+
+                            <!-- Option 2: Request Verification -->
+                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 15px; border: 1px solid #ddd; border-radius: 4px; transition: all 0.2s;">
+                                <input type="radio" name="verificationType" value="request" style="margin-top: 3px; cursor: pointer;">
+                                <div>
+                                    <div style="font-weight: 600; margin-bottom: 4px;">Request verification from other department(s)</div>
+                                    <div style="font-size: 13px; color: #666;">Request verification from specific departments with optional due date</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Departments Selection (shown only when Request Verification is selected) -->
+                    <div id="departmentsSection">
+                        <div class="form-section">
+                            <label class="form-label">
+                                Select Departments <span style="color: red;">*</span>
+                            </label>
+                            <p class="form-hint">Choose which departments should verify this answer.</p>
+                            <div id="departmentsCheckboxGroup">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="form-actions">
+                        <button class="btn-primary" onclick="submitQuestion()">
+                            Submit
+                        </button>
+                    </div>
+
+                </div>
+
+                <!-- Right Sidebar -->
+                <aside class="right-sidebar">
+                    <div class="info-box">
+                        <div class="box-title">Community Stats</div>
+                        <div class="stat-row">
+                            <span>Total Questions</span>
+                            <span class="stat-value" id="totalQuestions">4</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Verified Answers</span>
+                            <span class="stat-value" id="verifiedCount">0</span>
+                        </div>
+                    </div>
+
+                    <div class="info-box">
+                        <div class="box-title">Hot Questions</div>
+                        <div class="mini-list">
+                            <a href="#" class="mini-link">How to optimize database queries?</a>
+                            <a href="#" class="mini-link">Best practices for API design</a>
+                            <a href="#" class="mini-link">JavaScript async/await patterns</a>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .form-section {
+            margin-bottom: 30px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: var(--text-primary);
+        }
+
+        .form-hint {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        [data-theme="dark"] .form-hint {
+            color: #999;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+            color: #333;
+        }
+
+        [data-theme="dark"] .form-input {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #017374;
+            box-shadow: 0 0 0 3px rgba(1, 115, 116, 0.1);
+        }
+
+        .form-textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 0 0 4px 4px;
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            resize: vertical;
+            background: white;
+            color: #333;
+        }
+
+        [data-theme="dark"] .form-textarea {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        .editor-toolbar {
+            display: flex;
+            gap: 2px;
+            padding: 8px;
+            background: #f5f5f5;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            flex-wrap: wrap;
+        }
+
+        [data-theme="dark"] .editor-toolbar {
+            background: #1e1e1e;
+            border-color: #444;
+        }
+
+        .editor-btn {
+            padding: 6px 10px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            cursor: pointer;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .editor-btn:hover {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        [data-theme="dark"] .editor-btn {
+            color: #999;
+        }
+
+        [data-theme="dark"] .editor-btn:hover {
+            background: #2d2d2d;
+            color: #e0e0e0;
+        }
+
+        .tags-input-container {
+            position: relative;
+        }
+
+        /* File Upload Styles */
+        .file-drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f9f9f9;
+        }
+
+        [data-theme="dark"] .file-drop-zone {
+            background: #1a1a1a;
+            border-color: #444;
+        }
+
+        .file-drop-zone:hover {
+            border-color: #017374;
+            background: #f0f8ff;
+        }
+
+        [data-theme="dark"] .file-drop-zone:hover {
+            border-color: #017374;
+            background: #0d2525;
+        }
+
+        .file-drop-zone.drag-over {
+            border-color: #017374;
+            background: #e6f7ff;
+            box-shadow: 0 0 10px rgba(1, 115, 116, 0.2);
+        }
+
+        [data-theme="dark"] .file-drop-zone.drag-over {
+            background: #0d3d3d;
+        }
+
+        /* Small File Upload Button */
+        .file-upload-btn-small {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            background: white;
+            border: 2px dashed #4caf50;
+            border-radius: 4px;
+            color: #4caf50;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .file-upload-btn-small:hover {
+            background: rgba(76, 175, 80, 0.05);
+            border-color: #45a049;
+            color: #45a049;
+            box-shadow: 0 2px 6px rgba(76, 175, 80, 0.2);
+        }
+
+        .file-upload-btn-small i {
+            font-size: 13px;
+        }
+
+        [data-theme="light"] .file-upload-btn-small {
+            background: white;
+            border-color: #4caf50;
+            color: #4caf50;
+        }
+
+        [data-theme="light"] .file-upload-btn-small:hover {
+            background: rgba(76, 175, 80, 0.05);
+            border-color: #45a049;
+            color: #45a049;
+        }
+
+        [data-theme="dark"] .file-upload-btn-small {
+            background: #1e1e1e;
+            border-color: #4caf50;
+            color: #66bb6a;
+        }
+
+        [data-theme="dark"] .file-upload-btn-small:hover {
+            background: rgba(76, 175, 80, 0.1);
+            border-color: #66bb6a;
+            color: #81c784;
+        }
+
+        /* Files List Styling */
+        #filesList {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px;
+            background: rgba(23, 162, 184, 0.05);
+            border-radius: 4px;
+            border: 1px solid rgba(23, 162, 184, 0.2);
+        }
+
+        [data-theme="light"] #filesList {
+            background: rgba(23, 162, 184, 0.05);
+            border-color: rgba(23, 162, 184, 0.2);
+        }
+
+        .file-drop-content {
+            pointer-events: none;
+        }
+
+        .files-list {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+        }
+
+        [data-theme="dark"] .files-list {
+            background: #1e1e1e;
+            border-color: #444;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: white;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            border-left: 4px solid #017374;
+        }
+
+        [data-theme="dark"] .file-item {
+            background: #2d2d2d;
+        }
+
+        .file-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .file-item-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .file-item-icon {
+            font-size: 20px;
+            color: #017374;
+            width: 30px;
+            text-align: center;
+        }
+
+        .file-item-details {
+            flex: 1;
+        }
+
+        .file-item-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .file-item-size {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .file-item-remove {
+            background: #ff4757;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .file-item-remove:hover {
+            background: #ff3838;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary {
+            padding: 12px 24px;
+            background: #0a95ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-primary:hover {
+            background: #0074cc;
+        }
+
+        .btn-secondary {
+            padding: 12px 24px;
+            background: #3d3d3d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-secondary:hover {
+            background: #2d2d2d;
+        }
+
+        .btn-cancel {
+            padding: 10px 20px;
+            background: white;
+            color: #333;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        [data-theme="dark"] .btn-cancel {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        .dept-checkbox-label {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .dept-checkbox-label:hover {
+            background: #f5f5f5;
+        }
+
+        [data-theme="dark"] .dept-checkbox-label {
+            border-color: #444;
+        }
+
+        [data-theme="dark"] .dept-checkbox-label:hover {
+            background: #2d2d2d;
+        }
+
+        .dept-checkbox {
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        #departmentsSection {
+            padding: 20px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 30px;
+        }
+
+        #departmentsSection.hidden {
+            display: none;
+        }
+
+        [data-theme="dark"] #departmentsSection {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+
+        #departmentsCheckboxGroup {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        [data-theme="dark"] #departmentsCheckboxGroup {
+            background: #1e1e1e;
+            border-color: #444;
+        }
+
+        #departmentsCheckboxGroup label {
+            padding: 12px !important;
+            border-bottom: 1px solid #f0f0f0;
+            margin: 0;
+            transition: background 0.2s;
+        }
+
+        [data-theme="dark"] #departmentsCheckboxGroup label {
+            border-bottom-color: #333;
+        }
+
+        #departmentsCheckboxGroup label:last-child {
+            border-bottom: none;
+        }
+
+        #departmentsCheckboxGroup label:hover {
+            background: #f9f9f9;
+        }
+
+        [data-theme="dark"] #departmentsCheckboxGroup label:hover {
+            background: #2d2d2d;
+        }
+
+        #departmentsCheckboxGroup input[type="checkbox"] {
+            accent-color: #0a95ff;
+        }
+
+        /* Preview Pane Styles */
+        #previewPane {
+            border: 1px solid #ddd !important;
+            border-radius: 4px !important;
+            padding: 15px !important;
+            max-height: 400px !important;
+            overflow-y: auto !important;
+            background: #f9f9f9 !important;
+        }
+
+        [data-theme="dark"] #previewPane {
+            background: #2d2d2d !important;
+            border-color: #444 !important;
+            color: #e0e0e0;
+        }
+
+        #previewContent {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        #previewContent h1,
+        #previewContent h2,
+        #previewContent h3 {
+            margin-top: 16px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        #previewContent h1 { font-size: 28px; }
+        #previewContent h2 { font-size: 24px; }
+        #previewContent h3 { font-size: 20px; }
+
+        #previewContent strong {
+            font-weight: 600;
+            color: inherit;
+        }
+
+        #previewContent em {
+            font-style: italic;
+        }
+
+        #previewContent code {
+            background: #e8e8e8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        [data-theme="dark"] #previewContent code {
+            background: #1a1a1a;
+            color: #f0f0f0;
+        }
+
+        #previewContent pre {
+            background: #e8e8e8;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        [data-theme="dark"] #previewContent pre {
+            background: #1a1a1a;
+            color: #f0f0f0;
+        }
+
+        #previewContent ul,
+        #previewContent ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        #previewContent li {
+            margin: 5px 0;
+        }
+
+        #previewContent blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 12px;
+            margin: 10px 0;
+            color: #666;
+            font-style: italic;
+        }
+
+        [data-theme="dark"] #previewContent blockquote {
+            border-left-color: #444;
+            color: #aaa;
+        }
+
+        #previewContent table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        #previewContent table th,
+        #previewContent table td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        [data-theme="dark"] #previewContent table th,
+        [data-theme="dark"] #previewContent table td {
+            border-color: #444;
+        }
+
+        #previewContent table th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+
+        [data-theme="dark"] #previewContent table th {
+            background: #1a1a1a;
+        }
+
+        #previewContent img {
+            max-width: 100%;
+            height: auto;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+
+        #previewContent a {
+            color: #0a95ff;
+            text-decoration: none;
+        }
+
+        #previewContent a:hover {
+            text-decoration: underline;
+        }
+    </style>
+
+    <script>
+        let currentUserId = null;
+        const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'PE', 'QA', 'IT'];
+        let selectedFiles = []; // Store selected files for submission
+        
+        // Initialize markdown-it
+        const md = window.markdownit({
+            html: true,
+            breaks: true,
+            linkify: true,
+            highlight: function (str, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    try {
+                        return hljs.highlight(str, { language: lang }).value;
+                    } catch (__) {}
+                }
+                return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>';
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await getCurrentUser();
+            setupSidebarToggle();
+            initTheme();
+            setupVerificationType();
+            initializeDepartmentsDropdown();
+            initializeTinyMCE();
+            setupFileUpload();
+        });
+
+        async function getCurrentUser() {
+            try {
+                const res = await fetch('/auth/session');
+                if (!res.ok) throw new Error('Failed to get session');
+                const data = await res.json();
+                
+                const loginBtn = document.getElementById('loginBtn');
+                const usernameDisplay = document.getElementById('usernameDisplay');
+                
+                if (data.loggedIn) {
+                    currentUserId = data.userId || null;
+                    
+                    if (loginBtn) {
+                        loginBtn.textContent = data.isGuest ? 'Login' : 'Logout';
+                        loginBtn.href = data.isGuest ? '/auth/login' : '/auth/logout';
+                    }
+                    
+                    if (!data.isGuest && data.username && usernameDisplay) {
+                        usernameDisplay.textContent = `Welcome: ${data.username}`;
+                        usernameDisplay.style.display = 'inline';
+                    }
+                } else {
+                    // Not logged in, redirect to login
+                    window.location.href = '/auth/login';
+                }
+            } catch (e) {
+                console.log('User not logged in:', e);
+                window.location.href = '/auth/login';
+            }
+        }
+
+        function setupSidebarToggle() {
+            const toggleBtn = document.getElementById('toggleSidebarButton');
+            const chatList = document.getElementById('chatList');
+            const chatbox = document.getElementById('chatbox');
+            const header = document.querySelector('.header1');
+
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                chatList.classList.add('collapsed');
+                chatbox.classList.add('collapsed');
+                header.classList.add('collapsed');
+                toggleBtn.classList.add('collapsed');
+            }
+
+            toggleBtn.addEventListener('click', () => {
+                chatList.classList.toggle('collapsed');
+                chatbox.classList.toggle('collapsed');
+                header.classList.toggle('collapsed');
+                toggleBtn.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed', chatList.classList.contains('collapsed'));
+            });
+        }
+
+        // Setup verification type selection
+        function setupVerificationType() {
+            const radios = document.querySelectorAll('input[name="verificationType"]');
+            const departmentsSection = document.getElementById('departmentsSection');
+
+            radios.forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    if (e.target.value === 'request') {
+                        departmentsSection.classList.remove('hidden');
+                    } else {
+                        departmentsSection.classList.add('hidden');
+                    }
+                });
+            });
+            
+            // Initialize: hide by default since "self" is checked first
+            departmentsSection.classList.add('hidden');
+        }
+
+        // Setup file upload functionality
+        function setupFileUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+            
+            // Handle file selection from input
+            fileInput.addEventListener('change', (e) => {
+                handleFiles(Array.from(e.target.files), MAX_FILE_SIZE);
+            });
+        }
+
+        // Handle file selection
+        function handleFiles(files, maxSize) {
+            const validFiles = [];
+            
+            for (const file of files) {
+                // Check file size
+                if (file.size > maxSize) {
+                    alert(`File "${file.name}" is too large (max 10MB)`);
+                    continue;
+                }
+                
+                // Check file type (basic validation)
+                const validTypes = [
+                    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+                    'application/pdf',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'text/plain'
+                ];
+                
+                if (!validTypes.includes(file.type)) {
+                    alert(`File "${file.name}" has unsupported type. Supported: Images, PDF, Word, Excel, Text`);
+                    continue;
+                }
+                
+                validFiles.push(file);
+            }
+            
+            // Add valid files to our array
+            if (validFiles.length > 0) {
+                selectedFiles.push(...validFiles);
+                renderFilesList();
+            }
+        }
+
+        // Render files list UI
+        function renderFilesList() {
+            const filesList = document.getElementById('filesList');
+            const fileInput = document.getElementById('fileInput');
+            
+            if (selectedFiles.length === 0) {
+                filesList.style.display = 'none';
+                fileInput.value = ''; // Clear input
+                return;
+            }
+            
+            filesList.style.display = 'block';
+            filesList.innerHTML = selectedFiles.map((file, index) => {
+                const fileType = getFileIcon(file.type);
+                const fileSize = formatFileSize(file.size);
+                return `
+                    <div class="file-item">
+                        <div class="file-item-info">
+                            <div class="file-item-icon">${fileType}</div>
+                            <div class="file-item-details">
+                                <div class="file-item-name">${file.name}</div>
+                                <div class="file-item-size">${fileSize}</div>
+                            </div>
+                        </div>
+                        <button type="button" class="file-item-remove" onclick="removeFile(${index})">
+                            Remove
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Remove a file from selection
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            renderFilesList();
+        }
+
+        // Get appropriate icon for file type
+        function getFileIcon(mimeType) {
+            if (mimeType.startsWith('image/')) return '🖼️';
+            if (mimeType === 'application/pdf') return '📄';
+            if (mimeType.includes('word')) return '📝';
+            if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊';
+            if (mimeType === 'text/plain') return '📃';
+            return '📎';
+        }
+
+        // Format file size for display
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        // Initialize departments checkbox group
+        function initializeDepartmentsDropdown() {
+            const checkboxGroup = document.getElementById('departmentsCheckboxGroup');
+            if (checkboxGroup) {
+                checkboxGroup.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+                    <label style="display: flex; align-items: center; padding: 8px 0; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="${dept}" style="margin-right: 12px; cursor: pointer; width: 18px; height: 18px;">
+                        <span style="font-size: 14px; color: var(--text-primary);">${dept}</span>
+                    </label>
+                `).join('');
+            }
+        }
+
+        // Main submit function
+        async function submitQuestion() {
+            const title = document.getElementById('questionTitle').value.trim();
+            const body = tinymce.get('questionBody') ? tinymce.get('questionBody').getContent() : document.getElementById('questionBody').value;
+            const tags = document.getElementById('questionTags').value.trim();
+            const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
+
+            if (!title) {
+                alert('Please enter a title');
+                return;
+            }
+
+            if (!body) {
+                alert('Please enter a body');
+                return;
+            }
+
+            const tagArray = tags ? tags.split(/[\s,]+/).filter(t => t) : [];
+
+            try {
+                // Get session data
+                const sessionResponse = await fetch('/auth/session');
+                if (!sessionResponse.ok) {
+                    alert('Error: Unable to get session data');
+                    return;
+                }
+                const sessionData = await sessionResponse.json();
+                const userName = sessionData?.username || 'Anonymous';
+
+                let payload = {
+                    question: title,
+                    answer: body,
+                    tags: tagArray,
+                    verificationType: verificationType,
+                    userName: userName,
+                    rating: 1,
+                    comment: ''
+                };
+
+                // If requesting verification, add departments
+                if (verificationType === 'request') {
+                    const selectedDepts = Array.from(document.querySelectorAll('#departmentsCheckboxGroup .dept-checkbox:checked'))
+                        .map(cb => cb.value);
+
+                    if (selectedDepts.length === 0) {
+                        alert('Please select at least one department');
+                        return;
+                    }
+
+                    payload.requestedDepartments = selectedDepts;
+                }
+
+                // If there are files, use FormData instead of JSON
+                if (selectedFiles.length > 0) {
+                    const formData = new FormData();
+                    formData.append('question', payload.question);
+                    formData.append('answer', payload.answer);
+                    formData.append('tags', JSON.stringify(payload.tags));
+                    formData.append('verificationType', payload.verificationType);
+                    formData.append('userName', payload.userName);
+                    formData.append('rating', payload.rating);
+                    formData.append('comment', payload.comment);
+                    if (payload.requestedDepartments) {
+                        formData.append('requestedDepartments', JSON.stringify(payload.requestedDepartments));
+                    }
+
+                    // Add files
+                    selectedFiles.forEach((file, index) => {
+                        formData.append(`files`, file);
+                    });
+
+                    const response = await fetch('/api/verify-answer', {
+                        method: 'POST',
+                        body: formData
+                        // Do NOT set Content-Type header when using FormData - browser will set it with boundary
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json().catch(() => ({}));
+                        alert('Error: ' + (error.error || `Server error (${response.status})`));
+                        return;
+                    }
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert('✓ Question submitted successfully with attachments!');
+                        window.location.href = '/community.html';
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to submit question'));
+                    }
+                } else {
+                    // No files - use JSON
+                    const response = await fetch('/api/verify-answer', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json().catch(() => ({}));
+                        alert('Error: ' + (error.error || `Server error (${response.status})`));
+                        return;
+                    }
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert('✓ Question submitted successfully!');
+                        window.location.href = '/community.html';
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to submit question'));
+                    }
+                }
+            } catch (e) {
+                console.error('Error:', e);
+                alert('Failed to submit question: ' + e.message);
+            }
+        }
+
+        // Initialize TinyMCE editor (WYSIWYG - What You See Is What You Get)
+        function initializeTinyMCE() {
+            tinymce.init({
+                selector: '#questionBody',
+                plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste help wordcount',
+                toolbar: 'undo redo | formatselect | bold italic backcolor | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | help',
+                menubar: 'file edit view insert format table tools help',
+                height: 400,
+                branding: false,
+                promotion: false,
+                content_css: 'default',
+                skin: localStorage.getItem('theme') === 'dark' ? 'oxide-dark' : 'oxide',
+                content_css: localStorage.getItem('theme') === 'dark' ? 'dark' : 'default',
+                init_instance_callback: function(editor) {
+                    console.log('TinyMCE initialized');
+                }
+            });
+        }
+
+        // Theme Toggle
+        let currentTheme = localStorage.getItem('theme') || 'dark';
+
+        function initTheme() {
+            currentTheme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            updateThemeLabel();
+        }
+
+        function toggleTheme() {
+            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            localStorage.setItem('theme', currentTheme);
+            updateThemeLabel();
+        }
+
+        function updateThemeLabel() {
+            const label = document.getElementById('themeLabel');
+            const icon = document.querySelector('#themeToggleBtn i');
+            if (currentTheme === 'dark') {
+                label.textContent = 'Dark';
+                icon.className = 'fas fa-moon';
+            } else {
+                label.textContent = 'Light';
+                icon.className = 'fas fa-sun';
+            }
+        }
+
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'theme') {
+                currentTheme = e.newValue || 'dark';
+                document.body.setAttribute('data-theme', currentTheme);
+                updateThemeLabel();
+            }
+        });
+
+        document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+    </script>
+</body>
+</html>

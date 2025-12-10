@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Q&A Community</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
+    <link rel="stylesheet" href="community.css?v=5.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+</head>
+<body>
+    <!-- Auth Container (Top Right) - Same as index.html -->
+    <div class="auth-container">
+        <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
+        <a href="auth/login" class="login-button" id="loginBtn">Login</a>
+    </div>
+
+    <!-- Main Container - Same structure as index.html -->
+    <div class="container">
+        <!-- Sidebar - Same as index.html -->
+        <div id="chatList">
+            <div class="btn-sidebar-container"></div>
+            
+            <!-- Infineon Logo -->
+            <div class="sidebar-logo">
+                <img src="image.png" alt="Infineon Logo" class="infineon-logo">
+            </div>
+            
+            <!-- Q&A Community Button -->
+            <a href="/" class="community-nav-button">
+                <i class="fas fa-robot"></i> AI Chat
+            </a>
+
+            <!-- Filter By Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Filter By</div>
+                <a href="#" class="sidebar-link active" data-filter="all">All questions</a>
+                <a href="#" class="sidebar-link" data-filter="my-questions">My Questions</a>
+                <a href="#" class="sidebar-link" data-filter="my-answers">My Answers</a>
+                <a href="#" class="sidebar-link" data-filter="pending">Pending review</a>
+                <a href="#" class="sidebar-link" data-filter="unverified">Unverified</a>
+            </div>
+
+            <!-- Tags Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Tags</div>
+                <div id="tagsList" class="sidebar-tags-grid">
+                    <span class="sidebar-tag-item" data-tag="PRVX 4">PRVX 4</span>
+                    <span class="sidebar-tag-item" data-tag="D1">D1</span>
+                    <span class="sidebar-tag-item" data-tag="Handler">Handler</span>
+                    <span class="sidebar-tag-item" data-tag="V9300">V9300</span>
+                    <span class="sidebar-tag-item" data-tag="Prober">Prober</span>
+                    <span class="sidebar-tag-item" data-tag="Tester">Tester</span>
+                    <span class="sidebar-tag-item" data-tag="AI">AI</span>
+                    <span class="sidebar-tag-item" data-tag="Sensor">Sensor</span>
+                </div>
+            </div>
+
+            <!-- Theme Toggle Button -->
+            <div class="theme-toggle-container">
+                <button id="themeToggleBtn" class="theme-toggle-btn" title="Change Theme">
+                    <i class="fas fa-palette"></i>
+                    <span id="themeLabel">Dark</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Area - Same structure as index.html #chatbox -->
+        <div id="chatbox">
+            <!-- Header - Same as index.html -->
+            <h1 class="header1">
+                <button id="toggleSidebarButton"><i class="fas fa-bars"></i></button>
+                Q&A Community
+            </h1>
+
+            <!-- Content -->
+            <div class="contain-overflow">
+                <div class="content-wrapper">
+                    <!-- Header Section -->
+                    <div class="page-header">
+                        <div class="header-top">
+                            <h2>Questions</h2>
+                            <div class="header-search">
+                                <input type="text" id="headerSearch" placeholder="Search questions...">
+                            </div>
+                            <button class="btn-ask-large" onclick="window.location.href='/create_question.html'">Create Question</button>
+                        </div>
+                    </div>
+
+                    <!-- Tabs & Sort -->
+                    <div class="tabs-section">
+                        <div class="tabs">
+                            <button class="tab active" onclick="filterByTab('all', event)">Newest</button>
+                            <button class="tab" onclick="filterByTab('score', event)">Score</button>
+                            <button class="tab" onclick="filterByTab('views', event)">Views</button>
+                            <button class="tab" onclick="filterByTab('verified', event)">Verified</button>
+                        </div>
+                    </div>
+
+                    <!-- Questions List -->
+                    <div class="questions-list" id="questionsList">
+                        <div class="loading-state">
+                            <div class="spinner"></div>
+                            <p>Loading questions...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Sidebar -->
+                <aside class="right-sidebar">
+                    <div class="info-box">
+                        <div class="box-title">Community Stats</div>
+                        <div class="stat-row">
+                            <span>Total Questions</span>
+                            <span class="stat-value" id="totalQuestions"></span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Verified Answers</span>
+                            <span class="stat-value" id="verifiedCount"></span>
+                        </div>
+                    </div>
+
+                    <div class="info-box">
+                        <div class="box-title">Hot Questions</div>
+                        <div class="mini-list" id="sidebarHotQuestions">
+                            <a href="#" class="mini-link">How to optimize database queries?</a>
+                            <a href="#" class="mini-link">Best practices for API design</a>
+                            <a href="#" class="mini-link">JavaScript async/await patterns</a>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allQuestions = [];
+        let currentFilter = 'all';
+        let currentSort = 'newest';
+        let selectedTags = [];
+        let currentUserId = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await getCurrentUser();
+            await loadAllQuestions();
+            setupSearchListener();
+            setupSidebarToggle();
+            setupFilterLinks();
+            setupPageRefresh();
+        });
+
+        // Refresh data when user returns to this page from detail page
+        function setupPageRefresh() {
+            // Listen for page visibility changes
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    console.log('Page became visible, refreshing questions...');
+                    loadAllQuestions();
+                }
+            });
+
+            // Also listen for page focus
+            window.addEventListener('focus', () => {
+                console.log('Window focused, refreshing questions...');
+                loadAllQuestions();
+            });
+        }
+
+        async function getCurrentUser() {
+            try {
+                const res = await fetch('/auth/session');
+                if (!res.ok) throw new Error('Failed to get session');
+                const data = await res.json();
+                
+                const loginBtn = document.getElementById('loginBtn');
+                const usernameDisplay = document.getElementById('usernameDisplay');
+                
+                if (data.loggedIn) {
+                    currentUserId = data.userId || null;
+                    
+                    if (loginBtn) {
+                        loginBtn.textContent = data.isGuest ? 'Login' : 'Logout';
+                        loginBtn.href = data.isGuest ? '/auth/login' : '/auth/logout';
+                    }
+                    
+                    if (!data.isGuest && data.username && usernameDisplay) {
+                        usernameDisplay.textContent = `Welcome: ${data.username}`;
+                        usernameDisplay.style.display = 'inline';
+                    } else if (usernameDisplay) {
+                        usernameDisplay.style.display = 'none';
+                    }
+                } else {
+                    currentUserId = null;
+                    if (loginBtn) {
+                        loginBtn.textContent = 'Login';
+                        loginBtn.href = '/auth/login';
+                    }
+                    if (usernameDisplay) {
+                        usernameDisplay.style.display = 'none';
+                    }
+                }
+            } catch (e) {
+                console.log('User not logged in:', e);
+                currentUserId = null;
+            }
+        }
+
+        // Sidebar Toggle Functionality (same as index.html)
+        function setupSidebarToggle() {
+            const toggleBtn = document.getElementById('toggleSidebarButton');
+            const chatList = document.getElementById('chatList');
+            const chatbox = document.getElementById('chatbox');
+            const header = document.querySelector('.header1');
+
+            // Restore sidebar state from localStorage
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                chatList.classList.add('collapsed');
+                chatbox.classList.add('collapsed');
+                header.classList.add('collapsed');
+                toggleBtn.classList.add('collapsed');
+            }
+
+            toggleBtn.addEventListener('click', () => {
+                chatList.classList.toggle('collapsed');
+                chatbox.classList.toggle('collapsed');
+                header.classList.toggle('collapsed');
+                toggleBtn.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed', chatList.classList.contains('collapsed'));
+            });
+        }
+
+        function setupFilterLinks() {
+            document.querySelectorAll('.sidebar-link[data-filter]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    document.querySelectorAll('.sidebar-link[data-filter]').forEach(l => l.classList.remove('active'));
+                    link.classList.add('active');
+                    const filter = link.dataset.filter;
+                    applyFilter(filter);
+                });
+            });
+
+            // Setup tag click handlers
+            document.querySelectorAll('.sidebar-tag-item').forEach(tag => {
+                tag.addEventListener('click', () => {
+                    tag.classList.toggle('active');
+                    filterByTags();
+                });
+            });
+        }
+
+        function filterByTags() {
+            selectedTags = Array.from(document.querySelectorAll('.sidebar-tag-item.active')).map(t => t.dataset.tag);
+            renderQuestions();
+        }
+
+        function applyFilter(filter) {
+            currentFilter = filter;
+            renderQuestions();
+        }
+
+        async function loadAllQuestions() {
+            try {
+                const res = await fetch('/api/get-all-verified-answers');
+                const data = await res.json();
+                allQuestions = (data.results || data.answers || []).map((q, idx) => ({
+                    ...q,
+                    id: q.id || idx,
+                    views: q.views || 0,
+                    score: q.score || 0,
+                    rating_count: q.rating_count || 0,
+                    is_verified: (q.rating_count || 0) > 0
+                }));
+                console.log('Loaded questions:', allQuestions.length, 'Verified:', allQuestions.filter(q => (q.rating_count || 0) > 0).length);
+                updateStats();
+                renderQuestions();
+            } catch (e) {
+                console.error('Error:', e);
+                showEmpty();
+            }
+        }
+
+        function setupSearchListener() {
+            const searchInput = document.getElementById('headerSearch');
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch(searchInput.value);
+            });
+        }
+
+        async function performSearch(query) {
+            if (!query.trim()) {
+                await loadAllQuestions();
+                return;
+            }
+            try {
+                const res = await fetch('/api/search-verified-answers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: query, threshold: 0.7, limit: 20 })
+                });
+                const data = await res.json();
+                allQuestions = (data.results || []).map((q, idx) => ({
+                    ...q,
+                    id: q.id || idx,
+                    views: Math.floor(Math.random() * 500),
+                    votes: Math.floor((q.avg_rating || 0) * 20)
+                }));
+                renderQuestions();
+            } catch (e) {
+                console.error('Search error:', e);
+                showEmpty();
+            }
+        }
+
+        function filterByTab(tab, event) {
+            // Map 'all' to 'newest' for sorting
+            currentSort = (tab === 'all') ? 'newest' : tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            renderQuestions();
+        }
+
+        function updateSort() {
+            currentSort = document.getElementById('sortSelect').value;
+            renderQuestions();
+        }
+
+        function updateStats() {
+            document.getElementById('totalQuestions').textContent = allQuestions.length;
+            
+            // Count verified questions using same logic as "Verified" tab
+            const verifiedCount = allQuestions.filter(q => {
+                // For request type: all requested departments must have verified
+                if (q.verification_type === 'request' && q.requested_departments) {
+                    const requestedDepts = Array.isArray(q.requested_departments) 
+                        ? q.requested_departments 
+                        : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                    const deptCount = requestedDepts.length;
+                    const verificationCount = q.rating_count || 0;
+                    return verificationCount >= deptCount && deptCount > 0;
+                }
+                // For self type: must have at least one verification
+                return q.verification_type === 'self' && (q.rating_count || 0) > 0;
+            }).length;
+            
+            document.getElementById('verifiedCount').textContent = verifiedCount;
+            // Update Hot Questions after stats
+            updateHotQuestions();
+        }
+
+        function updateHotQuestions() {
+            if (allQuestions.length === 0) return;
+            
+            // Sort by score (descending) and get top 3
+            const topQuestions = [...allQuestions]
+                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .slice(0, 3);
+            
+            // Update Hot Questions list
+            const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
+            if (hotQuestionsDiv) {
+                hotQuestionsDiv.innerHTML = topQuestions.map(q => {
+                    const scoreDisplay = q.score || 0;
+                    const title = esc(q.question || q.question_title || 'Untitled');
+                    return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" title="Score: ${scoreDisplay}">${title}</a>`;
+                }).join('');
+                
+                // If no questions, show placeholder
+                if (topQuestions.length === 0) {
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                }
+            }
+        }
+
+        function renderQuestions() {
+            let filtered = [...allQuestions];
+
+            // Apply tag filter first
+            if (selectedTags.length > 0) {
+                filtered = filtered.filter(q => {
+                    const qTags = q.tags || [];
+                    return selectedTags.some(tag => qTags.includes(tag));
+                });
+            }
+
+            // Apply sidebar filter first (My Questions, Pending review, Unverified)
+            if (currentFilter === 'my-questions') {
+                // Filter by current user's questions (created by this user)
+                if (currentUserId) {
+                    filtered = filtered.filter(q => q.user_id === currentUserId);
+                } else {
+                    filtered = []; // No user logged in, show nothing
+                }
+            } else if (currentFilter === 'my-answers') {
+                // Filter by questions the current user has verified/answered
+                if (currentUserId) {
+                    filtered = filtered.filter(q => q.answered_by_user === true);
+                } else {
+                    filtered = []; // No user logged in, show nothing
+                }
+            } else if (currentFilter === 'pending') {
+                // Questions that are requesting verification from other departments but not all have verified yet
+                filtered = filtered.filter(q => {
+                    if (q.verification_type === 'request' && q.requested_departments && q.requested_departments.length > 0) {
+                        const requestedDepts = Array.isArray(q.requested_departments) 
+                            ? q.requested_departments 
+                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                        const deptCount = requestedDepts.length;
+                        const verifiedCount = q.rating_count || 0;
+                        // Show only if NOT all departments have verified yet
+                        return verifiedCount < deptCount;
+                    }
+                    return false;
+                });
+            } else if (currentFilter === 'unverified') {
+                // Questions that have no verifications yet
+                filtered = filtered.filter(q => (q.rating_count || 0) === 0);
+            }
+
+            // Apply tab sort (Newest, Score, Views, Verified)
+            if (currentSort === 'verified') {
+                // Show only verified questions (completely verified, not pending)
+                filtered = filtered.filter(q => {
+                    // For request type: all requested departments must have verified
+                    if (q.verification_type === 'request' && q.requested_departments) {
+                        const requestedDepts = Array.isArray(q.requested_departments) 
+                            ? q.requested_departments 
+                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                        const deptCount = requestedDepts.length;
+                        const verifiedCount = q.rating_count || 0;
+                        return verifiedCount >= deptCount && deptCount > 0;
+                    }
+                    // For self type: must have at least one verification
+                    return q.verification_type === 'self' && (q.rating_count || 0) > 0;
+                });
+            } else if (currentSort === 'score') {
+                // Sort by score descending
+                filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+            } else if (currentSort === 'views') {
+                // Sort by views descending
+                filtered.sort((a, b) => (b.views || 0) - (a.views || 0));
+            } else {
+                // Default (newest): sort by created_at descending
+                filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            }
+
+            if (!filtered.length) {
+                showEmpty();
+                return;
+            }
+
+            document.getElementById('questionsList').innerHTML = filtered.map(q => {
+                // Determine badge based on verification status
+                let badgeHtml = '';
+                
+                // Check if question is waiting for verification (request type questions)
+                if (q.verification_type === 'request' && q.requested_departments) {
+                    const requestedDepts = Array.isArray(q.requested_departments) 
+                        ? q.requested_departments 
+                        : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                    
+                    const deptCount = requestedDepts.length;
+                    const verifiedCount = q.rating_count || 0;
+                    
+                    if (verifiedCount >= deptCount && deptCount > 0) {
+                        // All departments have verified
+                        badgeHtml = '<span class="vote-badge verified-badge">✓ Verified</span>';
+                    } else {
+                        // Still waiting for verification from some departments
+                        badgeHtml = `<span class="vote-badge pending-badge">⏳ Pending (${verifiedCount}/${deptCount})</span>`;
+                    }
+                } else if (q.verification_type === 'self' && q.rating_count > 0) {
+                    badgeHtml = '<span class="vote-badge verified-badge">✓ Verified</span>';
+                } else if (q.verification_type === 'self' && (!q.rating_count || q.rating_count === 0)) {
+                    badgeHtml = '<span class="vote-badge pending-badge">⏳ Pending</span>';
+                }
+                
+                return `
+                <div class="question-item" onclick="goToDetail(${q.id})">
+                    <div class="vote-section">
+                        <div class="vote-count">${q.score || 0}</div>
+                        <div>${badgeHtml}</div>
+                    </div>
+                    <div class="question-content">
+                        <a href="comment.html?id=${q.id}" class="question-title" onclick="event.stopPropagation()">${esc(q.question || q.question_title || 'Untitled')}</a>
+                        <div class="question-excerpt">${esc(stripHtml((q.answer || q.summary || '')).substring(0, 120))}</div>
+                        <div class="question-tags">${(q.tags || []).map(tag => `<span class="tag-badge">${esc(tag)}</span>`).join('')}</div>
+                    </div>
+                    <div class="question-meta">
+                        <span>${q.views || 0} views</span>
+                        <div class="user-info">
+                            <div class="avatar">${(q.user_name || 'U')[0].toUpperCase()}</div>
+                            <div class="user-text">
+                                <span class="username">${esc(q.user_name || 'Anonymous')}</span>
+                                <span class="time">${formatDate(q.created_at)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function incrementView(questionId) {
+            try {
+                await fetch('/api/increment-view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ questionId })
+                });
+                // Update local view count
+                const q = allQuestions.find(q => q.id === questionId);
+                if (q) q.views = (q.views || 0) + 1;
+            } catch (e) {
+                console.error('Error incrementing view:', e);
+            }
+        }
+
+        function showEmpty() {
+            document.getElementById('questionsList').innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No questions found</p></div>';
+        }
+
+        function formatDate(d) {
+            if (!d) return 'unknown';
+            const date = new Date(d);
+            if (isNaN(date)) return 'unknown';
+            const diff = Date.now() - date, m = Math.floor(diff/60000), h = Math.floor(diff/3600000), dy = Math.floor(diff/86400000);
+            return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : h < 24 ? h + 'h ago' : dy < 30 ? dy + 'd ago' : date.toLocaleDateString();
+        }
+
+        function esc(t) {
+            if (!t) return '';
+            const m = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
+            return String(t).replace(/[&<>"']/g, c => m[c]);
+        }
+
+        // Extract plain text from HTML content
+        function stripHtml(html) {
+            if (!html) return '';
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            return temp.textContent || temp.innerText || '';
+        }
+
+        // Theme Toggle Functionality
+        const themes = ['dark', 'light'];
+        let currentTheme = localStorage.getItem('theme') || 'dark';
+
+        function initTheme() {
+            // Always read latest theme from localStorage
+            currentTheme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            updateThemeLabel();
+            console.log('✅ initTheme: Applied theme -', currentTheme);
+        }
+
+        function toggleTheme() {
+            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            localStorage.setItem('theme', currentTheme);
+            updateThemeLabel();
+            console.log('✅ toggleTheme: Changed to -', currentTheme);
+        }
+
+        function updateThemeLabel() {
+            const label = document.getElementById('themeLabel');
+            const icon = document.querySelector('#themeToggleBtn i');
+            if (currentTheme === 'dark') {
+                label.textContent = 'Dark';
+                icon.className = 'fas fa-moon';
+            } else {
+                label.textContent = 'Light';
+                icon.className = 'fas fa-sun';
+            }
+        }
+
+        // Listen for theme changes from other pages/tabs
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'theme') {
+                currentTheme = e.newValue || 'dark';
+                document.body.setAttribute('data-theme', currentTheme);
+                updateThemeLabel();
+            }
+        });
+
+        function goToDetail(questionId) {
+            window.location.href = `comment.html?id=${questionId}`;
+        }
+
+        // Create Question Modal Functions
+        function showCreateQuestionModal() {
+            if (!currentUserId) {
+                alert('Please login to create a question');
+                window.location.href = '/auth/login';
+                return;
+            }
+            document.getElementById('createQuestionModal').style.display = 'flex';
+        }
+
+        function closeCreateQuestionModal() {
+            document.getElementById('createQuestionModal').style.display = 'none';
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            document.getElementById('answerBody').value = '';
+            document.getElementById('selfVerifySection').style.display = 'none';
+            document.getElementById('requestDepartmentsSection').style.display = 'none';
+        }
+
+        function selectVerificationType(type) {
+            const selfBtn = document.getElementById('selfVerifyBtn');
+            const requestBtn = document.getElementById('requestVerifyBtn');
+            const selfSection = document.getElementById('selfVerifySection');
+            const requestSection = document.getElementById('requestDepartmentsSection');
+
+            if (type === 'self') {
+                selfBtn.classList.add('active');
+                requestBtn.classList.remove('active');
+                selfSection.style.display = 'block';
+                requestSection.style.display = 'none';
+            } else {
+                requestBtn.classList.add('active');
+                selfBtn.classList.remove('active');
+                requestSection.style.display = 'block';
+                selfSection.style.display = 'none';
+            }
+        }
+
+        async function submitQuestion() {
+            const title = document.getElementById('questionTitle').value.trim();
+            const body = document.getElementById('questionBody').value.trim();
+            const tagsInput = document.getElementById('questionTags').value.trim();
+            const selfVerifyBtn = document.getElementById('selfVerifyBtn');
+            const isSelfVerify = selfVerifyBtn.classList.contains('active');
+
+            if (!title || !body) {
+                alert('Please fill in title and body');
+                return;
+            }
+
+            const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+
+            try {
+                if (isSelfVerify) {
+                    // Self-verify mode: create question with answer
+                    const answer = document.getElementById('answerBody').value.trim();
+                    if (!answer) {
+                        alert('Please provide an answer for self-verification');
+                        return;
+                    }
+
+                    const response = await fetch('/api/submit-verified-answer', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            question: title + '\n\n' + body,
+                            answer: answer,
+                            tags: tags,
+                            verificationType: 'self'
+                        })
+                    });
+
+                    if (response.ok) {
+                        alert('Question created and verified successfully!');
+                        closeCreateQuestionModal();
+                        await loadAllQuestions();
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || 'Failed to create question');
+                    }
+                } else {
+                    // Request verification mode: create question and request from departments
+                    const selectedDepts = Array.from(document.querySelectorAll('.dept-checkbox:checked'))
+                        .map(cb => cb.value);
+
+                    if (selectedDepts.length === 0) {
+                        alert('Please select at least one department');
+                        return;
+                    }
+
+                    const dueDateInput = document.getElementById('requestDueDate').value;
+
+                    const response = await fetch('/api/submit-verified-answer', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            question: title + '\n\n' + body,
+                            answer: 'Waiting for response from: ' + selectedDepts.join(', '),
+                            tags: tags,
+                            verificationType: 'request',
+                            requestedDepartments: selectedDepts,
+                            dueDate: dueDateInput || null
+                        })
+                    });
+
+                    if (response.ok) {
+                        alert('Question created! Verification request sent to selected departments.');
+                        closeCreateQuestionModal();
+                        await loadAllQuestions();
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || 'Failed to create question');
+                    }
+                }
+            } catch (e) {
+                console.error('Error submitting question:', e);
+                alert('Failed to submit question');
+            }
+        }
+
+        document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+        initTheme();
+    </script>
+
+    <!-- Create Question Modal -->
+    <div id="createQuestionModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <span class="modal-close" onclick="closeCreateQuestionModal()">&times;</span>
+            <h2 style="margin-bottom: 20px;">Create Question</h2>
+
+            <!-- Question Title -->
+            <div class="form-group">
+                <label>Title <span style="color: red;">*</span></label>
+                <input type="text" id="questionTitle" placeholder="Be specific and imagine you're asking a question to another person. Min 15 characters." 
+                    style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 5px;">
+            </div>
+
+            <!-- Question Body -->
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Body <span style="color: red;">*</span></label>
+                <textarea id="questionBody" rows="6" placeholder="Include all the information someone would need to answer your question. Min 120 characters."
+                    style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 5px;"></textarea>
+            </div>
+
+            <!-- Tags -->
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Tags</label>
+                <input type="text" id="questionTags" placeholder="Add up to 5 tags to describe what your question is about. Start typing to see suggestions."
+                    style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 5px;">
+                <small style="color: #666;">e.g. Handler, Prober, V9300 (comma separated)</small>
+            </div>
+
+            <!-- Verification Type Selection -->
+            <div class="form-group" style="margin-top: 20px;">
+                <label style="font-weight: bold;">Verification Type</label>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button id="selfVerifyBtn" class="verification-type-btn active" onclick="selectVerificationType('self')" 
+                        style="flex: 1; padding: 12px; border: 2px solid #017374; background: #017374; color: white; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        Self Verify
+                    </button>
+                    <button id="requestVerifyBtn" class="verification-type-btn" onclick="selectVerificationType('request')"
+                        style="flex: 1; padding: 12px; border: 2px solid #ccc; background: white; color: #333; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        Request Verification from Other Departments
+                    </button>
+                </div>
+            </div>
+
+            <!-- Self Verify Section -->
+            <div id="selfVerifySection" style="margin-top: 15px; display: block;">
+                <label>Answer <span style="color: red;">*</span></label>
+                <textarea id="answerBody" rows="6" placeholder="Provide your answer and verify it as correct from your department."
+                    style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 5px;"></textarea>
+            </div>
+
+            <!-- Request Departments Section -->
+            <div id="requestDepartmentsSection" style="margin-top: 15px; display: none;">
+                <!-- Yellow Info Bar -->
+                <div style="background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px 15px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⏳</span>
+                    <span style="color: #856404; font-weight: 500;">Your question will be marked as "⏳ Pending" until selected departments verify it.</span>
+                </div>
+
+                <label style="font-weight: bold;">Select Departments <span style="color: red;">*</span></label>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px;">
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="Engineering" style="margin-right: 8px;">
+                        Engineering
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="Quality" style="margin-right: 8px;">
+                        Quality
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="Production" style="margin-right: 8px;">
+                        Production
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="Maintenance" style="margin-right: 8px;">
+                        Maintenance
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="IT" style="margin-right: 8px;">
+                        IT
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                        <input type="checkbox" class="dept-checkbox" value="Other" style="margin-right: 8px;">
+                        Other
+                    </label>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <label>Due Date (Optional)</label>
+                    <input type="datetime-local" id="requestDueDate"
+                        style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 5px;">
+                </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeCreateQuestionModal()" 
+                    style="padding: 10px 20px; border: 1px solid #ccc; background: white; color: #333; border-radius: 4px; cursor: pointer;">
+                    Cancel
+                </button>
+                <button onclick="submitQuestion()" 
+                    style="padding: 10px 20px; border: none; background: #017374; color: white; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                    Submit to Staging Ground
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        [data-theme="dark"] .modal-content {
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+        }
+
+        [data-theme="dark"] .modal-content input,
+        [data-theme="dark"] .modal-content textarea {
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        [data-theme="dark"] .modal-content label[style*="border"] {
+            border-color: #444 !important;
+            background-color: #2d2d2d;
+        }
+
+        .modal-close {
+            position: absolute;
+            right: 15px;
+            top: 15px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .verification-type-btn.active {
+            background: #017374 !important;
+            color: white !important;
+            border-color: #017374 !important;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+    </style>
+</body>
+</html>

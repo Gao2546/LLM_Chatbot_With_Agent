@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Q&A Detail - Comments</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
+    <link rel="stylesheet" href="community.css?v=5.0">
+    <link rel="stylesheet" href="comment.css?v=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+</head>
+<body>
+    <!-- Auth Container (Top Right) -->
+    <div class="auth-container">
+        <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
+        <a href="auth/login" class="login-button" id="loginBtn">Login</a>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar -->
+        <div id="chatList">
+            <div class="btn-sidebar-container"></div>
+            
+            <!-- Infineon Logo -->
+            <div class="sidebar-logo">
+                <img src="image.png" alt="Infineon Logo" class="infineon-logo">
+            </div>
+            
+            <!-- Q&A Community Button -->
+            <a href="community.html" class="community-nav-button">
+                <i class="fas fa-comments"></i> Q&A Community
+            </a>
+
+            <!-- AI Chat Button -->
+            <a href="/" class="community-nav-button">
+                <i class="fas fa-robot"></i> AI Chat
+            </a>
+
+            <!-- Filter By Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Filter By</div>
+                <a href="community.html" class="sidebar-link">All questions</a>
+                <a href="#" class="sidebar-link">My Questions</a>
+                <a href="#" class="sidebar-link">My Answers</a>
+                <a href="#" class="sidebar-link">Pending review</a>
+                <a href="#" class="sidebar-link">Unverified</a>
+            </div>
+
+            <!-- Tags Section -->
+            <div class="sidebar-section">
+                <div class="section-title">Tags</div>
+                <div id="tagsList" class="sidebar-tags-grid">
+                    <span class="sidebar-tag-item" data-tag="PRVX 4">PRVX 4</span>
+                    <span class="sidebar-tag-item" data-tag="D1">D1</span>
+                    <span class="sidebar-tag-item" data-tag="Handler">Handler</span>
+                    <span class="sidebar-tag-item" data-tag="V9300">V9300</span>
+                    <span class="sidebar-tag-item" data-tag="Prober">Prober</span>
+                    <span class="sidebar-tag-item" data-tag="Tester">Tester</span>
+                    <span class="sidebar-tag-item" data-tag="AI">AI</span>
+                    <span class="sidebar-tag-item" data-tag="Sensor">Sensor</span>
+                </div>
+            </div>
+
+            <!-- Theme Toggle Button -->
+            <div class="theme-toggle-container">
+                <button id="themeToggleBtn" class="theme-toggle-btn" title="Change Theme">
+                    <i class="fas fa-palette"></i>
+                    <span id="themeLabel">Dark</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div id="chatbox">
+            <!-- Header -->
+            <h1 class="header1">
+                <button id="toggleSidebarButton"><i class="fas fa-bars"></i></button>
+                Q&A Detail
+            </h1>
+
+            <!-- Content -->
+            <div class="contain-overflow">
+                <div class="content-wrapper">
+                    <!-- Back Button -->
+                    <div class="page-header">
+                        <button class="back-button" onclick="history.back()">
+                            <i class="fas fa-arrow-left"></i> Back to Community
+                        </button>
+                    </div>
+
+                    <!-- Question Detail -->
+                    <div id="questionDetail" class="question-item">
+                        <div class="loading-state">
+                            <div class="spinner"></div>
+                            <p>Loading question...</p>
+                        </div>
+                    </div>
+
+                    <!-- Comments Section -->
+                    <div style="margin-top: 30px;">
+                        <div class="comments-header">
+                            <i class="fas fa-comments"></i> Comments (<span id="commentCount">0</span>)
+                        </div>
+
+                        <!-- Comment Form -->
+                        <div class="comments-form">
+                            <div class="comment-input-group">
+                                <!-- Department Selection -->
+                                <div class="comment-dept-select">
+                                    <label for="commentDept">Department:</label>
+                                    <select id="commentDept" class="dept-select">
+                                        <option value="">Select Department</option>
+                                        <option value="WT">WT - Wafer Test</option>
+                                        <option value="FT">FT - Final Test</option>
+                                        <option value="PE">PE - Process Engineering</option>
+                                        <option value="QM">QM - Quality Management</option>
+                                    </select>
+                                </div>
+
+                                <textarea 
+                                    class="comment-textarea" 
+                                    id="commentInput" 
+                                    placeholder="Write your comment here..."
+                                    rows="4"></textarea>
+
+                                <!-- File Upload -->
+                                <div class="comment-file-upload">
+                                    <input type="file" id="commentAttachment" multiple accept="image/*,.pdf,.doc,.docx" style="display: none;" />
+                                    <label for="commentAttachment" class="file-upload-btn">
+                                        <i class="fas fa-paperclip"></i> Attach Files (Images/PDF/Docs)
+                                    </label>
+                                    <div id="attachmentPreview" class="attachment-preview"></div>
+                                </div>
+
+                                <div class="comment-action-buttons">
+                                    <button class="comment-submit" id="submitCommentBtn">
+                                        <i class="fas fa-paper-plane"></i> Submit Comment
+                                    </button>
+                                    <button class="comment-verify" id="verifyCommentBtn" style="display: none;">
+                                        <i class="fas fa-check-circle"></i> Verify
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Messages Container -->
+                        <div id="messagesContainer"></div>
+
+                        <!-- Comments List -->
+                        <div class="comments-list" id="commentsList">
+                            <div class="empty-comments">
+                                <div class="empty-comments-icon">💬</div>
+                                <p>No comments yet. Be the first to comment!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentQuestionId = null;
+        let comments = [];
+        let verifications = [];
+        let currentUserId = null;
+        let currentUsername = null;
+        let userRating = null;
+
+        // Add CSS for preview modal
+        const style = document.createElement('style');
+        style.textContent = `
+            .image-preview-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.9);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10000;
+            }
+            .image-preview-content {
+                position: relative;
+                max-width: 95vw;
+                max-height: 95vh;
+            }
+            .modal-close-btn {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: #fff;
+                border: none;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                font-size: 28px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #333;
+                z-index: 10001;
+            }
+            .modal-close-btn:hover {
+                background: #f0f0f0;
+            }
+            .attachment-preview-btn {
+                background: #0066cc;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                transition: background 0.2s;
+            }
+            .attachment-preview-btn:hover {
+                background: #0052a3;
+            }
+        `;
+        document.head.appendChild(style);
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('🔄 DOMContentLoaded - Starting...');
+            await getCurrentUser();
+            console.log('👤 getCurrentUser completed');
+            await loadQuestionDetail();
+            console.log('❓ loadQuestionDetail completed');
+            setupSidebarToggle();
+            console.log('⚙️ setupSidebarToggle completed');
+            setupCommentSubmit();
+            console.log('💬 setupCommentSubmit completed');
+            setupRatingButtons();
+            console.log('⭐ setupRatingButtons completed');
+            setupTheme();
+            console.log('🎨 setupTheme completed');
+            console.log('✅ All setup functions completed');
+        });
+
+        async function getCurrentUser() {
+            try {
+                const res = await fetch('/auth/session');
+                if (!res.ok) throw new Error('Failed to get session');
+                const data = await res.json();
+                
+                const loginBtn = document.getElementById('loginBtn');
+                const usernameDisplay = document.getElementById('usernameDisplay');
+                
+                if (data.loggedIn) {
+                    currentUserId = data.userId || null;
+                    currentUsername = data.username || 'Guest';
+                    
+                    if (loginBtn) {
+                        loginBtn.textContent = data.isGuest ? 'Login' : 'Logout';
+                        loginBtn.href = data.isGuest ? '/auth/login' : '/auth/logout';
+                    }
+                    
+                    if (!data.isGuest && data.username && usernameDisplay) {
+                        usernameDisplay.textContent = `Welcome: ${data.username}`;
+                        usernameDisplay.style.display = 'inline';
+                    } else if (usernameDisplay) {
+                        usernameDisplay.style.display = 'none';
+                    }
+                } else {
+                    currentUserId = null;
+                    currentUsername = 'Guest';
+                    if (loginBtn) {
+                        loginBtn.textContent = 'Login';
+                        loginBtn.href = '/auth/login';
+                    }
+                    if (usernameDisplay) {
+                        usernameDisplay.style.display = 'none';
+                    }
+                }
+            } catch (e) {
+                console.log('User not logged in:', e);
+                currentUserId = null;
+                currentUsername = 'Guest';
+            }
+        }
+
+        async function loadQuestionDetail() {
+            try {
+                // Get question ID from URL parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                currentQuestionId = urlParams.get('id');
+
+                if (!currentQuestionId) {
+                    showQuestionError('Question not found. Please go back to community page.');
+                    return;
+                }
+
+                // Fetch question details
+                const res = await fetch('/api/get-all-verified-answers');
+                const data = await res.json();
+                const questions = data.results || data.answers || [];
+                const question = questions.find(q => q.id === parseInt(currentQuestionId));
+
+                if (!question) {
+                    showQuestionError('Question not found.');
+                    return;
+                }
+
+                // Update page title
+                document.title = question.question || 'Q&A Detail';
+
+                // Render question detail
+                renderQuestionDetail(question);
+
+                // Load attachments
+                await loadAttachments(currentQuestionId);
+
+                // Load comments and verifications
+                await loadComments();
+                await loadVerifications();
+
+                // Increment view
+                await incrementView(currentQuestionId);
+            } catch (e) {
+                console.error('Error loading question:', e);
+                showQuestionError('Error loading question. Please try again.');
+            }
+        }
+
+        function renderQuestionDetail(q) {
+            currentQuestion = q; // Store for verify button visibility check
+            
+            console.log('🔍 renderQuestionDetail called with:', q);
+            console.log('🔍 verification_types:', q.verification_types);
+            console.log('🔍 requested_departments_list:', q.requested_departments_list);
+            
+            // Ensure requested_departments_list is an array
+            let deptsList = [];
+            if (q.requested_departments_list) {
+                if (Array.isArray(q.requested_departments_list)) {
+                    deptsList = q.requested_departments_list;
+                } else if (typeof q.requested_departments_list === 'string') {
+                    // Handle string format (could be JSON array string or comma-separated)
+                    try {
+                        deptsList = JSON.parse(q.requested_departments_list);
+                        if (!Array.isArray(deptsList)) deptsList = [q.requested_departments_list];
+                    } catch (e) {
+                        deptsList = q.requested_departments_list.split(',').map(d => d.trim());
+                    }
+                }
+            }
+            
+            console.log('🔍 deptsList:', deptsList);
+            
+            // Initial badge and pending info (will be updated after verifications load)
+            const verificationBadge = q.verification_types && q.verification_types.includes('request')
+                ? '<span class="detail-verified-badge pending" id="verificationBadge">⏳ Pending</span>'
+                : (q.rating_count || 0) > 0 
+                ? '<span class="detail-verified-badge verified" id="verificationBadge">✓ Verified</span>'
+                : '';
+
+            const pendingInfo = q.verification_types && q.verification_types.includes('request') && deptsList && deptsList.length > 0
+                ? `<div class="detail-pending-info" id="pendingInfo">
+                    <i class="fas fa-hourglass-end"></i> Pending verification from: ${deptsList.join(', ')}
+                    <button class="view-status-btn" onclick="showVerificationStatus()">View verification status</button>
+                   </div>`
+                : '';
+
+            console.log('🔍 pendingInfo:', pendingInfo);
+
+            document.getElementById('questionDetail').innerHTML = `
+                <div class="question-with-vote">
+                    <div class="vote-section">
+                        <button class="vote-btn vote-up" data-vote="1" title="This question is useful">
+                            <i class="fas fa-caret-up"></i>
+                        </button>
+                        <div class="vote-count" id="questionVoteCount">${q.score || 0}</div>
+                        <button class="vote-btn vote-down" data-vote="-1" title="This question is not useful">
+                            <i class="fas fa-caret-down"></i>
+                        </button>
+                    </div>
+                    <div class="question-content-area">
+                        <div class="detail-question-box">
+                            <div class="detail-question-title">${q.question || q.question_title || 'Untitled'}</div>
+                            
+                            <div class="detail-question-meta">
+                        <div class="detail-meta-item">
+                            <div class="detail-meta-avatar">${(q.user_name || 'U')[0].toUpperCase()}</div>
+                            <div class="detail-meta-user">
+                                <span class="detail-meta-name">${q.user_name || 'Anonymous'}</span>
+                                <span class="detail-meta-time">${formatDate(q.created_at)}</span>
+                            </div>
+                        </div>
+                        <div class="detail-meta-item">
+                            <i class="fas fa-eye"></i> ${q.views || 0} views
+                        </div>
+                        <div class="detail-meta-item">
+                            <i class="fas fa-star"></i> Score: ${q.score || 0}
+                        </div>
+                    </div>
+
+                    <div class="detail-question-content">${q.answer || 'No content available'}</div>
+
+                    <div class="detail-question-tags">
+                        ${(q.tags || []).map(tag => `<span class="tag-badge">${tag}</span>`).join('')}
+                    </div>
+
+                    <div id="attachmentsSection" class="detail-attachments-section"></div>
+
+                    ${pendingInfo}
+
+                    <!-- Quick Verification Section for Departments -->
+                    <div id="quickVerificationSection" class="quick-verification-section" style="display: none;">
+                        <div class="verification-title">Your Verification</div>
+                        <div class="verification-buttons">
+                            <button class="verify-btn helpful" onclick="submitVerification(1)">
+                                <i class="fas fa-thumbs-up"></i> Helpful
+                            </button>
+                            <button class="verify-btn neutral" onclick="submitVerification(0)">
+                                <i class="fas fa-minus"></i> Neutral
+                            </button>
+                            <button class="verify-btn not-helpful" onclick="submitVerification(-1)">
+                                <i class="fas fa-thumbs-down"></i> Not Helpful
+                            </button>
+                        </div>
+                        <textarea id="verificationComment" class="verification-comment" placeholder="Add a comment (optional)..." rows="2"></textarea>
+                        <button class="submit-verification-btn" onclick="submitVerificationWithComment()">Submit Verification</button>
+                    </div>
+
+                    <div class="detail-question-actions">
+                        <button class="detail-action-btn" onclick="shareQuestion()">
+                            <i class="fas fa-share"></i> Share
+                        </button>
+                    </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Setup vote button event listeners
+            setupVoteButtons();
+            
+            // Setup verification rating buttons
+            setupVerificationButtons();
+        }
+
+        function setupVoteButtons() {
+            const voteButtons = document.querySelectorAll('.vote-btn');
+            voteButtons.forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const vote = parseInt(this.getAttribute('data-vote'));
+                    await voteQuestion(vote);
+                });
+            });
+        }
+        // Load and display attachments
+        async function loadAttachments(questionId) {
+            try {
+                const res = await fetch(`/api/question-attachments/${questionId}`);
+                if (!res.ok) {
+                    console.warn('Could not load attachments');
+                    return;
+                }
+                
+                const data = await res.json();
+                const attachments = data.attachments || [];
+                const attachmentsSection = document.getElementById('attachmentsSection');
+                
+                if (!attachmentsSection) return;
+                
+                if (attachments.length === 0) {
+                    attachmentsSection.style.display = 'none';
+                    return;
+                }
+                
+                attachmentsSection.style.display = 'block';
+                attachmentsSection.innerHTML = `
+                    <div class="attachments-header">
+                        <i class="fas fa-paperclip"></i> Attachments (${attachments.length})
+                    </div>
+                    <div class="attachments-list">
+                        ${attachments.map(att => `
+                            <div class="attachment-item">
+                                <div class="attachment-info">
+                                    <i class="fas ${getFileIcon(att.mime_type)}"></i>
+                                    <div class="attachment-details">
+                                        <div class="attachment-name">${att.file_name}</div>
+                                        <div class="attachment-meta">${formatFileSize(att.file_size_bytes)} • Uploaded by ${att.uploaded_by}</div>
+                                    </div>
+                                </div>
+                                <button class="attachment-preview-btn" onclick="previewAttachment(${att.id}, '${att.mime_type}', '${att.file_name}')" title="Preview file">
+                                    <i class="fas fa-eye"></i> Preview
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } catch (e) {
+                console.error('Error loading attachments:', e);
+            }
+        }
+
+        function getFileIcon(mimeType) {
+            if (mimeType.startsWith('image/')) return 'fa-image';
+            if (mimeType === 'application/pdf') return 'fa-file-pdf';
+            if (mimeType.includes('word')) return 'fa-file-word';
+            if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'fa-file-excel';
+            if (mimeType === 'text/plain') return 'fa-file-alt';
+            return 'fa-file';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        async function previewAttachment(attachmentId, mimeType, fileName) {
+            try {
+                if (mimeType.startsWith('image/')) {
+                    // Open image in modal
+                    const res = await fetch(`/api/attachment-preview/${attachmentId}`);
+                    if (res.ok) {
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        
+                        // Create modal
+                        const modal = document.createElement('div');
+                        modal.className = 'image-preview-modal';
+                        modal.innerHTML = `
+                            <div class="image-preview-content">
+                                <button class="modal-close-btn" onclick="this.closest('.image-preview-modal').remove()">×</button>
+                                <img src="${url}" alt="${fileName}" style="max-width: 90%; max-height: 90%; border-radius: 8px;">
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+                    }
+                } else if (mimeType === 'application/pdf') {
+                    // Open PDF in new tab (browser will show preview)
+                    window.open(`/api/attachment-preview/${attachmentId}`, '_blank');
+                } else {
+                    // For other files, open in new tab (browser default preview/download)
+                    window.open(`/api/attachment-preview/${attachmentId}`, '_blank');
+                }
+            } catch (e) {
+                console.error('Error previewing attachment:', e);
+                alert('Failed to preview file. Please try again.');
+            }
+        }
+
+        function setupVerificationButtons() {
+            // Setup rating button selection
+            const ratingBtns = document.querySelectorAll('.verify-btn');
+            ratingBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    ratingBtns.forEach(b => b.classList.remove('selected'));
+                    this.classList.add('selected');
+                });
+            });
+
+            // Setup submit verification button
+            const submitBtn = document.getElementById('submitVerificationBtn');
+            if (submitBtn) {
+                submitBtn.addEventListener('click', submitVerification);
+            }
+        }
+
+        async function voteQuestion(vote) {
+            if (!currentUserId) {
+                alert('Please login to vote');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/vote-question/${currentQuestionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vote })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    const voteCountEl = document.getElementById('questionVoteCount');
+                    if (voteCountEl) {
+                        voteCountEl.textContent = data.score || 0;
+                        voteCountEl.className = 'vote-count';
+                        if (data.score > 0) voteCountEl.classList.add('positive');
+                        if (data.score < 0) voteCountEl.classList.add('negative');
+                    }
+
+                    // Update button states
+                    document.querySelectorAll('.vote-btn').forEach(btn => {
+                        btn.classList.remove('upvoted', 'downvoted');
+                    });
+                    
+                    if (data.userVote === 1) {
+                        document.querySelector('.vote-up').classList.add('upvoted');
+                    } else if (data.userVote === -1) {
+                        document.querySelector('.vote-down').classList.add('downvoted');
+                    }
+                } else {
+                    const error = await res.json();
+                    alert(error.error || 'Failed to vote');
+                }
+            } catch (e) {
+                console.error('Error voting:', e);
+                alert('Failed to vote');
+            }
+        }
+
+        async function loadComments() {
+            try {
+                const res = await fetch(`/api/get-comments/${currentQuestionId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    comments = data.comments || [];
+                    console.log('📝 Loaded comments:', comments.length);
+                } else {
+                    console.error('Failed to load comments');
+                    comments = [];
+                }
+                renderComments();
+            } catch (e) {
+                console.error('Error loading comments:', e);
+                comments = [];
+                renderComments();
+            }
+        }
+
+        async function loadVerifications() {
+            try {
+                const res = await fetch(`/api/get-verifications/${currentQuestionId}`);
+                console.log('🌐 API Response status:', res.status);
+                if (res.ok) {
+                    const data = await res.json();
+                    console.log('🌐 API Response data:', data);
+                    verifications = data.verifications || [];
+                    console.log('✅ Loaded verifications:', verifications.length, verifications);
+                    
+                    // Check if current user already rated
+                    if (currentUserId) {
+                        const myRating = verifications.find(v => v.userId === currentUserId);
+                        if (myRating) {
+                            userRating = myRating.rating;
+                            highlightUserRating(userRating);
+                        }
+                    }
+                    
+                    // Update verification status display
+                    updateVerificationStatus();
+                } else {
+                    verifications = [];
+                }
+                renderVerifications();
+            } catch (e) {
+                console.error('Error loading verifications:', e);
+                verifications = [];
+                renderVerifications();
+            }
+        }
+
+        function updateVerificationStatus() {
+            // Update the pending banner after verifications are loaded
+            if (!currentQuestion || !currentQuestion.requested_departments_list || currentQuestion.requested_departments_list.length === 0) {
+                return;
+            }
+            
+            // Get unique departments that have verified with rating = 1
+            console.log('🔍 Step 1: All verifications loaded:', verifications.length, verifications);
+            
+            const positiveVerifications = verifications.filter(v => v.rating === 1);
+            console.log('🔍 Step 2: Positive verifications (rating=1):', positiveVerifications.length, positiveVerifications);
+            
+            const departmentsExtracted = positiveVerifications.map(v => {
+                console.log('🔍 Step 3: Extracting department from:', v, '-> department:', v.department);
+                return v.department;
+            });
+            console.log('🔍 Step 4: Departments extracted:', departmentsExtracted);
+            
+            const verifiedDepts = [...new Set(departmentsExtracted.filter(d => d))];
+            console.log('🔍 Step 5: Unique verified departments:', verifiedDepts);
+            
+            // Check if all requested departments are in the verified list
+            const allDepartmentsVerified = currentQuestion.requested_departments_list.every(dept => 
+                verifiedDepts.includes(dept)
+            );
+            
+            console.log('🔄 Updating verification banner:', {
+                requestedDepts: currentQuestion.requested_departments_list,
+                verifiedDepts: verifiedDepts,
+                allVerified: allDepartmentsVerified
+            });
+            
+            // Update badge and pending info
+            const badgeEl = document.getElementById('verificationBadge');
+            const pendingInfoEl = document.getElementById('pendingInfo');
+            
+            if (badgeEl && currentQuestion.verification_types && currentQuestion.verification_types.includes('request')) {
+                if (allDepartmentsVerified) {
+                    // All verified - change to green and show departments
+                    badgeEl.className = 'detail-verified-badge verified';
+                    badgeEl.innerHTML = `✓ Verified from: ${verifiedDepts.join(', ')}`;
+                    // Hide pending info
+                    if (pendingInfoEl) {
+                        pendingInfoEl.style.display = 'none';
+                    }
+                } else {
+                    // Still pending - keep yellow
+                    badgeEl.className = 'detail-verified-badge pending';
+                    badgeEl.innerHTML = '⏳ Pending';
+                    // Show pending info
+                    if (pendingInfoEl) {
+                        pendingInfoEl.style.display = 'flex';
+                    }
+                }
+            }
+        }
+
+        function renderVerifications() {
+            const count = verifications.length;
+            
+            // Only update if elements exist (Verifications section was removed)
+            const verCountEl = document.getElementById('verificationCount');
+            const verListEl = document.getElementById('verificationsList');
+            
+            if (!verCountEl || !verListEl) {
+                console.log('ℹ️ Verifications elements not found (section removed)');
+                return;
+            }
+            
+            verCountEl.textContent = count;
+
+            if (count === 0) {
+                verListEl.innerHTML = `
+                    <div class="empty-verifications">
+                        <div class="empty-icon">🔍</div>
+                        <p>No verifications yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            verListEl.innerHTML = verifications.map(v => {
+                // Rating display
+                let ratingDisplay = '';
+                let ratingClass = '';
+                if (v.rating === 1) {
+                    ratingDisplay = '<i class="fas fa-thumbs-up"></i> Helpful (+1)';
+                    ratingClass = 'rating-positive';
+                } else if (v.rating === -1) {
+                    ratingDisplay = '<i class="fas fa-thumbs-down"></i> Not Helpful (-1)';
+                    ratingClass = 'rating-negative';
+                } else if (v.rating === 0) {
+                    ratingDisplay = '<i class="fas fa-minus"></i> Neutral (0)';
+                    ratingClass = 'rating-neutral';
+                } else {
+                    ratingDisplay = `<i class="fas fa-star"></i> Score: ${v.rating}`;
+                    ratingClass = v.rating > 0 ? 'rating-positive' : (v.rating < 0 ? 'rating-negative' : 'rating-neutral');
+                }
+
+                // Type badge
+                let typeBadge = '';
+                if (v.verificationType === 'request') {
+                    const depts = (v.requestedDepartments || []).join(', ');
+                    typeBadge = `<span class="type-badge pending">⏳ Request (${depts || 'N/A'})</span>`;
+                } else if (v.verificationType === 'self') {
+                    typeBadge = '<span class="type-badge verified">✓ Self Verified</span>';
+                } else if (v.verificationType === 'rating') {
+                    typeBadge = '<span class="type-badge rating">⭐ Quick Rating</span>';
+                }
+
+                return `
+                    <div class="verification-item">
+                        <div class="verification-header">
+                            <div class="verification-user">
+                                <div class="verification-avatar">${(v.username || 'U')[0].toUpperCase()}</div>
+                                <div class="verification-user-info">
+                                    <span class="verification-username">${v.username || 'Anonymous'}</span>
+                                    <span class="verification-time">${formatDate(v.createdAt)}</span>
+                                </div>
+                            </div>
+                            <div class="verification-rating ${ratingClass}">${ratingDisplay}</div>
+                        </div>
+                        ${typeBadge ? `<div class="verification-type">${typeBadge}</div>` : ''}
+                        ${v.comment ? `<div class="verification-comment">${v.comment}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function setupRatingButtons() {
+            const ratingBtns = document.querySelectorAll('.quick-rate-btn');
+            ratingBtns.forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!currentUserId) {
+                        showRatingMessage('Please login to rate this answer', 'error');
+                        return;
+                    }
+                    
+                    const rating = parseInt(btn.dataset.rating);
+                    await rateAnswer(rating);
+                });
+            });
+        }
+
+        async function rateAnswer(rating) {
+            try {
+                const response = await fetch('/api/rate-answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        questionId: currentQuestionId,
+                        rating: rating,
+                        userId: currentUserId,
+                        username: currentUsername
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    userRating = rating;
+                    highlightUserRating(rating);
+                    showRatingMessage('Rating submitted successfully!', 'success');
+                    
+                    // Update score display
+                    const scoreEl = document.querySelector('.detail-meta-item .fa-star');
+                    if (scoreEl) {
+                        scoreEl.parentElement.innerHTML = `<i class="fas fa-star"></i> Score: ${data.newScore}`;
+                    }
+                    
+                    // Reload verifications
+                    await loadVerifications();
+                } else {
+                    showRatingMessage('Failed to submit rating', 'error');
+                }
+            } catch (e) {
+                console.error('Error rating:', e);
+                showRatingMessage('Error submitting rating', 'error');
+            }
+        }
+
+        function highlightUserRating(rating) {
+            document.querySelectorAll('.quick-rate-btn').forEach(btn => {
+                btn.classList.remove('selected');
+                if (parseInt(btn.dataset.rating) === rating) {
+                    btn.classList.add('selected');
+                }
+            });
+        }
+
+        function showRatingMessage(msg, type) {
+            const msgEl = document.getElementById('ratingMessage');
+            msgEl.textContent = msg;
+            msgEl.className = `quick-rating-message ${type}`;
+            msgEl.style.display = 'block';
+            setTimeout(() => {
+                msgEl.style.display = 'none';
+            }, 3000);
+        }
+
+        function renderComments() {
+            try {
+                console.log('🎨 Rendering comments...', comments.length, 'total');
+                
+                // Separate verification comments from regular comments
+                const verificationComments = comments.filter(c => c.source === 'verification');
+                const regularComments = comments.filter(c => c.source !== 'verification');
+                
+                console.log('📊 Comment breakdown:', {
+                    total: comments.length,
+                    verifications: verificationComments.length,
+                    regular: regularComments.length
+                });
+                
+                const count = comments.length;
+                const countEl = document.getElementById('commentCount');
+                if (countEl) countEl.textContent = count;
+
+                const listEl = document.getElementById('commentsList');
+                if (!listEl) {
+                    console.error('❌ commentsList element not found!');
+                    return;
+                }
+
+                if (count === 0) {
+                    listEl.innerHTML = `
+                        <div class="empty-comments">
+                            <div class="empty-comments-icon">💬</div>
+                            <p>No comments yet. Be the first to comment!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+            let html = '';
+            
+            // Render verification comments first
+            verificationComments.forEach(comment => {
+                const dept = comment.requested_departments && comment.requested_departments.length > 0 
+                    ? comment.requested_departments[0] 
+                    : (comment.department || 'N/A');
+                const statusIcon = '✓';
+                const statusClass = 'correct';
+                const formattedDate = new Date(comment.createdAt).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short'
+                });
+                
+                const safeText = (comment.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                html += `
+                    <div class="comment-item verification-comment">
+                        <div class="verification-header">
+                            <span class="verification-info">
+                                <span class="dept-name">${dept}:</span>
+                                <span class="verification-status ${statusClass}">${statusIcon} Verified by ${comment.username} (${formattedDate})</span>
+                            </span>
+                        </div>
+                        ${comment.text ? `<div class="comment-text">${safeText}</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            // Render regular comments
+            regularComments.forEach(comment => {
+                const formattedDate = new Date(comment.createdAt).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short'
+                });
+                
+                const deptLabel = comment.department || 'General';
+                const safeText = (comment.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                
+                // Parse attachments if it's a JSON string
+                let attachmentsList = [];
+                try {
+                    if (comment.attachments) {
+                        attachmentsList = typeof comment.attachments === 'string' 
+                            ? JSON.parse(comment.attachments) 
+                            : comment.attachments;
+                    }
+                } catch (e) {
+                    console.warn('Failed to parse attachments:', e);
+                    attachmentsList = [];
+                }
+                
+                html += `
+                    <div class="comment-item">
+                        <div class="comment-dept-header">
+                            Comment by ${comment.username || 'Anonymous'} (${formattedDate})
+                        </div>
+                        ${comment.text ? `<div class="comment-content">${safeText}</div>` : ''}
+                        ${attachmentsList.length > 0 ? `
+                            <div class="comment-attachments-list">
+                                ${attachmentsList.map(att => {
+                                    const ext = att.name.split('.').pop().toLowerCase();
+                                    const iconMap = {
+                                        'pdf': '📄',
+                                        'doc': '📝', 'docx': '📝',
+                                        'xls': '📊', 'xlsx': '📊',
+                                        'ppt': '📽️', 'pptx': '📽️',
+                                        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
+                                        'zip': '📦', 'rar': '📦', '7z': '📦',
+                                        'txt': '📃', 'csv': '📃'
+                                    };
+                                    const icon = iconMap[ext] || '📎';
+                                    const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
+                                    return `
+                                    <div class="attachment-item">
+                                        <a href="${att.url}" target="_blank" class="attachment-link" download="${att.name}">
+                                            ${icon} ${att.name} ${sizeKB > 0 ? `(${sizeKB} KB)` : ''}
+                                        </a>
+                                    </div>
+                                `}).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            
+            listEl.innerHTML = html;
+            console.log('✅ Comments rendered successfully');
+            } catch (error) {
+                console.error('❌ Error rendering comments:', error);
+                const listEl = document.getElementById('commentsList');
+                if (listEl) {
+                    listEl.innerHTML = '<div class="error-message">Error displaying comments. Please refresh the page.</div>';
+                }
+            }
+        }
+
+        function setupCommentSubmit() {
+            const submitBtn = document.getElementById('submitCommentBtn');
+            const verifyBtn = document.getElementById('verifyCommentBtn');
+            const commentInput = document.getElementById('commentInput');
+            const fileInput = document.getElementById('commentAttachment');
+            const deptSelect = document.getElementById('commentDept');
+
+            submitBtn.addEventListener('click', submitComment);
+            verifyBtn.addEventListener('click', submitVerifyComment);
+            
+            // Show verify button when user selects department for pending verification
+            deptSelect.addEventListener('change', updateVerifyButtonVisibility);
+            
+            commentInput.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    submitComment();
+                }
+            });
+
+            // Handle file upload
+            fileInput.addEventListener('change', handleFileSelect);
+        }
+
+        let selectedFiles = [];
+        let currentQuestion = null;
+
+        function updateVerifyButtonVisibility() {
+            const deptSelect = document.getElementById('commentDept');
+            const verifyBtn = document.getElementById('verifyCommentBtn');
+            const department = deptSelect.value;
+            
+            // Show verify button if:
+            // 1. User is logged in
+            // 2. Question has pending verification requests
+            // 3. Selected department is in the requested departments list
+            if (currentUserId && currentQuestion && department && 
+                currentQuestion.requested_departments_list && 
+                currentQuestion.requested_departments_list.includes(department)) {
+                verifyBtn.style.display = 'inline-flex';
+            } else {
+                verifyBtn.style.display = 'none';
+            }
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            const preview = document.getElementById('attachmentPreview');
+            
+            selectedFiles = files;
+            preview.innerHTML = '';
+
+            files.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'attachment-item';
+                item.innerHTML = `
+                    <i class="fas fa-file"></i>
+                    <span>${file.name}</span>
+                    <button type="button" data-index="${index}">×</button>
+                `;
+                preview.appendChild(item);
+            });
+
+            // Add remove listeners
+            preview.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const index = parseInt(btn.dataset.index);
+                    selectedFiles.splice(index, 1);
+                    handleFileSelect({ target: { files: selectedFiles } });
+                });
+            });
+        }
+
+        async function submitComment() {
+            const commentInput = document.getElementById('commentInput');
+            const deptSelect = document.getElementById('commentDept');
+            const text = commentInput.value.trim();
+            const department = deptSelect.value;
+            const messagesContainer = document.getElementById('messagesContainer');
+
+            if (!text) {
+                showMessage('Please write a comment', 'error');
+                return;
+            }
+
+            if (!currentUserId) {
+                showMessage('Please login to comment', 'error');
+                return;
+            }
+
+            if (!department) {
+                showMessage('Please select a department', 'error');
+                return;
+            }
+
+            try {
+                const attachments = [];
+                
+                console.log('📎 Selected files:', selectedFiles.length);
+                
+                // Upload files if any
+                if (selectedFiles.length > 0) {
+                    console.log('📤 Uploading files...');
+                    const formData = new FormData();
+                    selectedFiles.forEach(file => {
+                        console.log('Adding file:', file.name, file.size);
+                        formData.append('files', file);
+                    });
+
+                    const uploadRes = await fetch('/api/upload-comment-files', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    console.log('Upload response status:', uploadRes.status);
+                    if (uploadRes.ok) {
+                        const uploadData = await uploadRes.json();
+                        console.log('Upload result:', uploadData);
+                        attachments.push(...(uploadData.files || []));
+                    } else {
+                        console.error('Upload failed:', await uploadRes.text());
+                    }
+                } else {
+                    console.log('⚠️ No files selected');
+                }
+
+                // Save to backend
+                const res = await fetch('/api/add-comment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        questionId: currentQuestionId,
+                        userId: currentUserId,
+                        username: currentUsername,
+                        text: text,
+                        department: department,
+                        attachments: attachments
+                    })
+                });
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error('Server error:', errorText);
+                    throw new Error('Failed to save comment');
+                }
+
+                const data = await res.json();
+                console.log('Comment response:', data);
+                
+                if (data.success && data.comment) {
+                    // Reload all comments from server to ensure consistency
+                    await loadComments();
+                    
+                    // Clear form
+                    commentInput.value = '';
+                    deptSelect.value = '';
+                    selectedFiles = [];
+                    document.getElementById('attachmentPreview').innerHTML = '';
+                    document.getElementById('commentAttachment').value = '';
+                    showMessage('Comment added successfully!', 'success');
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (e) {
+                console.error('Error submitting comment:', e);
+                showMessage('Error adding comment. Please try again.', 'error');
+            }
+        }
+
+        function showMessage(text, type) {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messageEl = document.createElement('div');
+            messageEl.className = `${type}-message`;
+            messageEl.textContent = text;
+            messagesContainer.innerHTML = '';
+            messagesContainer.appendChild(messageEl);
+
+            setTimeout(() => {
+                messageEl.remove();
+            }, 3000);
+        }
+
+        async function incrementView(questionId) {
+            try {
+                await fetch('/api/increment-view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ questionId })
+                });
+            } catch (e) {
+                console.log('View count increment failed:', e);
+            }
+        }
+
+        function verifyAnswer() {
+            // Redirect to community page with verify modal
+            window.location.href = `community.html?verify=${currentQuestionId}`;
+        }
+
+        function shareQuestion() {
+            const url = window.location.href;
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Check this Q&A',
+                    text: 'Take a look at this interesting question and answer',
+                    url: url
+                }).catch(err => console.log('Share failed:', err));
+            } else {
+                // Fallback: copy to clipboard
+                navigator.clipboard.writeText(url).then(() => {
+                    showMessage('Link copied to clipboard!', 'success');
+                }).catch(() => {
+                    showMessage('Could not copy link', 'error');
+                });
+            }
+        }
+
+        function showQuestionError(message) {
+            document.getElementById('questionDetail').innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-circle"></i> ${esc(message)}
+                </div>
+            `;
+        }
+
+        // Sidebar Toggle Functionality
+        function setupSidebarToggle() {
+            const toggleBtn = document.getElementById('toggleSidebarButton');
+            const chatList = document.getElementById('chatList');
+            const chatbox = document.getElementById('chatbox');
+            const header = document.querySelector('.header1');
+
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                chatList.classList.add('collapsed');
+                chatbox.classList.add('collapsed');
+                header.classList.add('collapsed');
+                toggleBtn.classList.add('collapsed');
+            }
+
+            toggleBtn.addEventListener('click', () => {
+                chatList.classList.toggle('collapsed');
+                chatbox.classList.toggle('collapsed');
+                header.classList.toggle('collapsed');
+                toggleBtn.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed', chatList.classList.contains('collapsed'));
+            });
+        }
+
+        // Theme Toggle Functionality
+        let currentTheme = localStorage.getItem('theme') || 'dark';
+
+        function setupTheme() {
+            // Always read latest theme from localStorage
+            currentTheme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            updateThemeLabel();
+            console.log('✅ setupTheme: Applied theme -', currentTheme);
+        }
+
+        function toggleTheme() {
+            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', currentTheme);
+            localStorage.setItem('theme', currentTheme);
+            updateThemeLabel();
+            console.log('✅ toggleTheme: Changed to -', currentTheme);
+        }
+
+        function updateThemeLabel() {
+            const label = document.getElementById('themeLabel');
+            const icon = document.querySelector('#themeToggleBtn i');
+            if (currentTheme === 'dark') {
+                label.textContent = 'Dark';
+                icon.className = 'fas fa-moon';
+            } else {
+                label.textContent = 'Light';
+                icon.className = 'fas fa-sun';
+            }
+        }
+
+        // Listen for theme changes from other pages/tabs
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'theme') {
+                currentTheme = e.newValue || 'dark';
+                document.body.setAttribute('data-theme', currentTheme);
+                updateThemeLabel();
+            }
+        });
+
+        document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+
+        // Verification Modal Functions
+        const allDepartments = ['FT', 'PE', 'QM', 'WT', 'FAE'];
+
+        async function showVerificationStatus() {
+            try {
+                console.log('🔍 Current Question:', currentQuestion);
+                console.log('🔍 Requested Departments:', currentQuestion?.requested_departments_list);
+                console.log('🔍 All Verifications:', verifications);
+                
+                // Get due date from question
+                const dueDate = currentQuestion?.due_date ? new Date(currentQuestion.due_date) : null;
+                const dueDateStr = dueDate ? dueDate.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                }) : 'N/A';
+                
+                // Build verification status - check which departments have verified (rating === 1)
+                // Use the department from requestedDepartments field in each verification
+                const verifiedDepartments = {};
+                verifications.forEach(v => {
+                    console.log('📋 Processing verification:', {
+                        id: v.id,
+                        username: v.username,
+                        rating: v.rating,
+                        requestedDepartments: v.requestedDepartments,
+                        createdAt: v.createdAt
+                    });
+                    
+                    // Check if this verification has rating = 1 (verified)
+                    if (v.rating === 1 && v.requestedDepartments && v.requestedDepartments.length > 0) {
+                        // The requestedDepartments contains the department that verified
+                        v.requestedDepartments.forEach(dept => {
+                            if (!verifiedDepartments[dept]) {
+                                verifiedDepartments[dept] = {
+                                    username: v.username,
+                                    date: new Date(v.createdAt).toLocaleDateString('en-GB', {
+                                        day: '2-digit',
+                                        month: 'short'
+                                    })
+                                };
+                                console.log(`   ✅ ${dept} VERIFIED by ${v.username}`);
+                            }
+                        });
+                    }
+                });
+
+                console.log('✅ Verified Departments:', verifiedDepartments);
+
+                const timeline = document.getElementById('verificationTimeline');
+                
+                if (currentQuestion && currentQuestion.requested_departments_list && currentQuestion.requested_departments_list.length > 0) {
+                    const requestedDepts = currentQuestion.requested_departments_list;
+                    console.log('📝 Building timeline for ALL requested departments:', requestedDepts);
+                    
+                    timeline.innerHTML = requestedDepts.map(dept => {
+                        if (verifiedDepartments[dept]) {
+                            // This department has verified
+                            console.log(`✅ Showing ${dept} as VERIFIED`);
+                            return `
+                                <div class="timeline-item">
+                                    <div class="timeline-icon">✅</div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-dept">${dept}</div>
+                                        <div class="timeline-status verified">✔ Verified by ${verifiedDepartments[dept].username} (${verifiedDepartments[dept].date})</div>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            // This department hasn't verified yet
+                            console.log(`⏳ Showing ${dept} as WAITING`);
+                            return `
+                                <div class="timeline-item">
+                                    <div class="timeline-icon">🟡</div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-dept">${dept}</div>
+                                        <div class="timeline-status waiting">⏳ Waiting (Due: ${dueDateStr})</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }).join('');
+                } else {
+                    console.warn('⚠️ No requested departments found');
+                    timeline.innerHTML = '<p style="color: #b0b0b0; text-align: center;">No verification requests yet</p>';
+                }
+
+                document.getElementById('verificationModal').classList.add('show');
+            } catch (e) {
+                console.error('Error loading verification status:', e);
+                const timeline = document.getElementById('verificationTimeline');
+                timeline.innerHTML = '<p style="color: #ff6b6b; text-align: center;">Unable to load verification status. Please try again.</p>';
+                document.getElementById('verificationModal').classList.add('show');
+            }
+        }
+
+        function closeVerificationModal() {
+            document.getElementById('verificationModal').classList.remove('show');
+        }
+
+        function showRequestMoreReviewers() {
+            const checkboxGroup = document.getElementById('deptCheckboxGroup');
+            checkboxGroup.innerHTML = allDepartments.map(dept => `
+                <div class="dept-checkbox">
+                    <input type="checkbox" id="dept-${dept}" value="${dept}">
+                    <label for="dept-${dept}">${dept}</label>
+                </div>
+            `).join('');
+
+            document.getElementById('verificationModal').classList.remove('show');
+            document.getElementById('requestReviewersModal').classList.add('show');
+        }
+
+        function closeRequestReviewersModal() {
+            document.getElementById('requestReviewersModal').classList.remove('show');
+        }
+
+        async function submitRequestReviewers() {
+            const checked = document.querySelectorAll('#deptCheckboxGroup input:checked');
+            const departments = Array.from(checked).map(c => c.value);
+
+            if (departments.length === 0) {
+                alert('Please select at least one department');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/request-verifications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ questionId: currentQuestionId, departments })
+                });
+
+                if (res.ok) {
+                    alert('Verification request sent to ' + departments.join(', '));
+                    closeRequestReviewersModal();
+                    // Reload question detail to show updated status
+                    await loadQuestionDetail();
+                } else {
+                    const error = await res.json();
+                    alert(error.error || 'Failed to send request');
+                }
+            } catch (e) {
+                console.error('Error sending request:', e);
+                alert('Failed to send verification request');
+            }
+        }
+
+        async function submitVerifyComment() {
+            const commentInput = document.getElementById('commentInput');
+            const deptSelect = document.getElementById('commentDept');
+            const text = commentInput.value.trim();
+            const department = deptSelect.value;
+
+            if (!currentUserId) {
+                showMessage('Please login to verify', 'error');
+                return;
+            }
+
+            if (!department) {
+                showMessage('Please select a department', 'error');
+                return;
+            }
+
+            // Verify with rating = 1 (helpful/verified)
+            try {
+                const res = await fetch('/api/submit-verification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        questionId: currentQuestionId,
+                        rating: 1,
+                        comment: text || '',
+                        department: department
+                    })
+                });
+
+                if (res.ok) {
+                    showMessage('Verification submitted successfully!', 'success');
+                    // Clear form
+                    commentInput.value = '';
+                    deptSelect.value = '';
+                    document.getElementById('verifyCommentBtn').style.display = 'none';
+                    // Reload everything to refresh verification status
+                    await loadComments();
+                    await loadVerifications(); // Reload verifications to update modal data
+                    await loadQuestionDetail(); // Reload question to get updated status
+                } else {
+                    const error = await res.json();
+                    showMessage(error.error || 'Failed to submit verification', 'error');
+                }
+            } catch (e) {
+                console.error('Error submitting verification:', e);
+                showMessage('Error submitting verification. Please try again.', 'error');
+            }
+        }
+
+        async function submitVerification() {
+            if (!currentUserId) {
+                alert('Please log in to verify this answer');
+                return;
+            }
+
+            const ratingBtns = document.querySelectorAll('.verify-btn');
+            let selectedRating = null;
+
+            for (const btn of ratingBtns) {
+                if (btn.classList.contains('selected')) {
+                    selectedRating = parseInt(btn.getAttribute('data-rating'));
+                    break;
+                }
+            }
+
+            if (selectedRating === null) {
+                alert('Please select a rating (Helpful/Neutral/Not Helpful)');
+                return;
+            }
+
+            const comment = document.getElementById('verificationComment')?.value || '';
+
+            try {
+                const res = await fetch('/api/submit-verification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        questionId: currentQuestionId,
+                        rating: selectedRating,
+                        comment: comment
+                    })
+                });
+
+                if (res.ok) {
+                    alert('Thank you! Your verification has been submitted.');
+                    // Reset form
+                    document.querySelectorAll('.verify-btn').forEach(btn => btn.classList.remove('selected'));
+                    document.getElementById('verificationComment').value = '';
+                    // Reload to show updated verification status
+                    await loadQuestionDetail();
+                } else {
+                    const error = await res.json();
+                    alert(error.error || 'Failed to submit verification');
+                }
+            } catch (e) {
+                console.error('Error submitting verification:', e);
+                alert('Failed to submit verification');
+            }
+        }
+
+        document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+
+        // Utility Functions
+        function formatDate(d) {
+            if (!d) return 'unknown';
+            const date = new Date(d);
+            if (isNaN(date)) return 'unknown';
+            const diff = Date.now() - date, 
+                  m = Math.floor(diff/60000), 
+                  h = Math.floor(diff/3600000), 
+                  dy = Math.floor(diff/86400000);
+            return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : h < 24 ? h + 'h ago' : dy < 30 ? dy + 'd ago' : date.toLocaleDateString();
+        }
+    </script>
+
+    <!-- Verification Status Modal -->
+    <div id="verificationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Verification Status</h3>
+                <button class="modal-close" onclick="closeVerificationModal()">&times;</button>
+            </div>
+            <div class="verification-timeline" id="verificationTimeline"></div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-primary" onclick="showRequestMoreReviewers()">Request more reviewers</button>
+                <button class="modal-btn modal-btn-cancel" onclick="closeVerificationModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request More Reviewers Modal -->
+    <div id="requestReviewersModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Request More Reviewers</h3>
+                <button class="modal-close" onclick="closeRequestReviewersModal()">&times;</button>
+            </div>
+            <p style="color: #b0b0b0; font-size: 13px;">Select departments to request verification from:</p>
+            <div class="dept-checkbox-group" id="deptCheckboxGroup"></div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-primary" onclick="submitRequestReviewers()">Send Request</button>
+                <button class="modal-btn modal-btn-cancel" onclick="closeRequestReviewersModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

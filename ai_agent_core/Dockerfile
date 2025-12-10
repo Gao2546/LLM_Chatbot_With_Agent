@@ -1,14 +1,14 @@
-# Stage 1: Build ai_agent_with_McpProtocol
+# Stage 1: Build ai_agent_core
 FROM node:22-bookworm AS builder_app
 
 WORKDIR /app
 
-COPY ai_agent_with_McpProtocol/package*.json ./
+COPY ai_agent_core/package*.json ./
 RUN npm install
 
-COPY ai_agent_with_McpProtocol/tsconfig.json ./
-COPY ai_agent_with_McpProtocol/src ./src
-COPY ai_agent_with_McpProtocol/public ./public
+COPY ai_agent_core/tsconfig.json ./
+COPY ai_agent_core/src ./src
+COPY ai_agent_core/public ./public
 
 # RUN npm update @modelcontextprotocol/sdk
 RUN npm run build
@@ -38,13 +38,12 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y bash
 
-# Setup ai_agent_with_McpProtocol
-COPY ai_agent_with_McpProtocol/package.json ./
+# Setup ai_agent_core
+COPY ai_agent_core/package.json ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
-COPY ai_agent_with_McpProtocol/.env ./.env
-COPY ai_agent_with_McpProtocol/build/setting.txt ./build/setting.txt
-COPY ai_agent_with_McpProtocol/scripts ./scripts
+COPY ai_agent_core/build/setting.txt ./build/setting.txt
+COPY ai_agent_core/scripts ./scripts
 COPY --from=builder_app /app/public ./public
 
 # Setup mcp_BrowserBase build output (e.g., dist or build folder)

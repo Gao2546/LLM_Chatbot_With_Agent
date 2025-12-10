@@ -145,8 +145,95 @@ def get_page(driver, url):
     page_source = driver.find_element(By.TAG_NAME, "body").get_attribute('innerHTML')
     return page_source
 
-@app.route('/Generate', methods=['POST'])
-def generate():
+@app.route('/test_db', methods=['GET'])
+def test_db():
+    """Test database connection and check document_embeddings table"""
+    try:
+        cur = conn.cursor()
+        
+        # Count total records
+        cur.execute("SELECT COUNT(*) FROM document_embeddings")
+        total_count = cur.fetchone()[0]
+        
+        # Get sample records
+        cur.execute("SELECT user_id, chat_history_id, uploaded_file_id, page_number, created_at FROM document_embeddings ORDER BY created_at DESC LIMIT 5")
+        sample_records = cur.fetchall()
+        
+        cur.close()
+        
+        return jsonify({
+            'status': 'connected',
+            'total_embeddings': total_count,
+            'sample_records': [
+                {
+                    'user_id': r[0],
+                    'chat_history_id': r[1],
+                    'uploaded_file_id': r[2],
+                    'page_number': r[3],
+                    'created_at': str(r[4])
+                } for r in sample_records
+            ]
+        }), 200
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/test_embedding_save', methods=['POST'])
+def test_embedding_save():
+    """Test saving an embedding to database"""
+    try:
+        data = request.get_json()
+        
+        test_data = {
+            'user_id': data.get('user_id', 1),
+            'chat_history_id': data.get('chat_history_id', 1),
+            'uploaded_file_id': data.get('uploaded_file_id', 1),
+            'file_name': data.get('file_name', 'test_file.txt'),
+            'text': data.get('text', 'This is a test document for embedding'),
+            'embedding': data.get('embedding') or [0.1] * 384,  # Default 384-dim vector
+            'page_number': data.get('page_number', -1)
+        }
+        
+        print(f"Testing save_vector_to_db with: {test_data}")
+        
+        # Try to save
+        save_vector_to_db(**test_data)
+        
+        # Verify save
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM document_embeddings WHERE user_id = %s AND file_name = %s",
+            (test_data['user_id'], test_data['file_name'])
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Test embedding saved successfully',
+            'test_data': test_data,
+            'verification_count': count
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Test embedding save error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+
     clear_gpu()
     prompt = request.json['prompt']
     img_url = request.json['img_url']
@@ -534,6 +621,7 @@ def process():
         
         # --- 2. Branch processing based on mode ---
 
+        n_pages = 1  # Default for non-PDF files
         if filename.endswith('.pdf'):
             pdf_file = fitz.open(stream=file_bytes, filetype='pdf')
             n_pages = pdf_file.page_count
@@ -562,20 +650,42 @@ def process():
                 file_text = extract_txt_file(file_stream)
 
             if not file_text.strip():
-                print(f"Skipped file (empty or unsupported text): {filename}")
+                print(f"❌ Skipped file (empty or unsupported text): {filename}")
                 continue
-            print(f"Text extracted:\n{file_text}")
-            data_vector = encode_text_for_embedding(file_text)
-            save_vector_to_db(
-                user_id=user_id,
-                chat_history_id=chat_history_id, # This is for compatibility, but uploaded_file_id is the key
-                uploaded_file_id=uploaded_file_id,
-                file_name=filename,
-                text=file_text,
-                embedding=data_vector,
-                page_number=-1 # Explicitly set -1 for legacy
-            )
-            processed_files.append(filename)
+            
+            print(f"✅ Text extracted: {len(file_text)} characters")
+            
+            try:
+                data_vector = encode_text_for_embedding(file_text)
+                print(f"✅ Vector created: {len(data_vector)} dimensions")
+                
+                save_vector_to_db(
+                    user_id=user_id,
+                    chat_history_id=chat_history_id,
+                    uploaded_file_id=uploaded_file_id,
+                    file_name=filename,
+                    text=file_text,
+                    embedding=data_vector,
+                    page_number=-1
+                )
+                
+                # ✅ Verify save to DB
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) FROM document_embeddings WHERE user_id = %s AND chat_history_id = %s AND uploaded_file_id = %s",
+                    (user_id, chat_history_id, uploaded_file_id)
+                )
+                count = cur.fetchone()[0]
+                cur.close()
+                print(f"✅ Verification: {count} record(s) saved in DB for '{filename}'")
+                
+                processed_files.append(filename)
+                
+            except Exception as e:
+                print(f"❌ Error saving to DB: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
 
         # elif (processing_mode == 'new_page_image') or (n_pages > 25):
         elif (n_pages > 5):
@@ -712,6 +822,9 @@ def search_similar_api_unified():
     - top_k_pages (int, optional, default=3): Max image pages to search for VLM summary.
     - threshold (float, optional, default=1.0): Distance threshold for page image search.
     - run_vlm_summary (bool, optional, default=True): Whether to run the VLM summary on found pages.
+    - use_ollama (bool, optional, default=False): If True, use Ollama; if False, use DeepInfra.
+    - ollama_model (str, optional, default='llava'): Ollama model name.
+    - deepinfra_model (str, optional, default='Qwen/Qwen2.5-VL-32B-Instruct'): DeepInfra model name.
     """
     clear_gpu()
     data = request.get_json()
@@ -726,6 +839,9 @@ def search_similar_api_unified():
         top_k_pages = int(data.get('top_k_pages', 5))
         threshold = float(data.get('threshold', 1.0))
         run_vlm_summary = bool(data.get('run_vlm_summary', True))
+        use_ollama = bool(data.get('use_ollama', False))
+        ollama_model = data.get('ollama_model', 'llava')
+        deepinfra_model = data.get('deepinfra_model', 'Qwen/Qwen2.5-VL-32B-Instruct')
         
     except Exception as e:
         return jsonify({"error": f"Invalid data: {e}. 'user_id', 'chat_history_id', 'top_k' must be numbers."}), 400
@@ -733,7 +849,8 @@ def search_similar_api_unified():
     if not queryT or not user_id or not chat_history_id:
         return jsonify({"error": "Missing required fields: query, user_id, chat_history_id"}), 400
 
-    print(f"Running UNIFIED search with query: {queryT}, user_id: {user_id}, chat_id: {chat_history_id}")
+    vlm_provider = "Ollama" if use_ollama else "DeepInfra"
+    print(f"Running UNIFIED search with query: {queryT}, user_id: {user_id}, chat_id: {chat_history_id}, VLM provider: {vlm_provider}")
     legacy_results = []
     page_search_results = []
 
@@ -787,10 +904,13 @@ def search_similar_api_unified():
     # --- 3. VLM Processing (ถ้าเจอหน้าเอกสารและเปิดใช้งาน) ---
     vlm_summary = None
     if page_search_results and run_vlm_summary:
-        print(f"  - Found {len(page_search_results)} relevant pages. Sending to VLM for summary...")
+        print(f"  - Found {len(page_search_results)} relevant pages. Sending to VLM ({vlm_provider}) for summary...")
         vlm_summary = process_pages_with_vlm(
             search_results=page_search_results,
-            original_query=query
+            original_query=queryT,
+            use_ollama=use_ollama,
+            ollama_model=ollama_model,
+            deepinfra_model=deepinfra_model
         )
     elif not page_search_results:
         print("  - No relevant pages found for VLM summary.")
@@ -816,8 +936,18 @@ def search_similar_pages_api():
     1. Takes a text query.
     2. Searches 'document_page_embeddings' (image vectors).
     3. Retrieves the matching pages as images from MinIO.
-    4. Sends images + query to a VLM.
+    4. Sends images + query to a VLM (Ollama or DeepInfra).
     5. Returns the VLM's generated summary/answer.
+    
+    JSON Body:
+    - query (str): The user's query.
+    - user_id (int): User ID.
+    - chat_history_id (int): Chat ID.
+    - top_k (int, optional, default=3): Max pages to search for VLM.
+    - threshold (float, optional, default=0.3): Distance threshold for page image search.
+    - use_ollama (bool, optional, default=False): If True, use Ollama; if False, use DeepInfra.
+    - ollama_model (str, optional, default='llava'): Ollama model name.
+    - deepinfra_model (str, optional, default='Qwen/Qwen2.5-VL-32B-Instruct'): DeepInfra model name.
     """
     clear_gpu()
     data = request.get_json()
@@ -827,16 +957,18 @@ def search_similar_pages_api():
         user_id = int(data.get('user_id'))
         chat_history_id = int(data.get('chat_history_id'))
         top_k = int(data.get('top_k', 3))
-        # Distance threshold: 1.0 means include all results up to top_k.
-        # A smaller value (e.g., 0.5) is a stricter filter.
-        threshold = float(data.get('threshold', 0.3)) 
+        threshold = float(data.get('threshold', 0.3))
+        use_ollama = bool(data.get('use_ollama', False))
+        ollama_model = data.get('ollama_model', 'llava')
+        deepinfra_model = data.get('deepinfra_model', 'Qwen/Qwen2.5-VL-32B-Instruct')
     except Exception as e:
         return jsonify({"error": f"Invalid data: {e}. 'user_id', 'chat_history_id', 'top_k', 'threshold' must be numbers."}), 400
 
     if not query or not user_id or not chat_history_id:
         return jsonify({"error": "Missing required fields: query, user_id, chat_history_id"}), 400
 
-    print(f"Searching NEW page images with query: {query}, user_id: {user_id}, chat_id: {chat_history_id}, top_k: {top_k}, threshold: {threshold}")
+    vlm_provider = "Ollama" if use_ollama else "DeepInfra"
+    print(f"Searching NEW page images with query: {query}, user_id: {user_id}, chat_id: {chat_history_id}, top_k: {top_k}, threshold: {threshold}, VLM provider: {vlm_provider}")
 
     # 1. Search for similar pages
     search_results = search_similar_pages(
@@ -851,21 +983,20 @@ def search_similar_pages_api():
         print("No relevant pages found.")
         return jsonify({"summary": "I could not find any relevant document pages for your query.", "search_results": []})
 
-    print(f"Found {len(search_results)} relevant pages. Sending to VLM...")
+    print(f"Found {len(search_results)} relevant pages. Sending to VLM ({vlm_provider})...")
 
-    # 2. Process pages with VLM (fetches images, calls VLM)
+    # 2. Process pages with VLM (fetches images, calls appropriate VLM)
     vlm_summary = process_pages_with_vlm(
         search_results=search_results,
-        original_query=query
+        original_query=query,
+        use_ollama=use_ollama,
+        ollama_model=ollama_model,
+        deepinfra_model=deepinfra_model
     )
     
     clear_gpu()
     
     # 3. Return the final answer
-    # return jsonify({
-    #     "summary": vlm_summary,
-    #     "search_results": search_results # Return metadata for debugging/UI
-    # })
     return jsonify({"results": [vlm_summary]})
 
 
@@ -1252,4 +1383,43 @@ if __name__ == '__main__':
     #             n_class=n_class
 
     #         )
+    
+    # === VERIFIED ANSWERS ENDPOINT ===
+    @app.route('/encode_embedding', methods=['POST'])
+    def encode_embedding():
+        """สร้าง embedding จากข้อความ
+        
+        Request body:
+        {
+            "text": "ข้อความที่ต้องการ embedding",
+            "dimensions": 1024  # optional (default: 1024 สำหรับ verified_answers)
+        }
+        """
+        try:
+            data = request.json
+            text = data.get('text', '')
+            dimensions = data.get('dimensions', 1024)  # Default: 1024
+            
+            if not text:
+                return jsonify({'error': 'No text provided'}), 400
+            
+            # ใช้ encode_text_for_embedding จาก utils
+            # มันจะ auto-select model ตามจำนวน dimensions
+            embedding = encode_text_for_embedding(text, target_dimensions=dimensions)
+            
+            # ตรวจสอบ dimensions ที่ได้กลับมา
+            actual_dimensions = len(embedding)
+            
+            return jsonify({
+                'success': True,
+                'embedding': embedding,
+                'dimensions': actual_dimensions,
+                'requested_dimensions': dimensions
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
     app.run(host='0.0.0.0', port=5000, debug=True)

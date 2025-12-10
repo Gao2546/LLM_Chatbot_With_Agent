@@ -5,6 +5,7 @@ datas/
 images/
 image/
 env/
+llm_venv/
 data_base/
 node_modules/
 output/

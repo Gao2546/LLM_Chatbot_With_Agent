@@ -29,5 +29,5 @@ openpyxl
 xlrd
 unstructured[all-docs]>=0.18.15
 docling[full]
-mlx-vlm
+# mlx-vlm
 minio

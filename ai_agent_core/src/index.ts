@@ -20,8 +20,8 @@ import { callToolFunction, GetSocketIO } from "./api.js"
 
 // Import DB functions for session timeout cleanup
 import { setCurrentChatId, setUserActiveStatus, deleteUserAndHistory, getUserByUsername, getUserActiveStatus, deleteInactiveGuestUsersAndChats, getUserByUserId, deleteAllGuestUsersAndChats } from './db.js';
-deleteAllGuestUsersAndChats();
-// deleteOrphanedUserFolders();
+// Clean up old guest users on startup (optional - commented out for stability)
+// deleteAllGuestUsersAndChats();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,30 +87,29 @@ setInterval(async () => {
   }
 }, CLEANUP_INTERVAL_MS);
 
-const BypassSession = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop"];
+const BypassSession = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification"];
 const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/.well-known/appspecific/com.chrome.devtools.json"]
 
 // Session timeout cleanup middleware
 app.use(async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Bypass session check for public API endpoints and non-api routes
+  const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications"];
+  
+  if (publicPaths.includes(req.path) || req.path.startsWith('/api/get-') || req.path.startsWith('/api/search-') || req.path.startsWith('/api/submit-')) {
+    return next();
+  }
+
   try {
     const user = req.session.user;
 
     // If no user in session, treat as expired
     if (!user) {
-      console.log(req.path);
       if (BypassSession.includes(req.path)) {
-        next();
-        if (!BypassSessionNRe.includes(req.path)){
-        return;
-      }
+        return next();
       }
       else{
         return res.json({ exp: true });
       }
-      // return res.status(440).json({ message: 'Session expired' });
-      // next();
-      // return res.status(440).json({ message: 'Session expired' });
-      // return;
     }
 
     const now = Date.now();

@@ -10,9 +10,9 @@ import { Server as SocketIOServer } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { GetSocketIO } from "./api.js";
 // Import DB functions for session timeout cleanup
-import { setCurrentChatId, setUserActiveStatus, deleteUserAndHistory, getUserByUsername, deleteInactiveGuestUsersAndChats, deleteAllGuestUsersAndChats } from './db.js';
-deleteAllGuestUsersAndChats();
-// deleteOrphanedUserFolders();
+import { setCurrentChatId, setUserActiveStatus, deleteUserAndHistory, getUserByUsername, deleteInactiveGuestUsersAndChats } from './db.js';
+// Clean up old guest users on startup (optional - commented out for stability)
+// deleteAllGuestUsersAndChats();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -55,28 +55,29 @@ setInterval(async () => {
         console.error('Error during periodic cleanup:', error);
     }
 }, CLEANUP_INTERVAL_MS);
-const BypassSession = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js", "/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop"];
-const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/.well-known/appspecific/com.chrome.devtools.json"];
+const BypassSession = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js", "/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/add-comment", "/api/comment-attachments", "/api/comment-attachment-preview", "/api/comment-attachment-download"];
+const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/.well-known/appspecific/com.chrome.devtools.json", "/api/comment-attachment-preview/.*", "/api/comment-attachment-download/.*", "/api/comment-attachments/.*"];
 // Session timeout cleanup middleware
 app.use(async (req, res, next) => {
+    // Bypass session check for public API endpoints and non-api routes
+    const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js", "/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications"];
+    if (publicPaths.includes(req.path) || req.path.startsWith('/api/get-') || req.path.startsWith('/api/search-') || req.path.startsWith('/api/submit-')) {
+        return next();
+    }
     try {
         const user = req.session.user;
         // If no user in session, treat as expired
         if (!user) {
-            console.log(req.path);
-            if (BypassSession.includes(req.path)) {
-                next();
-                if (!BypassSessionNRe.includes(req.path)) {
-                    return;
-                }
+            // Check if path is in bypass list (exact match or regex or starts with comment-attachment)
+            const isBypassPath = BypassSession.includes(req.path) ||
+                BypassSessionNRe.some(pattern => new RegExp(pattern).test(req.path)) ||
+                req.path.startsWith('/api/comment-');
+            if (isBypassPath) {
+                return next();
             }
             else {
                 return res.json({ exp: true });
             }
-            // return res.status(440).json({ message: 'Session expired' });
-            // next();
-            // return res.status(440).json({ message: 'Session expired' });
-            // return;
         }
         const now = Date.now();
         const TIMEOUT_DURATION = 1 * 1 * 1 * 60 * 60 * 1000; // 1 houre in milliseconds
