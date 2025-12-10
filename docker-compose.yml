@@ -9,8 +9,8 @@ services:
       POSTGRES_DB: ai_agent
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # ports:
-      # - "5433:5432" # Expose DB port to host (optional, for debugging)
+    ports:
+      - "5432:5432" # Expose DB port to host (optional, for debugging)
     networks:
       - app-network
 
@@ -29,10 +29,13 @@ services:
     # image: ai_agent_app:latest
     ports:
       - "3000:3000"
+    env_file: .env
     environment: #<==============================================================
-      - DATABASE_URL=postgres://athip:123456@db:5432/ai_agent # Example URL, adjust as needed
-      - API_SERVER_URL=http://api_server:5000
-      - API_OLLAMA=http://ollama:11434/api/generate
+      - DATABASE_URL=postgresql://athip:123456@db:5432/ai_agent
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - API_SERVER_URL=http://host.docker.internal:5000
+      - API_OLLAMA=http://host.docker.internal:11434/api/generate
       # Add any other necessary environment variables here
     depends_on:
       - db

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
 
   api_server:
@@ -88,9 +86,7 @@ services:
 
 networks:
   app-network:
-    driver: bridge
-    # external: true
-    # name: my_simulation_network
+    external: true
 
 
 
