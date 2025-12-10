@@ -485,7 +485,7 @@ async function initializeDatabase() {
     `);
     console.log('DB: Views column added to verified_answers table');
 
-    await pool.query(alterUsersTableQuery);
+    // await pool.query(alterUsersTableQuery);
     console.log('DB: Foreign key added to users table');
     console.log('✅ Database initialization complete!');
     

@@ -39,3 +39,5 @@ RAG_Model/scratch/
 
 # Note
 Note*
+
+build/*.js

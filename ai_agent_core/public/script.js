@@ -29,8 +29,8 @@ socket.on('StreamText', (text) => {
 socket.on('CallTool', async (toolName, toolParameters, callback) => {
   console.log(`Call Tool \nTool Name: ${toolName}`);
 
-  const baseURL = 'http://host.docker.internal:3333/files';
-  const baseSysURL = 'http://host.docker.internal:3333/system'
+  const baseURL = 'http://localhost:3333/files';
+  const baseSysURL = 'http://localhost:3333/system'
 
   try {
     switch (toolName) {
