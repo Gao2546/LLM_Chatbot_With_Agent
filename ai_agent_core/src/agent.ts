@@ -646,6 +646,10 @@ router.post('/message', async (req : Request, res : Response) => {
             serch_doc += doc + "\n\n";
           }
         });
+      }
+    }
+    console.log(serch_doc);
+    console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
 
     let chatContent = "";
     if (currentChatId) {
