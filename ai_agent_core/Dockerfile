@@ -42,6 +42,7 @@ RUN apt-get update && \
 COPY ai_agent_core/package.json ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
+COPY ai_agent_core/.env ./.env
 COPY ai_agent_core/build/setting.txt ./build/setting.txt
 COPY ai_agent_core/scripts ./scripts
 COPY --from=builder_app /app/public ./public

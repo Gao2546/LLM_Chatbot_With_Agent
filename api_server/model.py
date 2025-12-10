@@ -47,19 +47,31 @@ from utils.util import (
     extract_pptx_text,
     extract_txt_file,
     extract_xls_text,
+    get_image_embedding_jinna_api_local,
+    get_image_embedding_nemoretriever_api_local,
+    get_image_embedding_jinna_api_local_vllm,
     save_vector_to_db,
     search_similar_documents_by_chat,
-    model as embeddings,
+    # model as embeddings,
     get_db_connection,
-
-    # --- NEW IMPORTS FOR DUAL-METHOD RAG ---
     upload_file_to_minio_and_db,
-    get_clip_embedding,
+    get_image_embedding_jinna_api,
     save_page_vector_to_db,
     convert_pdf_page_to_image,
     search_similar_pages,
-    process_pages_with_vlm
+    process_pages_with_vlm,
+    ollama_describe_image,
+    ollama_embed_image,
+    ollama_embed_text,
+    ollama_generate_text,
+    get_image_embedding_local_api_colpali_engine,
+    search_similar_documents_by_active_user,
+    search_similar_pages_by_active_user,
+    search_similar_documents_by_active_user_all,
+    search_similar_pages_by_active_user_all,
 )
+
+from utils.util import LOCAL
 
 conn = get_db_connection()
 
@@ -67,6 +79,19 @@ TEXT_FILE_EXTENSIONS = ['.txt', '.pdf', '.docx', '.pptx', '.odt', '.rtf']
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
+
+LOCAL = os.getenv("LOCAL", True)
+
+LOCAL = True if LOCAL == "True" else False
+
+if LOCAL:
+    print("Run model on local")
+    vlm_provider = "Ollama"
+
+else:
+    print("Run model on server")
+    vlm_provider = "DeepInfra"
+
 file_system = EditedFileSystem()
 
 # Add project root to sys.path to allow absolute imports
@@ -82,10 +107,12 @@ app = Flask(__name__)
 
 def clear_gpu():
     import torch
+    import gc
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
         print("Cleared GPU memory.")
+    gc.collect()
 
 
 def init_driver():
@@ -745,7 +772,10 @@ def process():
                 image_bytes_batch = [page['img_bytes'] for page in pages_to_embed]
                 
                 # NEW: Call wi(processing_mode == 'new_page_image') or th image_bytes_list
-                embeddings_list = get_clip_embedding(image_bytes_list=image_bytes_batch) 
+                if not LOCAL:
+                    embeddings_list = get_image_embedding_jinna_api(image_bytes_list=image_bytes_batch) 
+                else :
+                    embeddings_list = get_image_embedding_jinna_api_local(image_bytes_list=image_bytes_batch)
                 
                 if not embeddings_list or len(embeddings_list) != len(pages_to_embed):
                     print(f"    - FAILED to get embeddings or count mismatch. Expected {len(pages_to_embed)}, Got {len(embeddings_list) if embeddings_list else 0}.")
@@ -776,6 +806,209 @@ def process():
     return jsonify({
         'reply': f"Processed {len(processed_files)}/{len(files)} files.",
         'processed_files': processed_files
+    })
+
+
+@app.route('/processDocument', methods=['POST'])
+def process_document_api():
+    """
+    Endpoint to process documents for the Knowledge Base (forcing chat_history_id = -1).
+    """
+    clear_gpu()
+    
+    try:
+        # 1. Get Form Data
+        files = request.files.getlist('files')
+        text_input = request.form.get('text', '')
+        method = request.form.get('method', 'text')
+        
+        # Get user_id sent from TypeScript agent
+        user_id_str = request.form.get('user_id')
+        if not user_id_str:
+            return jsonify({"error": "user_id is required from agent"}), 400
+        user_id = int(user_id_str)
+
+        # Force Chat ID to -1 for "Knowledge Base" / Global context
+        chat_history_id = -1 
+
+    except Exception as e:
+        return jsonify({"error": f"Invalid form data: {e}"}), 400
+
+    if not files and not text_input:
+        return jsonify({"error": "No files or text provided"}), 400
+
+    processed_files = []
+    
+    # --- SCENARIO A: Text Input Only ---
+    if text_input and not files:
+        print(f"Processing raw text input via {method} method...")
+        
+        # Create a dummy file record for pure text
+        uploaded_file_id, object_name = upload_file_to_minio_and_db(
+            user_id=0,
+            chat_history_id=chat_history_id,
+            file_name=f"text_snippet_{int(time.time())}.txt",
+            file_bytes=text_input.encode('utf-8')
+        )
+
+        if method == 'image':
+             # Logic if someone tries to "image encode" raw text (Use HyDE or Text-to-Image logic)
+             # For now, we reuse the local embedding function which handles text input via HyDE
+             if LOCAL:
+                 print("local101")
+                 embedding = get_image_embedding_jinna_api_local(text=text_input)
+             else:
+                 print("api101")
+                 embedding = get_image_embedding_jinna_api(text=text_input)
+             
+             if embedding:
+                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, 1, embedding)
+                 processed_files.append({"name": "Raw Text", "status": "indexed_as_multimodal_text"})
+
+        else:
+            # Standard Text Embedding
+            embedding = encode_text_for_embedding(text_input)
+            save_vector_to_db(user_id, chat_history_id, uploaded_file_id, "Raw Text Input", text_input, embedding, -1)
+            processed_files.append({"name": "Raw Text", "status": "indexed_as_legacy_text"})
+
+
+    # --- SCENARIO B: File Processing ---
+    for file in files:
+        filename = file.filename
+        file.seek(0)
+        file_bytes = file.read()
+        
+        if not file_bytes:
+            continue
+
+        # 1. Upload to MinIO & DB
+        user_id = 0
+        uploaded_file_id, object_name = upload_file_to_minio_and_db(
+            user_id=user_id,
+            chat_history_id=chat_history_id,
+            file_name=filename,
+            file_bytes=file_bytes
+        )
+        
+        if not uploaded_file_id:
+            print(f"Failed to upload {filename}. Skipping.")
+            continue
+
+        # 2. Process based on Method
+        
+        # === METHOD: IMAGE (VLM / Multimodal Embeddings) ===
+        if method == 'image':
+            print(f"Processing '{filename}' via VLM/Image method...")
+            try:
+                pages_to_embed = []
+                
+                # A. Handle PDF
+                if filename.lower().endswith('.pdf'):
+                    pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    num_pages = pdf_doc.page_count
+                    
+                    # Convert pages to images
+                    for page_num_0_idx in range(num_pages):
+                        img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
+                        if img_bytes:
+                            pages_to_embed.append({
+                                "page_num_1_idx": page_num_0_idx + 1,
+                                "img_bytes": img_bytes
+                            })
+                    pdf_doc.close()
+                
+                # B. Handle Images
+                elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    pages_to_embed.append({
+                        "page_num_1_idx": 1,
+                        "img_bytes": file_bytes
+                    })
+                
+                if not pages_to_embed:
+                    print(f"No pages extracted from {filename}.")
+                    continue
+
+                # Batch Embed
+                image_bytes_batch = [p['img_bytes'] for p in pages_to_embed]
+                
+                # Select Embedding Provider
+                if LOCAL:
+                    # Use local model (e.g., Jina v4 / ColPali)
+                    print("local_101")
+                    embeddings_list = get_image_embedding_jinna_api_local(image_bytes_list=image_bytes_batch)
+                else:
+                    # Use API
+                    print("api_101")
+                    embeddings_list = get_image_embedding_jinna_api(image_bytes_list=image_bytes_batch)
+                
+                # Save embeddings
+                if embeddings_list and len(embeddings_list) == len(pages_to_embed):
+                    for page_data, img_embedding in zip(pages_to_embed, embeddings_list):
+                        save_page_vector_to_db(
+                            user_id=user_id,
+                            chat_history_id=chat_history_id,
+                            uploaded_file_id=uploaded_file_id,
+                            page_number=page_data['page_num_1_idx'],
+                            embedding=img_embedding
+                        )
+                    processed_files.append({"name": filename, "status": "indexed_as_images", "pages": len(embeddings_list)})
+                else:
+                    print(f"Failed to generate embeddings for {filename}")
+
+            except Exception as e:
+                print(f"Error in image processing for {filename}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # === METHOD: TEXT (Legacy OCR/Extraction) ===
+        else:
+            print(f"Processing '{filename}' via Legacy Text method...")
+            try:
+                file_text = ""
+                # Wrap bytes for extractors
+                file_stream = io.BytesIO(file_bytes)
+                file_stream.filename = filename
+
+                # Select Extractor
+                if filename.lower().endswith('.pdf'):
+                    file_text = extract_pdf_text(file_stream)
+                elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
+                    file_text = extract_image_text(file_stream)
+                elif filename.lower().endswith(('.docx','.doc','.odt','.rtf')):
+                    file_text = extract_docx_text(file_stream)
+                elif filename.lower().endswith(('.pptx','.ppt')):
+                    file_text = extract_pptx_text(file_stream)
+                elif filename.lower().endswith(('.xlsx','.xlsm')):
+                    file_text = extract_excel_text(file_stream)
+                elif filename.lower().endswith('.xls'):
+                    file_text = extract_xls_text(file_stream)
+                else:
+                    # Default to TXT extractor
+                    file_text = extract_txt_file(file_stream)
+
+                if file_text and file_text.strip():
+                    data_vector = encode_text_for_embedding(file_text)
+                    save_vector_to_db(
+                        user_id=user_id,
+                        chat_history_id=chat_history_id,
+                        uploaded_file_id=uploaded_file_id,
+                        file_name=filename,
+                        text=file_text,
+                        embedding=data_vector,
+                        page_number=-1
+                    )
+                    processed_files.append({"name": filename, "status": "indexed_as_text"})
+                else:
+                    print(f"No text extracted from {filename}")
+
+            except Exception as e:
+                print(f"Error in text processing for {filename}: {e}")
+
+    clear_gpu()
+    return jsonify({
+        "status": "success", 
+        "message": f"Successfully processed {len(processed_files)} items.",
+        "details": processed_files
     })
 
 
@@ -812,20 +1045,12 @@ def process():
 @app.route('/search_similar', methods=['POST'])
 def search_similar_api_unified():
     """
-    UNIFIED search endpoint. Searches both LEGACY text and NEW page images.
-    
-    JSON Body:
-    - query (str): The user's query.
-    - user_id (int): User ID.
-    - chat_history_id (int): Chat ID.
-    - top_k_text (int, optional, default=5): Max legacy text chunks to return.
-    - top_k_pages (int, optional, default=3): Max image pages to search for VLM summary.
-    - threshold (float, optional, default=1.0): Distance threshold for page image search.
-    - run_vlm_summary (bool, optional, default=True): Whether to run the VLM summary on found pages.
-    - use_ollama (bool, optional, default=False): If True, use Ollama; if False, use DeepInfra.
-    - ollama_model (str, optional, default='llava'): Ollama model name.
-    - deepinfra_model (str, optional, default='Qwen/Qwen2.5-VL-32B-Instruct'): DeepInfra model name.
+    UNIFIED search endpoint. 
+    Handles two modes via 'document_search_method':
+    1. 'none' (Default): Search only the current chat history.
+    2. 'searchDoc': Search ALL files where the current user is in 'active_users'.
     """
+    u_time = time.time()
     clear_gpu()
     data = request.get_json()
     
@@ -834,99 +1059,126 @@ def search_similar_api_unified():
         user_id = int(data.get('user_id'))
         chat_history_id = int(data.get('chat_history_id'))
         
-        # รับค่า parameter ที่แยกกันสำหรับแต่ละการค้นหา
         top_k_text = int(data.get('top_k_text', 5))
         top_k_pages = int(data.get('top_k_pages', 5))
         threshold = float(data.get('threshold', 1.0))
         run_vlm_summary = bool(data.get('run_vlm_summary', True))
-        use_ollama = bool(data.get('use_ollama', False))
-        ollama_model = data.get('ollama_model', 'llava')
-        deepinfra_model = data.get('deepinfra_model', 'Qwen/Qwen2.5-VL-32B-Instruct')
+        document_search_method = data.get('documentSearchMethod', 'none') # Note: Check camelCase vs snake_case keys from frontend
         
     except Exception as e:
-        return jsonify({"error": f"Invalid data: {e}. 'user_id', 'chat_history_id', 'top_k' must be numbers."}), 400
+        return jsonify({"error": f"Invalid data: {e}."}), 400
 
-    if not queryT or not user_id or not chat_history_id:
-        return jsonify({"error": "Missing required fields: query, user_id, chat_history_id"}), 400
+    if not queryT or not user_id:
+        return jsonify({"error": "Missing required fields: query, user_id"}), 400
 
-    vlm_provider = "Ollama" if use_ollama else "DeepInfra"
-    print(f"Running UNIFIED search with query: {queryT}, user_id: {user_id}, chat_id: {chat_history_id}, VLM provider: {vlm_provider}")
+    print(f"Running UNIFIED search. Mode: {document_search_method}, Query: {queryT}")
+    
     legacy_results = []
     page_search_results = []
 
-    cur = conn.cursor()
-    query = """
-        SELECT 
-            *
-        FROM document_embeddings
-        WHERE user_id = %s 
-          AND chat_history_id = %s
-    """
-
-    cur.execute(query, (user_id, chat_history_id))
-    results = cur.fetchall() # This is the raw list of tuples
-    cur.close()
-
-    if results:
-        # --- 1. LEGACY Text Search ---
-        print(f"  - Searching legacy text (top_k={top_k_text})...")
-        legacy_results = search_similar_documents_by_chat(
+    # =========================================================
+    # METHOD 1: searchDoc (Search by active_users permission)
+    # =========================================================
+    if document_search_method == 'searchDoc':
+        print(f"  - executing 'searchDoc' strategy for user {user_id}...")
+        
+        # 1. Legacy Text Search
+        legacy_results = search_similar_documents_by_active_user(
             query_text=queryT,
             user_id=user_id,
-            chat_history_id=chat_history_id,
             top_k=top_k_text
         )
 
-    cur = conn.cursor()
-    query = """
-        SELECT 
-            *
-        FROM document_page_embeddings
-        WHERE user_id = %s 
-          AND chat_history_id = %s
-    """
-
-    cur.execute(query, (user_id, chat_history_id))
-    results = cur.fetchall() # This is the raw list of tuples
-    cur.close()
-
-    if results:
-        # --- 2. NEW Page Image Search ---
-        print(f"  - Searching new page images (top_k={top_k_pages}, threshold={threshold})...")
-        page_search_results = search_similar_pages(
+        # 2. New Page Image Search
+        page_search_results = search_similar_pages_by_active_user(
             query_text=queryT,
             user_id=user_id,
-            chat_history_id=chat_history_id,
             top_k=top_k_pages,
             threshold=threshold
         )
+
+    elif document_search_method == 'searchdocAll':
+        print(f"  - executing 'searchDocAll' strategy for user {user_id}...")
+        
+        # 1. Legacy Text Search
+        legacy_results = search_similar_documents_by_active_user_all(
+            query_text=queryT,
+            user_id=user_id,
+            top_k=top_k_text
+        )
+
+        # 2. New Page Image Search
+        page_search_results = search_similar_pages_by_active_user_all(
+            query_text=queryT,
+            user_id=user_id,
+            top_k=top_k_pages,
+            threshold=threshold
+        )
+
+    # =========================================================
+    # METHOD 3: none (Search by current chat context)
+    # =========================================================
+    elif document_search_method == 'none':
+        print(f"  - executing 'none' (chat context) strategy for chat {chat_history_id}...")
+        
+        # Check DB for Legacy Data
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+        has_legacy = cur.fetchone()
+        
+        # Check DB for New Page Data
+        cur.execute("SELECT 1 FROM document_page_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+        has_pages = cur.fetchone()
+        cur.close()
+
+        if has_legacy:
+            legacy_results = search_similar_documents_by_chat(
+                query_text=queryT, 
+                user_id=user_id, 
+                chat_history_id=chat_history_id, 
+                top_k=top_k_text
+            )
+
+        if has_pages:
+            page_search_results = search_similar_pages(
+                query_text=queryT, 
+                user_id=user_id, 
+                chat_history_id=chat_history_id, 
+                top_k=top_k_pages, 
+                threshold=threshold
+            )
     
-    # --- 3. VLM Processing (ถ้าเจอหน้าเอกสารและเปิดใช้งาน) ---
+    # =========================================================
+    # VLM PROCESSING (Common for both methods)
+    # =========================================================
     vlm_summary = None
     if page_search_results and run_vlm_summary:
         print(f"  - Found {len(page_search_results)} relevant pages. Sending to VLM ({vlm_provider}) for summary...")
         vlm_summary = process_pages_with_vlm(
             search_results=page_search_results,
-            original_query=queryT,
-            use_ollama=use_ollama,
-            ollama_model=ollama_model,
-            deepinfra_model=deepinfra_model
+            original_query=queryT
         )
+        print(f"  - VLM summary: {vlm_summary}")
     elif not page_search_results:
-        print("  - No relevant pages found for VLM summary.")
-        vlm_summary = "I could not find any relevant document pages for your query."
-    else:
-        print("  - VLM summary processing was skipped (run_vlm_summary=False).")
-        vlm_summary = "VLM summary was not requested."
+        # If no visual pages found, we don't return a VLM error, just None
+        # so the frontend sees purely text results if available.
+        vlm_summary = None 
         
     clear_gpu()
 
-    if legacy_results == [] and vlm_summary == None:
+    if not legacy_results and not vlm_summary:
+        print("  - No results found in either legacy or page search.")
         return jsonify({"results": [""]})
     
-    # --- 4. Return Combined Results ---
-    # ส่งคืนผลลัพธ์ทั้งหมดใน JSON เดียว
-    return jsonify({"results": legacy_results + [vlm_summary]})
+    # Combine results
+    final_output = legacy_results
+    print(f" - legacy_results: {legacy_results}")
+    if vlm_summary:
+        final_output.append(vlm_summary)
+
+    print(f" - final_output: {final_output}")
+    print(f"Process time: {time.time() - u_time}s")
+    return jsonify({"results": final_output})
 
 # --- NEW RAG ENDPOINT ---
 @app.route('/search_similar_pages', methods=['POST'])
@@ -967,7 +1219,6 @@ def search_similar_pages_api():
     if not query or not user_id or not chat_history_id:
         return jsonify({"error": "Missing required fields: query, user_id, chat_history_id"}), 400
 
-    vlm_provider = "Ollama" if use_ollama else "DeepInfra"
     print(f"Searching NEW page images with query: {query}, user_id: {user_id}, chat_id: {chat_history_id}, top_k: {top_k}, threshold: {threshold}, VLM provider: {vlm_provider}")
 
     # 1. Search for similar pages
@@ -1383,43 +1634,4 @@ if __name__ == '__main__':
     #             n_class=n_class
 
     #         )
-    
-    # === VERIFIED ANSWERS ENDPOINT ===
-    @app.route('/encode_embedding', methods=['POST'])
-    def encode_embedding():
-        """สร้าง embedding จากข้อความ
-        
-        Request body:
-        {
-            "text": "ข้อความที่ต้องการ embedding",
-            "dimensions": 1024  # optional (default: 1024 สำหรับ verified_answers)
-        }
-        """
-        try:
-            data = request.json
-            text = data.get('text', '')
-            dimensions = data.get('dimensions', 1024)  # Default: 1024
-            
-            if not text:
-                return jsonify({'error': 'No text provided'}), 400
-            
-            # ใช้ encode_text_for_embedding จาก utils
-            # มันจะ auto-select model ตามจำนวน dimensions
-            embedding = encode_text_for_embedding(text, target_dimensions=dimensions)
-            
-            # ตรวจสอบ dimensions ที่ได้กลับมา
-            actual_dimensions = len(embedding)
-            
-            return jsonify({
-                'success': True,
-                'embedding': embedding,
-                'dimensions': actual_dimensions,
-                'requested_dimensions': dimensions
-            })
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500
-
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)

@@ -40,7 +40,13 @@ import pool, {
     saveQuestionAttachment,
     getQuestionAttachments,
     getQuestionAttachmentData,
-    deleteQuestionAttachment
+    deleteQuestionAttachment,
+    getFilesByChatId,
+    deleteFile,
+    addActiveUserToFile,       // <-- Import this
+    removeActiveUserFromFile,  // <-- Import this
+    getDocSearchStatus,
+    setDocSearchStatus,
 } from './db.js';
 import { callToolFunction, GetSocketIO } from "./api.js"
 
@@ -58,6 +64,7 @@ const minioBucketName = process.env.MINIO_BUCKET || 'uploads';
 const ai = new GoogleGenAI({apiKey:process.env.Google_API_KEY});
 
 import fs = require('fs');
+import { get } from 'http';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -427,16 +434,78 @@ router.post('/upload', upload.array('files'), async (req, res) => {
 });
 
 
+router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
+  const { text, method } = req.body;
+  const files = req.files as Express.Multer.File[];
+  
+  // 1. Validate Session
+  const userId = req.session.user?.id;
+  if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: User session not found." });
+  }
+
+  try {
+      // 2. Prepare FormData for Python Server
+      const form = new FormData();
+      
+      // Pass the session user_id to Python
+      form.append('user_id', userId.toString());
+      
+      // Pass other fields
+      if (text) form.append('text', text);
+      form.append('method', method || 'text'); // Default to text if missing
+
+      // Append files
+      if (files && files.length > 0) {
+          for (const file of files) {
+              // Append buffer with filename and known length
+              form.append('files', file.buffer, {
+                  filename: file.originalname,
+                  contentType: file.mimetype,
+                  knownLength: file.size
+              });
+          }
+      }
+
+      // 3. Forward to Python Server
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      console.log(`Forwarding /processDocument to ${API_SERVER_URL}/processDocument...`);
+
+      const flaskRes = await axios.post(`${API_SERVER_URL}/processDocument`, form, {
+          headers: {
+              ...form.getHeaders(),
+              // Optional: Increase timeout for large file processing
+              'Content-Type': form.getHeaders()['content-type'] 
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity
+      });
+
+      // 4. Return Python response to Client
+      res.json(flaskRes.data);
+
+  } catch (err: any) {
+      console.error("Error forwarding to Python model:", err.message);
+      if (err.response) {
+          // Pass through the error from Python
+          return res.status(err.response.status).json(err.response.data);
+      }
+      return res.status(500).json({ error: "Internal server error processing document." });
+  }
+});
+
+
 router.post('/create_record', async (req : Request, res : Response) => {
-  const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId } = req.body;
+  const { message: userMessage, model: selectedModel, mode: selectedMode, docSearchMethod: selectedDocSearchMethod, role: selectedRole, socket: socketId } = req.body;
   const initialMode = selectedMode ?? 'ask';
   const initialModel = selectedModel ?? 'gemma3:1b';
   try {
     if (req.session.user){
       if (!req.session.user.currentChatId){
-        const chat_history_id = await newChatHistory(req.session.user.id);
+        const chat_history_id = await newChatHistory(req.session.user.id, selectedDocSearchMethod ?? "none");
         // REMOVED: createChatFolder(req.session.user.id, chat_history_id);
         req.session.user.currentChatId = chat_history_id;
+        req.session.user.currentDocSearchMethod = selectedDocSearchMethod ?? "none";
         const chatHistories = await listChatHistory(req.session.user.id);
         req.session.user!.chatIds = chatHistories.map((chat: any) => chat.id);
         await setChatMode(chat_history_id, initialMode);
@@ -460,9 +529,10 @@ router.post('/create_record', async (req : Request, res : Response) => {
         };
         await setUserActiveStatus(guestUser.id, true);
         // REMOVED: createUserFolder(guestUser.id);
-        const chat_history_id = await newChatHistory(req.session.user.id);
+        const chat_history_id = await newChatHistory(req.session.user.id, selectedDocSearchMethod ?? "none");
         // REMOVED: createChatFolder(req.session.user.id, chat_history_id);
         req.session.user.currentChatId = chat_history_id;
+        req.session.user.currentDocSearchMethod = selectedDocSearchMethod ?? "none";
         const chatHistories = await listChatHistory(req.session.user.id);
         req.session.user!.chatIds = chatHistories.map((chat: any) => chat.id);
         console.log("update and create session")
@@ -492,7 +562,7 @@ const runningRequests = new Map<string, AbortController>();
 let requestId:string = ""
 router.post('/message', async (req : Request, res : Response) => {
   try {
-    const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_} = req.body;
+    const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
     const controller = new AbortController();
     runningRequests.set(requestId, controller);
@@ -534,51 +604,48 @@ router.post('/message', async (req : Request, res : Response) => {
     let currentChatId = req.session.user?.currentChatId ?? null;
     let currentChatMode = req.session.user?.currentChatMode ?? null;
     let currentChatModel = req.session.user?.currentChatModel ?? null;
+    let documentSearchMethod = req.session.user?.currentDocSearchMethod ?? 'none';
     let serch_doc = ""
+    // const documentSearchMethod = docSearchMethod || "none";
 
     if (currentChatId){
-      try {
-        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: userMessage,
-            user_id: userId,
-            chat_history_id: currentChatId,
-            top_k: 20,
-            top_k_pages: 5,
-            top_k_text: 5,
-            threshold: 2.0
-          }),
-          signal: controller.signal,
-        });
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: userMessage,
+          user_id: userId,
+          chat_history_id: currentChatId,
+          top_k: 20,
+          top_k_pages: 5,
+          top_k_text: 5,
+          threshold: 2.0,
+          documentSearchMethod: documentSearchMethod,
+        }),
+        signal: controller.signal,
+      });
 
-        const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
-        if (result_similar_TopK && result_similar_TopK.results){
-          result_similar_TopK.results.forEach(doc => {
-            try {
-              console.log("type : ")
-              console.log(typeof doc)
-              if (typeof doc != "string"){
-                console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
-                serch_doc += doc.text + "\n\n";
-              }
-              else if (typeof doc == "string"){
-                serch_doc += "";
-              }
-            } catch (error) {
-              console.error(`Error processing document ${doc.file_name}:`, error);
+      const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
+      console.log("----- Search Similar Documents Results -----")
+      console.log(result_similar_TopK)
+      if (result_similar_TopK && result_similar_TopK.results){
+        result_similar_TopK.results.forEach(doc => {
+          try {
+            console.log("type : ")
+            console.log(typeof doc)
+            if (typeof doc != "string"){
+              console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+              serch_doc += doc.text + "\n\n";
+            }
+            else if (typeof doc == "string"){
               serch_doc += doc + "\n\n";
             }
-          });
-        }
-      } catch (error) {
-        console.warn('Could not fetch similar documents, continuing without RAG:', error);
-      }
-    }
-    console.log(serch_doc);
-    console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
+          } catch (error) {
+            console.error(`Error processing document ${doc.file_name}:`, error);
+            serch_doc += doc + "\n\n";
+          }
+        });
 
     let chatContent = "";
     if (currentChatId) {
@@ -905,7 +972,8 @@ router.post('/message', async (req : Request, res : Response) => {
             //     // ]
             //   },
             // ],
-            stream: modeToUse == "ask" ? true : false,
+            // stream: modeToUse == "ask" ? true : false,
+            stream: false,
             "reasoning": {
 
               // One of the following (not both):
@@ -933,8 +1001,9 @@ router.post('/message', async (req : Request, res : Response) => {
         });
 
       let result = "";
-
-      if (modeToUse == "code"){
+      
+      // if (modeToUse == "code"){
+      if (modeToUse == "code" || modeToUse == "ask"){
         const openRouterData = await openRouterFetchResponse.json() as OpenRouterChatResponse;
         if (openRouterData.choices && openRouterData.choices[0]?.message?.content) {
           result = openRouterData.choices[0].message.content;
@@ -1241,8 +1310,9 @@ router.post('/message', async (req : Request, res : Response) => {
 
 
 router.post('/edit-message', async (req, res) => {
-  const { chatId, messageIndex, newMessage, socketId, requestId } = req.body;
+  const { chatId, messageIndex, newMessage, socketId, requestId ,documentSearchMethod} = req.body;
   const userId = req.session.user?.id;
+  const documentSearchMethodValue = documentSearchMethod || "none";
   const controller = new AbortController();
   runningRequests.set(requestId, controller);
   const socket = io.sockets.sockets.get(socketId);
@@ -1289,37 +1359,34 @@ router.post('/edit-message', async (req, res) => {
     let serch_doc = ""
 
     if (chatId){
-      try {
-        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: newMessage,
-            user_id: userId,
-            chat_history_id: chatId,
-            top_k: 20,
-            top_k_pages: 5,
-            top_k_text: 5,
-            threshold: 2.0
-          }),
-          signal: controller.signal,
-        });
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: newMessage,
+          user_id: userId,
+          chat_history_id: chatId,
+          top_k: 20,
+          top_k_pages: 5,
+          top_k_text: 5,
+          threshold: 2.0,
+          documentSearchMethod: documentSearchMethod,
+        }),
+        signal: controller.signal,
+      });
 
-        const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
-        if (result_similar_TopK && result_similar_TopK.results){
-          result_similar_TopK.results.forEach(doc => {
-            try {
-              console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
-              serch_doc += doc.text + "\n\n";
-            } catch (error) {
-              console.error(`Error processing document ${doc.file_name}:`, error);
-              serch_doc += doc + "\n\n";
-            }
-          });
-        }
-      } catch (error) {
-        console.warn('Could not fetch similar documents, continuing without RAG:', error);
+      const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
+      if (result_similar_TopK && result_similar_TopK.results){
+        result_similar_TopK.results.forEach(doc => {
+          try {
+            console.log(`📄 ${doc.file_name} — score: ${doc.distance.toFixed(3)}`);
+            serch_doc += doc.text + "\n\n";
+          } catch (error) {
+            console.error(`Error processing document ${doc.file_name}:`, error);
+            serch_doc += doc + "\n\n";
+          }
+        });
       }
     }
     console.log(serch_doc);
@@ -1819,19 +1886,25 @@ router.get('/chat-history', async (req: express.Request, res: express.Response) 
     let chatContent = "";
     let chatMode = null;
     let chatModel = null;
+    let docSearchMethod = null;
 
     if (rows.length > 0) {
       chatContent = rows[0].message;
       chatMode = rows[0].chat_mode ?? 'code';
       chatModel = rows[0].chat_model ?? 'gemini-2.0-flash-001';
+      docSearchMethod = rows[0].doc_search_method ?? 'none';
+
+      // Ensure session is up-to-date
       req.session.user!.currentChatMode = chatMode;
       req.session.user!.currentChatModel = chatModel;
+      req.session.user!.currentDocSearchMethod = docSearchMethod;
     } else {
       req.session.user!.currentChatMode = null;
       req.session.user!.currentChatModel = null;
+      req.session.user!.currentDocSearchMethod = null;
     }
     const chatHistoryArray = (chatContent ? chatContent.split('\n<DATA_SECTION>\n') : []);
-    res.json({ chatHistory: chatHistoryArray, chatMode: chatMode, chatModel: chatModel });
+    res.json({ chatHistory: chatHistoryArray, chatMode: chatMode, chatModel: chatModel, docSearchMethod: docSearchMethod });
   } catch (error) {
     console.error('Error getting chat history:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -1857,6 +1930,9 @@ router.delete('/chat-history/:chatId', async (req, res) => {
     if (req.session.user) {
       req.session.user.chatIds = req.session.user.chatIds.filter((id: any) => id !== chatId);
       req.session.user.currentChatId = null;
+      req.session.user.currentChatMode = null;
+      req.session.user.currentChatModel = null;
+      req.session.user.currentDocSearchMethod = null;
     };
     res.status(200).json({ message: `Chat history ${chatId} deleted successfully` });
   } catch (error) {
@@ -1876,6 +1952,19 @@ router.get('/ClearChat', async (req, res) => {
     }
   }
   res.status(200).json({ message: 'Chat cleared successfully' });
+});
+
+router.get('/get_current_user', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    res.json({ userId: userId });
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 router.get('/reload-page', async (req, res) => {
@@ -3157,4 +3246,168 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
     console.error('Error submitting verification:', error);
     res.status(500).json({ success: false, error: String(error) });
   }
+});
+// ⭐ NEW: LIST FILES FOR A SPECIFIC CHAT (e.g., ID -1)
+// =================================================================================
+router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
+    const chatId = parseInt(req.params.chatId, 10);
+    
+    if (isNaN(chatId)) {
+        return res.status(400).json({ error: 'Invalid Chat ID' });
+    }
+
+    try {
+        const files = await getFilesByChatId(chatId);
+        res.json(files);
+    } catch (error) {
+        console.error('Error fetching files:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// =================================================================================
+// ⭐ NEW: DELETE A SPECIFIC FILE
+// =================================================================================
+router.delete('/file/:fileId', async (req: Request, res: Response) => {
+    const fileId = parseInt(req.params.fileId, 10);
+
+    if (isNaN(fileId)) {
+        return res.status(400).json({ error: 'Invalid File ID' });
+    }
+
+    // Optional: Add ownership check here if strictly required for non-dummy chats
+    // const userId = req.session.user?.id;
+
+    try {
+        await deleteFile(fileId);
+        res.status(200).json({ message: 'File deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting file:', error);
+        res.status(500).json({ error: 'Failed to delete file' });
+    }
+});
+
+// =================================================================================
+// ⭐ NEW: MANAGE ACTIVE USERS FOR A FILE
+// =================================================================================
+
+// Endpoint to ADD (Append) a user to active_users
+router.post('/file/:fileId/active', async (req: Request, res: Response) => {
+    const fileId = parseInt(req.params.fileId, 10);
+    // Use session ID by default, or allow body override if needed
+    const userId = req.session.user?.id || req.body.userId;
+
+    if (isNaN(fileId)) {
+        return res.status(400).json({ error: 'Invalid File ID' });
+    }
+    if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized: User ID required' });
+    }
+
+    try {
+        const updatedList = await addActiveUserToFile(fileId, userId);
+        
+        // Optional: Emit socket event to notify other clients
+        // io.to(chatId).emit('active_users_update', { fileId, activeUsers: updatedList });
+        
+        res.json({ success: true, active_users: updatedList });
+    } catch (error) {
+        console.error('Error adding active user:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Endpoint to REMOVE (Delete) a user from active_users
+router.delete('/file/:fileId/active', async (req: Request, res: Response) => {
+    const fileId = parseInt(req.params.fileId, 10);
+    // Use session ID by default, or allow body override if needed
+    const userId = req.session.user?.id || req.body.userId;
+
+    if (isNaN(fileId)) {
+        return res.status(400).json({ error: 'Invalid File ID' });
+    }
+    if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized: User ID required' });
+    }
+
+    try {
+        const updatedList = await removeActiveUserFromFile(fileId, userId);
+        
+        // Optional: Emit socket event to notify other clients
+        // io.to(chatId).emit('active_users_update', { fileId, activeUsers: updatedList });
+
+        res.json({ success: true, active_users: updatedList });
+    } catch (error) {
+        console.error('Error removing active user:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+router.get('/getDocSearchStatus', async (req, res) => {
+  try {
+    const chatId = req.session.user?.currentChatId;
+      if (!chatId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const status = await getDocSearchStatus(chatId);
+    console.log('Document search status retrieved:', status);
+    res.json({ docSearchMethod: status });
+  } catch (error) {
+    console.error('Error getting document search status:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.post('/setDocSearchStatus', async (req, res) => {
+  try {
+    const chatId = req.session.user?.currentChatId;
+    const docSearchMethod = req.body.docSearchMethod;
+
+    if (!chatId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (typeof docSearchMethod !== 'string') {
+      return res.status(400).json({ error: 'Invalid status value' });
+    }
+
+    await setDocSearchStatus(chatId, docSearchMethod);
+    res.json({ success: true, documentSearchEnabled: docSearchMethod });
+  } catch (error) {
+    console.error('Error setting document search status:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// This endpoint serves the file directly from MinIO to the browser
+router.get('/storage/*', async (req: Request, res: Response) => {
+    // The '*' captures the entire path after /storage/
+    const objectName = req.params[0];
+
+    if (!objectName) {
+        return res.status(400).send('File path is required.');
+    }
+
+    try {
+        // 1. Get file metadata (MIME type is crucial for preview)
+        const fileInfo = await getFileInfoByObjectName(objectName);
+
+        if (!fileInfo) {
+            return res.status(404).send('File not found in database records.');
+        }
+
+        // 2. Get the stream from MinIO
+        const fileStream = await getFileByObjectName(objectName);
+        
+        // 3. Set headers so browser knows how to display it (Image, PDF, etc)
+        res.setHeader('Content-Type', fileInfo.mime_type || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${fileInfo.file_name}"`);
+        
+        // 4. Pipe stream to response
+        fileStream.pipe(res);
+
+    } catch (error) {
+        console.error(`Failed to retrieve file '${objectName}':`, error);
+        res.status(500).send('Internal server error while retrieving file.');
+    }
 });

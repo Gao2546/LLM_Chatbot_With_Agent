@@ -42,6 +42,8 @@
     transformers
     sentence-transformers
     datasets
+    bitsandbytes
+    accelerate
 
 #Pytorch
     torch
@@ -64,3 +66,8 @@
     googlesearch-python
     selenium
     webdriver-manager
+
+# vllm
+    vllm
+
+    git+https://github.com/illuin-tech/colpali

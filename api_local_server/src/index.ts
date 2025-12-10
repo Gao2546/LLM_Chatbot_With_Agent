@@ -25,6 +25,8 @@ app.use(cors({
   credentials: true
 }));
 
+// app.use(cors()); // Allows all origins
+
 // let BASE_DIR = path.join(__dirname, 'managed_files');
 // if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR);
 // let BASE_DIR = "/app/files";

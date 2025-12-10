@@ -38,6 +38,7 @@
         <div id="chatList">
             <div class="btn-sidebar-container" display="none"></div>
             <button id="newChatButton">New Chat</button>
+            <button id="preprocessButton"><i class="fas fa-file-import"></i> Preprocess File</button>
             <div class="mode-selector-container">
                 <label for="modeSelector">Mode:</label>
                 <select id="modeSelector">
@@ -63,27 +64,43 @@
                 </div>
                 
                 <div class="input-button-container">
-                    <textarea id="userInput" placeholder="Ask any question..." rows="1"></textarea>
-                    <input  type="file" 
-                            id="fileInput" 
-                            accept=".pdf,.txt,.doc,.docx,.ppt,.pptx,.odt,.rtf,.md,
-                                    .py,.c,.cpp,.h,.hpp,.java,.js,.ts,.cs,.go,.rs,.php,.rb,.swift,.kt,.m,.sh,.xls,.xlsx,.xlsm,.csv,.yml,.bat,.xml,.html,.css,.ts,
-                                    image/*" 
-                            multiple />
-                   
+
                     <label for="fileInput" class="file-input-label">
                         <i class="fas fa-paperclip"></i>
                     </label>
-                    <button id="fileDialogButton" style="display: none;" title="Select file to include path">
-                        <i class="fas fa-folder-open"></i>
-                    </button>
 
-                    <button id="changeDirButton" title="Change current working directory">
-                        <i class="fas fa-folder-tree"></i>
-                    </button>
-    
-                    <button id="sendButton">Send</button>
-                    <button id="stopButton" style="display:none;">Stop</button>
+                    <div class="textarea-container"> 
+                        <textarea id="userInput" placeholder="Ask any question..." rows="1"></textarea>
+                    </div>  
+                    
+                    <div class="inputButtonArea-container">
+                        
+                        <button id="documentSearch" title="Search documents in knowledge base">
+                            <i class="fas fa-file-search"></i>
+                        </button>
+
+                        <input  type="file" 
+                                id="fileInput" 
+                                accept=".pdf,.txt,.doc,.docx,.ppt,.pptx,.odt,.rtf,.md,
+                                        .py,.c,.cpp,.h,.hpp,.java,.js,.ts,.cs,.go,.rs,.php,.rb,.swift,.kt,.m,.sh,.xls,.xlsx,.xlsm,.csv,.yml,.bat,.xml,.html,.css,.ts,
+                                        image/*" 
+                                multiple />
+
+                        <button id="fileDialogButton" style="display: inline-block;" title="Select file to include path">
+                            <i class="fas fa-folder-open"></i>
+                        </button>
+
+                        <button id="changeDirButton" style="display: inline-block;" title="Change current working directory">
+                            <i class="fas fa-folder-tree"></i>
+                        </button>
+                    
+                        <button id="sendButton" title="Send Message">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                        <button id="stopButton" style="display:none;" title="Stop Generation">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="warning">warning: is Alpha version</div>
             </div>
@@ -104,6 +121,8 @@
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="file_browser.js"></script>
+    <script src="preprocessDialog.js"></script>
+    <script src="directoryBrowser.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS chat_history (
     message TEXT NOT NULL,
     chat_mode VARCHAR(255),
     chat_model VARCHAR(255),
+    doc_search_method VARCHAR(255),
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_chat_user
         FOREIGN KEY (user_id)
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     object_name TEXT UNIQUE NOT NULL, -- Stores the unique key in MinIO
     mime_type VARCHAR(255),
     file_size_bytes BIGINT,
+    active_users INTEGER[] DEFAULT ARRAY[]::INTEGER[], -- <<< NEW COLUMN FOR ACTIVE USERS
     uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_file_user
@@ -106,7 +108,7 @@ CREATE TABLE IF NOT EXISTS document_page_embeddings (
     chat_history_id INTEGER NOT NULL,
     uploaded_file_id INTEGER NOT NULL,
     page_number INTEGER NOT NULL,
-    embedding VECTOR(256), -- CLIP model vector size
+    embedding VECTOR(2048),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_page_user
@@ -140,123 +142,36 @@ BEGIN
 END
 $$;
 `;
-// === PGVECTOR EXTENSION ===
-const enablePgvectorQuery = `
-CREATE EXTENSION IF NOT EXISTS vector;
-`;
-// === VERIFIED ANSWERS TABLES ===
-const createVerifiedAnswersTableQuery = `
-CREATE TABLE IF NOT EXISTS verified_answers (
-    id SERIAL PRIMARY KEY,
-    question TEXT NOT NULL,
-    answer TEXT NOT NULL,
-    tags TEXT[],
-    department VARCHAR(255),
-    verification_type VARCHAR(50) DEFAULT 'staging',
-    question_embedding VECTOR(384),
-    avg_rating FLOAT DEFAULT 0,
-    verified_count INT DEFAULT 0,
-    rating_count INT DEFAULT 0,
-    views INT DEFAULT 0,
-    requested_departments TEXT[],
-    due_date TIMESTAMP,
-    created_by VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    last_updated_at TIMESTAMP DEFAULT NOW()
-);
-`;
-const createVerifiedAnswersIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_verified_answers_embedding 
-ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
-`;
-const createAnswerVerificationsTableQuery = `
-CREATE TABLE IF NOT EXISTS answer_verifications (
-    id SERIAL PRIMARY KEY,
-    verified_answer_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
-    user_id INT,
-    rating INT CHECK (rating IN (-1, 0, 1)),
-    comment TEXT,
-    commenter_name VARCHAR(255),
-    verification_type VARCHAR(50) DEFAULT 'self',
-    requested_departments TEXT[],
-    due_date TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-`;
-const createAnswerVerificationsIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_answer_verifications_answer 
-ON answer_verifications(verified_answer_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_answer_verifications_unique 
-ON answer_verifications(verified_answer_id, user_id);
-`;
-// Comments table for Q&A
-const createCommentsTableQuery = `
-CREATE TABLE IF NOT EXISTS comments (
-    id SERIAL PRIMARY KEY,
-    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
-    user_id INT,
-    username VARCHAR(255),
-    text TEXT NOT NULL,
-    department VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-`;
-const createCommentsIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_comments_question 
-ON comments(question_id);
-`;
-// Comment Attachments table for file uploads in comments
-const createCommentAttachmentsTableQuery = `
-CREATE TABLE IF NOT EXISTS comment_attachments (
-    id SERIAL PRIMARY KEY,
-    comment_id INT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
-    file_name VARCHAR(255) NOT NULL,
-    mime_type VARCHAR(100),
-    file_data BYTEA NOT NULL,
-    file_size_bytes BIGINT,
-    uploaded_by VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-`;
-const createCommentAttachmentsIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_comment_attachments_comment 
-ON comment_attachments(comment_id);
-`;
-// Question Votes table for Stack Overflow style voting
-const createQuestionVotesTableQuery = `
-CREATE TABLE IF NOT EXISTS question_votes (
-    id SERIAL PRIMARY KEY,
-    question_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    vote INTEGER NOT NULL CHECK (vote IN (-1, 1)),
-    voted_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(question_id, user_id),
-    FOREIGN KEY (question_id) REFERENCES verified_answers(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-`;
-const createQuestionVotesIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_question_votes_question_id ON question_votes(question_id);
-CREATE INDEX IF NOT EXISTS idx_question_votes_user_id ON question_votes(user_id);
-`;
-// Question Attachments table for file uploads in Q&A
-const createQuestionAttachmentsTableQuery = `
-CREATE TABLE IF NOT EXISTS question_attachments (
-    id SERIAL PRIMARY KEY,
-    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
-    file_name VARCHAR(255) NOT NULL,
-    mime_type VARCHAR(100),
-    file_data BYTEA NOT NULL,
-    file_size_bytes BIGINT,
-    uploaded_by VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-`;
-const createQuestionAttachmentsIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_question_attachments_question 
-ON question_attachments(question_id);
-`;
+// --- NEW HELPER FOR DUMMY DATA ---
+/**
+ * Creates a System User (ID 0) and a Dummy Chat History (ID -1).
+ * This ensures that file uploads targeting chat_id -1 have a valid foreign key relation.
+ */
+async function initializeDummyData() {
+    try {
+        // 1. Insert System User (ID 0) if not exists
+        // We use ID 0 to avoid conflicts with auto-incrementing regular users (starting at 1)
+        await pool.query(`
+            INSERT INTO users (id, username, password, email, role, is_active, is_guest)
+            VALUES (0, 'system_placeholder', NULL, 'system@local', 'admin', TRUE, FALSE)
+            ON CONFLICT (id) DO NOTHING;
+        `);
+        console.log('DB: System user (ID 0) ensured.');
+        // 2. Insert Dummy Chat History (ID -1) if not exists
+        // We attach this to User ID 0
+        await pool.query(`
+            INSERT INTO chat_history (id, user_id, message, chat_mode, chat_model)
+            VALUES (-1, 0, 'TEMP_UPLOAD_BUFFER', 'system', 'system')
+            ON CONFLICT (id) DO NOTHING;
+        `);
+        console.log('DB: Dummy chat history (ID -1) ensured.');
+    }
+    catch (error) {
+        console.error('Error initializing dummy data:', error);
+        // We don't throw here to allow app to try to continue, 
+        // but uploads to ID -1 will likely fail if this failed.
+    }
+}
 // Note: Guest support columns are now integrated into the main createUsersTableQuery
 // to simplify initialization. This block is no longer strictly necessary if starting fresh.
 const alterGuestSupportQuery = `
@@ -323,6 +238,11 @@ async function initializeDatabase() {
         console.log('DB: Users table created or already exists');
         await pool.query(createChatHistoryTableQuery);
         console.log('DB: Chat history table created or already exists');
+        // --- EXECUTE DUMMY DATA CREATION HERE ---
+        // Must be done BEFORE uploaded_files creation creates constraints, 
+        // or at least before we try to use the system.
+        await initializeDummyData();
+        console.log('DB: Create dummy chat with system user user id : 0');
         await pool.query(createUploadedFilesTableQuery); // Using updated query
         console.log('DB: Uploaded files table created or already exists');
         await pool.query(createDocumentEmbeddingsTableQuery);
@@ -649,9 +569,9 @@ async function getUserByEmail(email) {
         throw error;
     }
 }
-async function newChatHistory(userId) {
-    const query = 'INSERT INTO chat_history (user_id, message) VALUES ($1, \'\') RETURNING id';
-    const values = [userId];
+async function newChatHistory(userId, selectedDocSearchMethod) {
+    const query = 'INSERT INTO chat_history (user_id, message, doc_search_method) VALUES ($1, \'\', $2) RETURNING id';
+    const values = [userId, selectedDocSearchMethod];
     try {
         const result = await pool.query(query, values);
         return result.rows[0].id;
@@ -686,7 +606,7 @@ async function listChatHistory(userId) {
     }
 }
 async function readChatHistory(chatId) {
-    const query = 'SELECT message, timestamp, chat_mode, chat_model FROM chat_history WHERE id = $1';
+    const query = 'SELECT message, timestamp, chat_mode, chat_model, doc_search_method FROM chat_history WHERE id = $1';
     const values = [chatId];
     try {
         const result = await pool.query(query, values);
@@ -1068,6 +988,92 @@ async function deleteAllGuestUsersAndChats() {
         client.release();
     }
 }
+async function getFilesByChatId(chatId) {
+    const query = `
+    SELECT id, file_name, object_name, mime_type, file_size_bytes, active_users, uploaded_at 
+    FROM uploaded_files 
+    WHERE chat_history_id = $1 
+    ORDER BY uploaded_at DESC
+  `;
+    try {
+        const result = await pool.query(query, [chatId]);
+        return result.rows;
+    }
+    catch (error) {
+        console.error(`Error getting files for chat ${chatId}:`, error);
+        throw error;
+    }
+}
+// =================================================================================
+// ⭐ NEW FUNCTIONS FOR ACTIVE USERS MANAGEMENT ⭐
+// =================================================================================
+/**
+ * Appends a user ID to the active_users array for a specific file.
+ * Prevents duplicates (only adds if not already present).
+ */
+async function addActiveUserToFile(fileId, userId) {
+    const query = `
+    UPDATE uploaded_files
+    SET active_users = CASE
+        WHEN NOT ($1 = ANY(active_users)) THEN array_append(active_users, $1)
+        ELSE active_users
+    END
+    WHERE id = $2
+    RETURNING active_users;
+  `;
+    try {
+        const result = await pool.query(query, [userId, fileId]);
+        return result.rows[0]?.active_users || [];
+    }
+    catch (error) {
+        console.error(`Error adding active user ${userId} to file ${fileId}:`, error);
+        throw error;
+    }
+}
+/**
+ * Removes a user ID from the active_users array for a specific file.
+ */
+async function removeActiveUserFromFile(fileId, userId) {
+    const query = `
+    UPDATE uploaded_files
+    SET active_users = array_remove(active_users, $1)
+    WHERE id = $2
+    RETURNING active_users;
+  `;
+    try {
+        const result = await pool.query(query, [userId, fileId]);
+        return result.rows[0]?.active_users || [];
+    }
+    catch (error) {
+        console.error(`Error removing active user ${userId} from file ${fileId}:`, error);
+        throw error;
+    }
+}
+async function getDocSearchStatus(chatID) {
+    const query = 'SELECT doc_search_method FROM chat_history WHERE id = $1';
+    const values = [chatID];
+    try {
+        const result = await pool.query(query, values);
+        console.log(`DB: Retrieved document search method for chat history ${chatID}: ${result.rows[0]?.doc_search_method ?? null}`);
+        return result.rows[0]?.doc_search_method ?? null;
+    }
+    catch (error) {
+        console.error('Error getting document search method:', error);
+        throw error;
+    }
+}
+async function setDocSearchStatus(chatID, method) {
+    const query = 'UPDATE chat_history SET doc_search_method = $1 WHERE id = $2';
+    const values = [method, chatID];
+    try {
+        await pool.query(query, values);
+        console.log(`DB: Document search method for chat history ${chatID} updated to ${method}`);
+    }
+    catch (error) {
+        console.error('Error setting document search method:', error);
+        throw error;
+    }
+}
 // These startup cleanup functions can be run if needed.
 // await deleteAllGuestUsersAndChats();
 // ===================================
@@ -1226,5 +1232,9 @@ saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, updateAnswerR
 saveQuestionAttachment, getQuestionAttachments, getQuestionAttachmentData, deleteQuestionAttachment, 
 // Comment Attachments Functions
 saveCommentAttachment, getCommentAttachments, getCommentAttachmentData, deleteCommentAttachment, 
+// File Functions (New)
+uploadFile, getFile, getFileByObjectName, // <-- Added new function here
+getFileInfoByObjectName, // <-- Added new function here
+deleteFile, getFilesByChatId, addActiveUserToFile, removeActiveUserFromFile, getDocSearchStatus, setDocSearchStatus, 
 // Deletion and Cleanup Functions
 deleteUserAndHistory, deleteInactiveGuestUsersAndChats, deleteAllGuestUsersAndChats, };

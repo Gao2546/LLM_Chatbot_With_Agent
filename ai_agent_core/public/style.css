@@ -52,9 +52,9 @@ thinking {
     /* align-items: center; */
     /* justify-content: center; */
     width: calc(100% - 15px); /* Adjust width to account for padding */
-    max-height: calc(100% - 210px - 65px - 64px - 5px);
+    max-height: calc(100% - 210px - 65px - 64px - 5px - 57px);
     /* min-height: 200px; */
-    min-height: calc(100% - 210px - 65px - 64px - 5px);;
+    min-height: calc(100% - 210px - 65px - 64px - 5px - 57px);
     overflow-y: auto; /* Allow scrolling for chat list */
     flex-grow: 1; /* Allow list to take available space */
     overflow-x: hidden; /* Hide content when collapsed */
@@ -362,101 +362,165 @@ thinking {
 
 /* Container for the input and buttons */
 .input-button-container {
-    position: relative;
-    /* display: flex; */
-    /* align-items: center; Align items vertically */
+    display: flex;
+    flex-wrap: wrap; /* Allows items to wrap to new lines */
+    align-items: center; /* Vertically align items */
     width: 100%;
     background-color: #3c3c3c;
-    border-radius: 18px 18px 18px 18px; /* Rounded corners */
+    border: 1px solid #4a4a4a;
+    border-radius: 16px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    position: relative;
+    gap: 5px; /* Spacing between rows/items */
 }
 
-#userInput {
-    position: relative;
-    flex-grow: 1;
-    padding: 12px 15px; /* Increase padding */
-    border: 1px solid #4a4a4a; /* Subtle border */
-    border-radius: 18px 18px 18px 18px; /* Rounded corners */
-    border-right: none;
-    background-color: #3c3c3c; /* Darker input background */
-    color: #e0e0e0;
-    resize: none;
-    max-height: 150px;
-    min-height: 48px;
-    height: 48px; /* Initial height for one line */
-    width: calc(100% - 220px);
-    /* margin-right: 100px; */
-    overflow-y: auto;
-    margin: 0;
-    font-size: 1em;
-    line-height: 1.4; /* Improve readability */
-    box-sizing: border-box;
-    font-size: 16px;
-    scrollbar-width: none;
+.textarea-container {
+    width: 100%;      /* Take full width */
+    order: 1;         /* Force to be first visual item */
+    display: flex;
+    align-items: center;
+    padding-bottom: 5px; /* Space between text and buttons */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Optional divider line */
+    margin-bottom: 5px;
 }
+
+.inputButtonArea-container {
+    order: 3; /* Visual order: Third (Bottom Right) */
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Style for small tool buttons (Search, Folder, Tree) */
+.inputButtonArea-container button:not(#sendButton):not(#stopButton) {
+    width: 32px;
+    height: 32px;
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #b0b0b0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1em;
+    transition: all 0.2s;
+}
+
+.inputButtonArea-container button:not(#sendButton):not(#stopButton):hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* --- NEW: Document Search Button Styles --- */
+
+/* --- Base Button Style (None/Default State) --- */
+#documentSearch {
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    opacity: 0.7;
+    position: relative;
+}
+
+/* Default Icon: Search */
+/* This ensures that when no state class is present, it shows the search glass */
+#documentSearch i::before {
+    content: "\f002"; /* FontAwesome code for 'fa-search' */
+}
+
+/* Base Hover */
+#documentSearch:hover {
+    background-color: #4a4a4a;
+    color: #e0e0e0;
+    opacity: 1;
+}
+
+/* --- STATE 1: My Documents (Local/Focus) --- */
+/* Meaning: Selected, Active, Current Context */
+#documentSearch.state-my-doc {
+    background-color: rgba(10, 130, 118, 0.2) !important; /* Subtle Teal Background */
+    color: #0a8276 !important; /* Theme Teal Text */
+    border-color: #0a8276 !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 10px rgba(10, 130, 118, 0.1);
+}
+
+#documentSearch.state-my-doc:hover {
+    background-color: #0a8276 !important;
+    color: white !important;
+}
+
+/* Icon: Check Mark */
+#documentSearch.state-my-doc i::before {
+    content: "\f00c" !important; /* Force override */
+}
+
+/* --- STATE 2: All Documents (Global/Broad) --- */
+/* Meaning: World, Network, Everything */
+#documentSearch.state-all-doc {
+    background-color: rgba(92, 139, 214, 0.2) !important; /* Subtle Blue Background */
+    color: #5c8bd6 !important; /* Slate Blue Text */
+    border-color: #5c8bd6 !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 10px rgba(92, 139, 214, 0.1);
+}
+
+#documentSearch.state-all-doc:hover {
+    background-color: #5c8bd6 !important;
+    color: white !important;
+}
+
+/* Icon: Globe */
+#documentSearch.state-all-doc i::before {
+    content: "\f0ac" !important; /* Force override */
+}
+
+/* --- UPDATE: User Input Styling to fit with button --- */
+#userInput {
+    width: 100%;
+    background-color: transparent;
+    border: none;
+    color: #e0e0e0;
+    font-size: 16px;
+    resize: none;
+    max-height: 200px;
+    min-height: 24px;
+    height: auto;
+    padding: 4px 0;
+    outline: none;
+    line-height: 1.5;
+    box-sizing: border-box;
+}
+
 
 #userInput:focus {
     outline: none;
 }
 
-#sendButton {
-    padding: 0 20px; /* Adjust padding */
-    background-color: #0a8276; /* Match new chat button */
-    color: #fff;
+#sendButton, #stopButton {
+    width: 36px;
+    height: 36px;
+    background-color: #0a8276; /* Teal Background */
+    color: white;
     border: none;
-    border-radius: 0 18px 18px 0; /* Rounded corners */
+    border-radius: 8px; /* Rounded Square */
     cursor: pointer;
-    height: 48px; /* Match input height */
-    font-size: 1.2em; /* Make icon slightly larger if using one */
-    position: absolute; /* Make it stick to the bottom */
-    bottom: 0; /* Stick to the bottom edge */
-    right: 0;
-    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 0.2s ease, transform 0.1s ease;
-    box-sizing: border-box;
-    border: 1px solid #0a8276; /* Match border style */
-    border-left: none; /* Remove left border */
+    margin-left: 8px; /* Separation from tools */
+    transition: background 0.2s, transform 0.1s;
+    font-size: 1rem; /* Icon size */
 }
 
-#sendButton:hover {
+#sendButton:hover, #stopButton:hover {
     background-color: #086b61;
     transform: scale(1.05);
 }
 
-#sendButton:active {
-    transform: scale(0.95);
-}
-
-#stopButton {
-    padding: 0 20px; /* Adjust padding */
-    background-color: #0a8276; /* Match new chat button */
-    color: #fff;
-    border: none;
-    border-radius: 0 18px 18px 0; /* Rounded corners */
-    cursor: pointer;
-    height: 48px; /* Match input height */
-    font-size: 1.2em; /* Make icon slightly larger if using one */
-    position: absolute; /* Make it stick to the bottom */
-    bottom: 0; /* Stick to the bottom edge */
-    right: 0;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color 0.2s ease, transform 0.1s ease;
-    box-sizing: border-box;
-    border: 1px solid #0a8276; /* Match border style */
-    border-left: none; /* Remove left border */
-}
-
-#stopButton:hover {
-    background-color: #086b61;
-    transform: scale(1.05);
-}
-
-#stopButton:active {
+#sendButton:active, #stopButton:active {
     transform: scale(0.95);
 }
 
@@ -764,95 +828,67 @@ strong {
 }
 
 
-/* Change Directory Button Styles */
-#changeDirButton {
-    background-color: #3c3c3c;
-    border: 1px solid #4a4a4a;
-    border-radius: 8px;
-    color: #e0e0e0;
-    cursor: pointer;
-    display: none; /* Hidden by default */
+/* --- Tool Buttons (Folder & Tree) - Updated for Flex Layout --- */
+
+#changeDirButton, #fileDialogButton {
+    position: static !important; /* IMPORTANT: Removes absolute positioning */
+    display: flex;    /* Ensures they align correctly as flex items */
     align-items: center;
     justify-content: center;
-    height: 46px;
-    width: 46px;
-    position: absolute;
-    bottom: 0px;
-    right: 190px;
-    z-index: 10;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-#changeDirButton:hover {
-    background-color: #444;
-    border-color: #0a8276;
-    box-shadow: 0 2px 5px rgba(0, 122, 204, 0.2);
-}
-
-#changeDirButton i {
-    color: #e0e0e0;
-    font-size: 16px;
-}
-
-/* File Dialog Button Styles */
-#fileDialogButton {
-    background-color: #3c3c3c;
-    border: 1px solid #4a4a4a;
-    border-radius: 8px;
-    color: #e0e0e0;
+    width: 32px;      /* Match size of other tool buttons */
+    height: 32px;
+    
+    /* Visual Styling */
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #b0b0b0;
     cursor: pointer;
-    display: none; /* Hidden by default */
-    align-items: center;
-    justify-content: center;
-    height: 46px;
-    width: 46px;
-    position: absolute;
-    bottom: 0px;
-    right: 140px;
-    z-index: 10;
     transition: all 0.2s ease;
-    flex-shrink: 0;
+    
+    /* Reset old positioning props */
+    margin: 0;
+    bottom: auto;
+    right: auto;
+    z-index: auto;
+    box-shadow: none;
 }
 
-#fileDialogButton:hover {
-    background-color: #444;
-    border-color: #0a8276;
-    box-shadow: 0 2px 5px rgba(0, 122, 204, 0.2);
+/* Hover Effects */
+#changeDirButton:hover, #fileDialogButton:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: none;
 }
 
-#fileDialogButton i {
-    color: #e0e0e0;
-    font-size: 16px;
+/* Icon Styling */
+#changeDirButton i, #fileDialogButton i {
+    font-size: 1em;
+    color: inherit;
 }
 
 /* File Input Label Styles */
 .file-input-label {
-    background-color: #3c3c3c;
-    /* border: 1px solid #4a4a4a; */
-    /* border-radius: 8px; */
-    /* padding: 8px 12px; */
-    /* margin-right: 8px; */
+    order: 2; /* Visual order: Second (Bottom Left) */
+    position: static;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
+    background-color: transparent;
+    color: #b0b0b0;
+    border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0; /* Prevent shrinking */
-    /* height: 36px; */
-    /* min-width: 36px; */
-    height: 46px;
-    width: 46px;
-    position: absolute; /* Make it stick to the bottom */
-    bottom: 0px;
-    right: 90px;
-    z-index: 10;
+    flex-shrink: 0;
+    margin-right: auto; /* Pushes the Button Area to the far right */
+    transition: all 0.2s;
 }
 
 .file-input-label:hover {
-    background-color: #444;
-    border-color: #0a8276;
-    box-shadow: 0 2px 5px rgba(0, 122, 204, 0.2);
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .file-input-label i {
@@ -1266,9 +1302,509 @@ strong {
     transform: translateX(0%) scale(0.97); /* Maintain centering */
 }
 
+/* --- Unified Browser Modal Styles (File & Directory) --- */
+
+/* Animation Keyframes */
+@keyframes browserFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes browserScaleUp { from { transform: scale(0.95); } to { transform: scale(1); } }
+@keyframes browserFadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* The Overlay */
+.browser-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    z-index: 2000;
+    display: none; /* Hidden by default */
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+}
+
+.browser-overlay.active {
+    display: flex;
+    animation: browserFadeIn 0.2s forwards;
+}
+
+.browser-overlay.closing {
+    animation: browserFadeOut 0.2s forwards;
+}
+
+/* The Modal Window */
+.browser-modal {
+    width: 80%;
+    max-width: 800px;
+    height: 70%;
+    max-height: 600px;
+    background-color: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: scale(0.95);
+    /* Animation applied when parent has .active */
+}
+
+.browser-overlay.active .browser-modal {
+    animation: browserScaleUp 0.2s forwards;
+}
+
+/* Header */
+.browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background-color: #2a2a2a; /* Dark header instead of teal block */
+    border-bottom: 1px solid #3a3a3a;
+}
+
+.browser-header h3 {
+    margin: 0;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-size: 1.1em;
+}
+
+.browser-close-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #b0b0b0;
+    transition: color 0.2s;
+    line-height: 1;
+}
+.browser-close-btn:hover { color: #fff; }
+
+/* Navigation Bar */
+.browser-nav {
+    padding: 15px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #1e1e1e;
+}
+
+.browser-nav input[type="text"] {
+    flex-grow: 1;
+    padding: 10px;
+    background-color: #3c3c3c;
+    border: 1px solid #4a4a4a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    outline: none;
+}
+.browser-nav input[type="text"]:focus { border-color: #0a8276; }
+
+.browser-btn-nav {
+    padding: 8px 14px;
+    background-color: #3c3c3c;
+    border: 1px solid #4a4a4a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.browser-btn-nav:hover { background-color: #4a4a4a; border-color: #0a8276; }
+
+/* Current Path Display */
+.browser-path-display {
+    padding: 0 20px 10px 20px;
+}
+.browser-path-display input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #888;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+/* File List Area */
+.browser-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px 20px;
+    border-top: 1px solid #3a3a3a;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+/* Scrollbar styling */
+.browser-list::-webkit-scrollbar { width: 8px; }
+.browser-list::-webkit-scrollbar-track { background: #1e1e1e; }
+.browser-list::-webkit-scrollbar-thumb { background-color: #444; border-radius: 4px; }
+
+/* File Items */
+.browser-item {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    transition: background-color 0.1s;
+    color: #e0e0e0;
+}
+.browser-item:hover { background-color: #2a2a2a; }
+.browser-item.selected { 
+    background-color: #0a8276; /* Teal Active State */
+    color: white; 
+}
+
+.browser-item-icon { margin-right: 12px; opacity: 0.7; }
+.browser-item-name { flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.browser-item-size { font-size: 0.85em; opacity: 0.6; }
+
+/* Footer */
+.browser-footer {
+    padding: 15px 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background-color: #2a2a2a;
+}
+
+.browser-btn-primary, .browser-btn-secondary {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+    transition: transform 0.1s;
+}
+
+.browser-btn-primary {
+    background-color: #0a8276; /* Teal */
+    color: white;
+}
+.browser-btn-primary:hover:not(:disabled) { background-color: #086b61; }
+.browser-btn-primary:disabled { background-color: #444; cursor: not-allowed; opacity: 0.6; }
+
+.browser-btn-secondary {
+    background-color: transparent;
+    border: 1px solid #4a4a4a;
+    color: #e0e0e0;
+}
+.browser-btn-secondary:hover { background-color: #3c3c3c; }
+
+/* --- Preprocess Modal Specific Styles --- */
+
+/* The Overlay */
+.pp-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6); /* Darker dimmer */
+    backdrop-filter: blur(5px); /* Modern blur effect */
+    z-index: 2000; /* Above everything */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    animation: ppFadeIn 0.2s forwards;
+}
+
+/* The Main Dialog Box */
+.pp-dialog {
+    width: 80%;
+    max-width: 900px;
+    height: 650px;
+    background-color: #1e1e1e; /* Match Body BG */
+    border: 1px solid #3a3a3a;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    display: flex;
+    overflow: hidden;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    transform: scale(0.95);
+    animation: ppScaleUp 0.2s forwards;
+}
+
+/* Animations */
+@keyframes ppFadeIn { to { opacity: 1; } }
+@keyframes ppScaleUp { to { transform: scale(1); } }
+
+/* Left Sidebar */
+.pp-sidebar {
+    width: 280px;
+    background-color: #2a2a2a; /* Match App Sidebar */
+    border-right: 1px solid #3a3a3a;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    flex-shrink: 0;
+}
+
+/* Right Content Panel */
+.pp-main-panel {
+    flex: 1;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    background-color: #1e1e1e;
+    overflow-y: auto;
+}
+
+/* Typography */
+.pp-header {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 0.9em;
+    text-transform: uppercase;
+    color: #b0b0b0;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.pp-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    color: #b0b0b0;
+}
+
+/* Form Elements (Inputs, Selects, Textareas) */
+.pp-input, .pp-select, .pp-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background-color: #3c3c3c; /* Match your input fields */
+    border: 1px solid #4a4a4a;
+    color: #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+    outline: none;
+    font-family: inherit;
+}
+
+.pp-input:focus, .pp-select:focus, .pp-textarea:focus {
+    border-color: #0a8276; /* Your Theme Accent Color */
+}
+
+/* Buttons */
+.pp-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Primary Button (Teal) */
+.pp-btn-primary {
+    background-color: #0a8276;
+    color: white;
+    width: 100%;
+}
+.pp-btn-primary:hover { background-color: #086b61; transform: scale(1.02); }
+.pp-btn-primary:active { transform: scale(0.98); }
+
+/* Secondary Button (Grey) */
+.pp-btn-secondary {
+    background-color: #3a3a3a;
+    color: #e0e0e0;
+}
+.pp-btn-secondary:hover { background-color: #4a4a4a; }
+
+/* Success/Process Button */
+.pp-btn-success {
+    background-color: #0a8276; /* Using theme teal instead of standard green for consistency */
+    color: white;
+}
+.pp-btn-success:hover { background-color: #086b61; box-shadow: 0 2px 8px rgba(10, 130, 118, 0.3); }
+
+/* Upload Area specific styles */
+.pp-upload-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.pp-btn-upload {
+    background-color: #3c3c3c;
+    border: 1px solid #4a4a4a;
+    color: #e0e0e0;
+    white-space: nowrap;
+}
+.pp-btn-upload:hover { border-color: #0a8276; color: #0a8276; }
+
+/* Document List */
+.pp-doc-list {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 10px;
+    padding-right: 5px;
+}
+
+/* Custom Scrollbar for the list */
+.pp-doc-list::-webkit-scrollbar { width: 6px; }
+.pp-doc-list::-webkit-scrollbar-track { background: transparent; }
+.pp-doc-list::-webkit-scrollbar-thumb { background-color: #444; border-radius: 3px; }
+
+.pp-doc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    margin-bottom: 5px;
+    background-color: #3c3c3c;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    border: 1px solid transparent;
+}
+
+.pp-doc-item:hover {
+    background-color: #4a4a4a;
+}
+.pp-doc-item.active {
+    background-color: #0a8276;
+    color: white;
+    border-color: #0a8276;
+}
+
+/* OR Separator */
+.pp-separator {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 20px 0;
+    color: #666;
+    font-size: 0.85em;
+}
+.pp-separator::before, .pp-separator::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid #3a3a3a;
+}
+.pp-separator::before { margin-right: 10px; }
+.pp-separator::after { margin-left: 10px; }
+
+/* Section Spacing */
+.pp-section { margin-bottom: 25px; }
+.pp-actions { 
+    display: flex; 
+    justify-content: flex-end; 
+    gap: 15px; 
+    margin-top: auto; /* Push to bottom */
+    padding-top: 20px;
+    border-top: 1px solid #3a3a3a;
+}
+
+/* Style for the new delete button inside the list item */
+.pp-doc-delete {
+    color: #ff6b6b; /* Soft red */
+    font-weight: bold;
+    font-size: 18px;
+    line-height: 1;
+    margin-left: 10px;
+    padding: 0 5px;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+.pp-doc-delete:hover {
+    opacity: 1;
+    background-color: rgba(255, 107, 107, 0.1);
+    transform: scale(1.1);
+}
+
+/* --- Preprocess Status Animation --- */
+
+/* The container for the status icon */
+.pp-doc-status {
+    width: 18px;
+    height: 18px;
+    margin-right: 10px; 
+    display: none; /* Hidden by default */
+    flex-shrink: 0;
+}
+
+/* When active, show it */
+.pp-doc-status.pp-loading {
+    display: inline-block;
+}
+
+/* The loading spinner style (Rotating Ring) */
+.pp-loading {
+    box-sizing: border-box;
+    border: 2px solid rgba(10, 130, 118, 0.2); /* Faint track */
+    border-top: 2px solid #0a8276; /* Active color */
+    border-radius: 50%;
+    animation: ppSpin 0.8s linear infinite;
+}
+
+@keyframes ppSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
 
 
+/* Preprocess Button Styles */
+#preprocessButton {
+    width: 100%;
+    margin-bottom: 15px; /* Space between buttons */
+    padding: 10px 15px;
+    background-color: #3c3c3c; /* Dark Grey (Secondary Action) */
+    color: #e0e0e0;
+    border: 1px solid #4a4a4a; /* Subtle border definition */
+    border-radius: 8px; /* Rounded corners match New Chat */
+    cursor: pointer;
+    font-size: 1em;
+    transition: all 0.2s ease, transform 0.1s ease;
+    
+    /* Layout for Icon + Text */
+    display: flex;
+    align-items: center;
+    justify-content: center; /* Center content */
+    gap: 10px; /* Space between icon and text */
+    
+    /* Text handling for sidebar collapse */
+    overflow-x: hidden;
+    white-space: nowrap;
+    text-overflow: clip;
+}
 
+/* Hover Effect - Glows with your Theme Color */
+#preprocessButton:hover {
+    background-color: #4a4a4a; /* Lighter Grey */
+    border-color: #0a8276; /* Teal Accent Border */
+    color: #fff;
+    transform: scale(1.02); /* Subtle pop effect */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Click Effect */
+#preprocessButton:active {
+    transform: scale(0.98);
+    background-color: #363636;
+}
+
+/* Responsive Sidebar support (Mobile) */
+@media (max-width: 868px) {
+    #preprocessButton {
+        width: 100%;
+        margin-right: 0;
+        flex-shrink: 0;
+    }
+}
 
 
 /* Responsive adjustments */

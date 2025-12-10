@@ -1,0 +1,11 @@
+qwen3-embedding:0.6b   
+qwen3-vl:2b            
+llama3.2:3b            
+qwen3:8b               
+gemma3:270m            
+embeddinggemma:300m    
+qwen3:4b               
+gemma3n:e4b                       
+gemma3:1b              
+gemma3:4b              
+llama3.2:latest        

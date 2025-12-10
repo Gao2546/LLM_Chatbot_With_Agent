@@ -67,6 +67,7 @@ router.post('/login', async (req, res) => {
     if (req.session.user) {
       if (req.session.user.isGuest === true) {
         await deleteUserAndHistory(req.session.user.id);
+        req.session.user.isGuest = false;
         // await deleteUserFolder(req.session.user.id);
       }
       else{
@@ -75,7 +76,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Create a session
-    req.session.user = { id: user.id, username: user.username, socketId: socketId };
+    req.session.user = { id: user.id, username: user.username, socketId: socketId, isGuest: false };
     console.log("Auth: session has create")
 
     // await createUserFolder(user.id); // comment it in new patch
@@ -193,7 +194,7 @@ router.get('/session', (req, res) => {
     res.status(200).json({ error: 'No session please login' });
   }
   else{
-  // console.log(req.session.user);
+  console.log(req.session.user);
   if (req.session.user) {
     res.json({
       loggedIn: true,
