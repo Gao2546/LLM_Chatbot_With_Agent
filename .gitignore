@@ -40,4 +40,10 @@ RAG_Model/scratch/
 # Note
 Note*
 
-build/*.js
+ai_agent_core/build/db.js
+ai_agent_core/build/agent.js
+ai_agent_core/build/api.js
+ai_agent_core/build/auth.js
+ai_agent_core/build/db.js
+ai_agent_core/build/index.js
+api_local_server/build/index.js
