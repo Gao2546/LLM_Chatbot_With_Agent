@@ -108,7 +108,9 @@ app.use(async (req: express.Request, res: express.Response, next: express.NextFu
         return next();
       }
       else{
-        return res.json({ exp: true });
+        return res.redirect("/")
+        // res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+        // res.json({ exp: true });
       }
     }
 
@@ -169,6 +171,12 @@ app.use(async (req: express.Request, res: express.Response, next: express.NextFu
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+app.get('/communities', (req, res, next) => {
+    // const {q} = req.params;
+    // console.log(q);
+    res.sendFile(path.join(__dirname, '..', 'public', 'community.html'));
 });
 
 // Create HTTP + WebSocket server

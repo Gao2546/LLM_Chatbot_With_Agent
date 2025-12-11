@@ -114,6 +114,7 @@ minio_client = Minio(
 minio_bucket_name = os.getenv("MINIO_BUCKET", "user-files")
 
 # --- NEW: Database Connection Helper ---
+print("New DB")
 def get_db_connection():
     """Helper function to get a new database connection."""
     try:
