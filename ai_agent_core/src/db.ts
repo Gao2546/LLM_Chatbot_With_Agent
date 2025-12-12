@@ -214,10 +214,10 @@ ON answer_verifications(verified_answer_id, user_id);
 const createCommentsTableQuery = `
 CREATE TABLE IF NOT EXISTS comments (
     id SERIAL PRIMARY KEY,
-    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    question_id INT NOT NULL,
     user_id INT,
     username VARCHAR(255),
-    text TEXT NOT NULL,
+    comment_text TEXT NOT NULL,
     department VARCHAR(255),
     attachments JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT NOW()
@@ -445,6 +445,52 @@ async function initializeDatabase() {
       $$;
     `);
     console.log('DB: Views column added to verified_answers table');
+
+    // Add missing columns to comments table if not exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='comments' AND column_name='comment_text'
+        ) THEN
+          ALTER TABLE comments ADD COLUMN comment_text TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='comments' AND column_name='department'
+        ) THEN
+          ALTER TABLE comments ADD COLUMN department VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='comments' AND column_name='attachments'
+        ) THEN
+          ALTER TABLE comments ADD COLUMN attachments JSONB DEFAULT '[]'::jsonb;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: Missing columns added to comments table');
+
+    // Drop ALL foreign key constraints on comments table if they exist
+    await pool.query(`
+      DO $$
+      DECLARE
+        constraint_name text;
+      BEGIN
+        FOR constraint_name IN
+          SELECT c.constraint_name
+          FROM information_schema.table_constraints c
+          WHERE c.table_name='comments' AND c.constraint_type='FOREIGN KEY'
+        LOOP
+          EXECUTE 'ALTER TABLE comments DROP CONSTRAINT ' || constraint_name;
+          RAISE NOTICE 'Dropped constraint: %', constraint_name;
+        END LOOP;
+      END
+      $$;
+    `);
+    console.log('DB: Removed all foreign key constraints from comments table');
 
     await pool.query(alterUsersTableQuery);
     console.log('DB: Foreign key added to users table');

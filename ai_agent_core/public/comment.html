@@ -1133,14 +1133,21 @@
                     })
                 });
                 
-                if (!res.ok) {
+                let data;
+                try {
+                    data = await res.json();
+                } catch (e) {
                     const errorText = await res.text();
                     console.error('Server error:', errorText);
-                    throw new Error('Failed to save comment');
+                    throw new Error(`Server error: ${errorText || 'Unknown error'}`);
                 }
 
-                const data = await res.json();
                 console.log('Comment response:', data);
+                
+                if (!res.ok) {
+                    console.error('Server error:', data);
+                    throw new Error(data.error || 'Failed to save comment');
+                }
                 
                 if (data.success && data.comment) {
                     // Reload all comments from server to ensure consistency
@@ -1158,7 +1165,8 @@
                 }
             } catch (e) {
                 console.error('Error submitting comment:', e);
-                showMessage('Error adding comment. Please try again.', 'error');
+                const errorMsg = e.message || 'Unknown error';
+                showMessage(`Error adding comment: ${errorMsg}`, 'error');
             }
         }
 
