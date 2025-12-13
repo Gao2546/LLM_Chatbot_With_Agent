@@ -1421,7 +1421,7 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
     except Exception as e:
         return f"An unexpected error occurred: {e}"
 
-def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embedding-0.6B") -> list[list[float]]:
+def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embedding-0.6B", dimensions: int = 1024) -> list[list[float]]:
     """
     Generate embeddings using the DeepInfra API.
     (Original function, unchanged)
@@ -1436,7 +1436,7 @@ def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embeddin
         "Content-Type": "application/json"
     }
 
-    payload = {"inputs": inputs}
+    payload = {"inputs": inputs, "dimensions": dimensions}
     
     api_url = f"https://api.deepinfra.com/v1/inference/{model_name}"
 
@@ -1564,15 +1564,39 @@ def get_image_embedding_jinna_api(
     input_data = []
     task_type = ""
     # create_search_prompt = f"Help me to create prompt for use to search page by text from this task or question add more detail to explain the document page. \n\n task or question : {text} \n\n Give me only new prompt no additional text."
+#     create_search_prompt = f"""
+# Act as a document search that simurch engine. 
+# Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query in english. 
+# Do not answer the question directly; only describe the page content.
+
+# User Query: {text}
+
+# Output only the descriptive paragraph. No introductory text.
+# """
+
+
     create_search_prompt = f"""
-Act as a document search engine. 
-Based on the user's query below, generate a detailed paragraph describing the content, specific keywords, and technical terminology likely to appear on a document page that answers this query. 
-Do not answer the question directly; only describe the page content.
+Act as a document search engine (PDF document search by vector similarity). 
+Write a single, concise sentence in english that simulates a direct excerpt from a document page answering the query below. 
+Include likely keywords and factual phrasing.
 
 User Query: {text}
 
-Output only the descriptive paragraph. No introductory text.
-"""
+Output only the simulated excerpt.
+""" #*****************
+
+
+#     create_search_prompt = f"""
+# Act as a document retrieval expert. 
+# Analyze the User Query and generate a concise search string to find the relevant document page. 
+# Include specific technical terminology, synonyms, and key concepts that would appear in the text of the target page.
+# Keep the output short, dense, and strictly relevant.
+
+# User Query: {text}
+
+# Output only the search string.
+# """
+    
     if text:
         print("Requesting Jina v4 embedding (Type: Text)...")
         if not LOCAL:
@@ -1580,7 +1604,7 @@ Output only the descriptive paragraph. No introductory text.
                 prompt=create_search_prompt,
                 # system_prompt=system_prompt,
                 # image_bytes_list=image_bytes_list,
-                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
             )
 
         else :
@@ -2572,7 +2596,7 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
     # --- NEW: Use DeepInfra for embeddings ---
     if os.getenv("DEEPINFRA_API_KEY"):
         if not LOCAL:
-            embeddings_list = DeepInfraEmbedding(inputs=[text])
+            embeddings_list = DeepInfraEmbedding(inputs=[text],model_name="Qwen/Qwen3-Embedding-4B")
             if embeddings_list and len(embeddings_list) > 0:
                 print("✅ Generated embedding using DeepInfra.")
                 return embeddings_list[0]
@@ -2697,7 +2721,7 @@ def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_numb
             conn.close()
 
 # Search Text (Legacy)
-def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5):
+def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Search (Legacy) from 'document_embeddings' table.
     
@@ -2706,6 +2730,10 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
     """
     # Step 1: Encode the query text to a vector
     query_embedding = encode_text_for_embedding(query_text)
+    # if not LOCAL:
+    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    # else :
+    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
     conn = None
@@ -2720,30 +2748,32 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
         # JOIN with uploaded_files to filter by chat_history_id
         query = """
             SELECT 
-                t1.id, 
+                t1.id AS page_embedding_id, 
                 t2.file_name, 
-                t1.extracted_text, 
-                t1.embedding <=> %s AS distance
+                t2.object_name,
+                t1.page_number,
+                t1.extracted_text,
+                t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
-            WHERE t2.user_id = %s AND t2.chat_history_id = %s
+            WHERE %s = ANY(t2.active_users)
+              AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
         """
-
-        cur.execute(query, (query_vector, user_id, chat_history_id, top_k))
+        cur.execute(query, (query_vector, user_id, query_vector, threshold_text, top_k))
         results = cur.fetchall()
-
         cur.close()
 
         # Step 3: Return results
+
+        # Show search results for debugging
+        print("Search Results:")
+        for row in results:
+            print(row[1] + " ==> " + str(row[5]))
+
         return [
-            {
-                'id': row[0],
-                'file_name': row[1],
-                'text': row[2],
-                'distance': row[3]
-            }
+            {'id': row[0], 'file_name': row[1],'object_name' : row[2],'page_number' : row[3], 'text': row[4], 'distance': row[5]}
             for row in results
         ]
 
@@ -2842,16 +2872,17 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
                 # Min-Max normalization: (value - min) / (max - min)
                 normalized_distance = (original_distance - min_dist) / dist_range
             
-            processed_results.append({
-                'page_embedding_id': row[0],
-                'file_name': row[1],
-                'object_name': row[2],
-                'page_number': row[3],
-                'distance': original_distance, # The original L2 distance
-                'normalized_distance': normalized_distance # The new [0,1] score
-            })
+            if normalized_distance < 0.5:
+                processed_results.append({
+                    'page_embedding_id': row[0],
+                    'file_name': row[1],
+                    'object_name': row[2],
+                    'page_number': row[3],
+                    'distance': original_distance,
+                    'normalized_distance': normalized_distance
+                })
         
-        print(processed_results)
+        print(f"processed_results : {processed_results}")
 
         # Now, filter based on the *new* normalized threshold
         final_normalized_threshold = 1.0
@@ -2878,13 +2909,21 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
 #  SEARCH BY ACTIVE USER FUNCTIONS (METHOD: searchDoc)
 # ==============================================================================
 
-def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5):
+def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Legacy Text Search: Finds text chunks in files where the user is an 'active_user'.
     """
     # Encode query
-    query_embedding = encode_text_for_embedding(query_text)
-    query_vector = f"[{', '.join(map(str, query_embedding))}]"
+
+    # Encoding using Qwen3-0.6b-embedding
+    query_embedding = encode_text_for_embedding(text=query_text)
+
+    # Encode using jinna Text-Image-Embedding
+    # if not LOCAL:
+    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    # else :
+    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+    query_vector = f"[{', '.join(map(str, query_embedding))}]"  
 
     conn = None
     try:
@@ -2894,23 +2933,31 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
 
         # JOIN uploaded_files and filter by active_users array using ANY()
         query = """
-            SELECT
-                t1.id,
-                t2.file_name,
+            SELECT 
+                t1.id AS page_embedding_id, 
+                t2.file_name, 
+                t2.object_name,
+                t1.page_number,
                 t1.extracted_text,
-                t1.embedding <=> %s AS distance
+                t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
             WHERE %s = ANY(t2.active_users)
+              AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
         """
-        cur.execute(query, (query_vector, user_id, top_k))
+        cur.execute(query, (query_vector, user_id, query_vector, threshold_text, top_k))
         results = cur.fetchall()
         cur.close()
 
+        # Show search results for debugging
+        print("Search Results:")
+        for row in results:
+            print(row[1] + " ==> " + str(row[5]))
+
         return [
-            {'id': row[0], 'file_name': row[1], 'text': row[2], 'distance': row[3]}
+            {'id': row[0], 'file_name': row[1],'object_name' : row[2],'page_number' : row[3], 'text': row[4], 'distance': row[5]}
             for row in results
         ]
     except Exception as e:
@@ -2972,14 +3019,17 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
             original_distance = row[4]
             normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            processed_results.append({
-                'page_embedding_id': row[0],
-                'file_name': row[1],
-                'object_name': row[2],
-                'page_number': row[3],
-                'distance': original_distance,
-                'normalized_distance': normalized_distance
-            })
+            if normalized_distance < 0.5:
+                processed_results.append({
+                    'page_embedding_id': row[0],
+                    'file_name': row[1],
+                    'object_name': row[2],
+                    'page_number': row[3],
+                    'distance': original_distance,
+                    'normalized_distance': normalized_distance
+                })
+
+        print(f"processed_results : {processed_results}")
         
         # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
         final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
@@ -2993,12 +3043,16 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
         if conn: conn.close()
 
 
-def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5):
+def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
     """
     # Encode query
     query_embedding = encode_text_for_embedding(query_text)
+    # if not LOCAL:
+    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    # else :
+    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
 
     conn = None
@@ -3009,23 +3063,31 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
 
         # JOIN uploaded_files and filter by active_users array using ANY()
         query = """
-            SELECT
-                t1.id,
-                t2.file_name,
+            SELECT 
+                t1.id AS page_embedding_id, 
+                t2.file_name, 
+                t2.object_name,
+                t1.page_number,
                 t1.extracted_text,
-                t1.embedding <=> %s AS distance
+                t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
-            WHERE %s = t2.chat_history_id
+            WHERE %s = ANY(t2.active_users)
+              AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
         """
-        cur.execute(query, (query_vector, -1, top_k))
+        cur.execute(query, (query_vector, -1, query_vector, threshold_text, top_k))
         results = cur.fetchall()
         cur.close()
 
+        # Show search results for debugging
+        print("Search Results:")
+        for row in results:
+            print(row[1] + " ==> " + str(row[5]))
+
         return [
-            {'id': row[0], 'file_name': row[1], 'text': row[2], 'distance': row[3]}
+            {'id': row[0], 'file_name': row[1],'object_name' : row[2],'page_number' : row[3], 'text': row[4], 'distance': row[5]}
             for row in results
         ]
     except Exception as e:
@@ -3087,14 +3149,17 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
             original_distance = row[4]
             normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            processed_results.append({
-                'page_embedding_id': row[0],
-                'file_name': row[1],
-                'object_name': row[2],
-                'page_number': row[3],
-                'distance': original_distance,
-                'normalized_distance': normalized_distance
-            })
+            if normalized_distance < 0.5:
+                processed_results.append({
+                    'page_embedding_id': row[0],
+                    'file_name': row[1],
+                    'object_name': row[2],
+                    'page_number': row[3],
+                    'distance': original_distance,
+                    'normalized_distance': normalized_distance
+                })
+
+        print(f"processed_results : {processed_results}")
         
         # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
         final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
@@ -3401,6 +3466,9 @@ def process_pages_with_vlm(search_results: List[Dict[str, Any]], original_query:
 #         <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
 #         ```
 
+# ### Relevance Filter
+# If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
+
 # -----
 
 # ### *** Note ***
@@ -3489,6 +3557,9 @@ Use these tags to enclose literal descriptions of non-text elements:
 *   `<chart>`: Type, axes, legend, and data points.
 *   `<image>`, `<logo>`, `<signature>`, `<stamp>`: Literal visual description.
 
+### Relevance Filter
+If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
+
 ### Gold-Standard Output Example
 **Output must match this level of detail:**
 
@@ -3543,6 +3614,9 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 *   `<table>`: Markdown tables.
 *   `<chart>`: Type, axes, legend, and data points.
 *   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+
+### Relevance Filter
+If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
 """) #**********************************************
     
 #     system_prompt = (
@@ -3553,6 +3627,9 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 # 1. **Text:** Transcribe exactly as written, preserving Markdown formatting (Headers, Lists, Code).
 # 2. **Visuals:** Describe structure literally within tags: `<table>`, `<chart>`, `<image>`.
 # 3. **Diagrams (CRITICAL):** Inside `<diagram>`, you must trace every connection pin-by-pin (e.g., "Pin A connects to Resistor R1..."). Describe the wiring details, not the concept.
+
+# ### Relevance Filter
+# If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
 # """)
     
     reference_text = "\n".join(page_references)
@@ -3564,6 +3641,9 @@ Based on the following {len(image_bytes_list)} document pages:
 Please extract data to markdown (keep all original data ignore not match content) for use to answer the question:
 "{original_query}"
 *** Do not answer the question. ***
+
+### Relevance Filter
+If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
 
 Provide your response in Markdown format, following the tagging guidelines provided in the system prompt.
 """
@@ -3579,7 +3659,7 @@ Provide your response in Markdown format, following the tagging guidelines provi
             prompt=prompt,
             system_prompt=system_prompt,
             image_bytes_list=image_bytes_list,
-            model_name= 'Qwen/Qwen2.5-VL-32B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            model_name= 'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
         )
         print("DeepInfra VLM response received.")
         print(vlm_response)

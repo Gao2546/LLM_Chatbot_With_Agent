@@ -474,10 +474,51 @@ window.addEventListener('beforeunload', async (event) => {
 // });
 
 
+// Function to Initialize Theme
+function initTheme() {
+    const themeBtn = document.getElementById('themeToggleBtn');
+    if (!themeBtn) return;
+
+    // 1. Check localStorage or default to 'dark'
+    const storedTheme = localStorage.getItem('theme') || 'dark';
+    
+    // 2. Apply the theme
+    applyTheme(storedTheme);
+
+    // 3. Add Click Event Listener
+    themeBtn.addEventListener('click', () => {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        
+        applyTheme(newTheme);
+        
+        // 4. Save to localStorage
+        localStorage.setItem('theme', newTheme);
+    });
+}
+
+// Helper to Apply Theme and Update Icon
+function applyTheme(theme) {
+    // Set attribute on <html> element
+    document.documentElement.setAttribute('data-theme', theme);
+    
+    // Update Button Text/Icon
+    const themeBtn = document.getElementById('themeToggleBtn');
+    if (themeBtn) {
+        if (theme === 'light') {
+            themeBtn.innerHTML = '<i class="fas fa-sun"></i> <span>Light Mode</span>';
+        } else {
+            themeBtn.innerHTML = '<i class="fas fa-moon"></i> <span>Dark Mode</span>';
+        }
+    }
+}
+
+
 // Fetch chat history when the page loads
 document.addEventListener('DOMContentLoaded', async (event) => {
     // socket.emit('pong');
     console.log('reload-page')
+    initTheme(); // Initialize theme on page load
     // Add this check: Collapse sidebar on load if screen is small
     if (window.innerWidth < 868) {
         const chatList = document.getElementById('chatList');
@@ -1289,6 +1330,7 @@ function displayMessage(text, className) {
         const editButton = document.createElement('button');
         editButton.innerHTML = '<i class="fas fa-edit"></i>';
         editButton.className = 'edit-button';
+        editButton.classList.add('action-button');
         editButton.title = 'Edit message';
         editButton.style.display = 'none'; // Hidden by default
         
@@ -1463,6 +1505,7 @@ function displayMarkdownMessage(text, className) {
         const copyButton = document.createElement('button');
         copyButton.innerHTML = '<i class="fas fa-copy"></i>';
         copyButton.className = 'copy-button';
+        copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
         copyButton.style.display = 'none'; // Hidden by default
         
@@ -1517,6 +1560,7 @@ function displayMarkdownMessage(text, className) {
         const editButton = document.createElement('button');
         editButton.innerHTML = '<i class="fas fa-edit"></i>';
         editButton.className = 'edit-button';
+        editButton.classList.add('action-button');
         editButton.title = 'Edit message';
         editButton.style.display = 'none'; // Hidden by default
         
@@ -1538,6 +1582,7 @@ function displayMarkdownMessage(text, className) {
         const copyButton = document.createElement('button');
         copyButton.innerHTML = '<i class="fas fa-copy"></i>';
         copyButton.className = 'copy-button';
+        copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
         copyButton.style.display = 'none'; // Hidden by default
         
@@ -1602,6 +1647,7 @@ function displayMarkdownMessageStream(text, messageElement) {
         const copyButton = document.createElement('button');
         copyButton.innerHTML = '<i class="fas fa-copy"></i>';
         copyButton.className = 'copy-button';
+        copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
         copyButton.style.display = 'none'; // Hidden by default
         

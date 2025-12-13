@@ -69,6 +69,7 @@ from utils.util import (
     search_similar_pages_by_active_user,
     search_similar_documents_by_active_user_all,
     search_similar_pages_by_active_user_all,
+    DeepInfraInference,
 )
 
 from utils.util import LOCAL
@@ -1061,7 +1062,8 @@ def search_similar_api_unified():
         
         top_k_text = int(data.get('top_k_text', 5))
         top_k_pages = int(data.get('top_k_pages', 5))
-        threshold = float(data.get('threshold', 1.0))
+        threshold_page = float(data.get('threshold_page', 0.5))
+        threshold_text = float(data.get('threshold_text', 0.5))
         run_vlm_summary = bool(data.get('run_vlm_summary', True))
         document_search_method = data.get('documentSearchMethod', 'none') # Note: Check camelCase vs snake_case keys from frontend
         
@@ -1076,6 +1078,30 @@ def search_similar_api_unified():
     legacy_results = []
     page_search_results = []
 
+    create_search_prompt = f"""
+Act as a document search engine. 
+Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
+Include likely keywords and factual phrasing.
+
+User Query: {queryT}
+
+Output only the simulated excerpt.
+"""
+    if not LOCAL:
+            search_text = DeepInfraInference(
+                prompt=create_search_prompt,
+                # system_prompt=system_prompt,
+                # image_bytes_list=image_bytes_list,
+                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+
+    else :
+        search_text = ollama_generate_text(
+            prompt=create_search_prompt,
+            model="gemma3:4b"
+        )
+    print(f"Search prompt: {search_text}")
+
     # =========================================================
     # METHOD 1: searchDoc (Search by active_users permission)
     # =========================================================
@@ -1084,9 +1110,10 @@ def search_similar_api_unified():
         
         # 1. Legacy Text Search
         legacy_results = search_similar_documents_by_active_user(
-            query_text=queryT,
+            query_text=search_text,
             user_id=user_id,
-            top_k=top_k_text
+            top_k=top_k_text,
+            threshold_text=threshold_text
         )
 
         # 2. New Page Image Search
@@ -1094,7 +1121,7 @@ def search_similar_api_unified():
             query_text=queryT,
             user_id=user_id,
             top_k=top_k_pages,
-            threshold=threshold
+            threshold=threshold_page
         )
 
     elif document_search_method == 'searchdocAll':
@@ -1102,9 +1129,10 @@ def search_similar_api_unified():
         
         # 1. Legacy Text Search
         legacy_results = search_similar_documents_by_active_user_all(
-            query_text=queryT,
+            query_text=search_text,
             user_id=user_id,
-            top_k=top_k_text
+            top_k=top_k_text,
+            threshold_text=threshold_text,
         )
 
         # 2. New Page Image Search
@@ -1112,7 +1140,7 @@ def search_similar_api_unified():
             query_text=queryT,
             user_id=user_id,
             top_k=top_k_pages,
-            threshold=threshold
+            threshold=threshold_page,
         )
 
     # =========================================================
@@ -1133,10 +1161,11 @@ def search_similar_api_unified():
 
         if has_legacy:
             legacy_results = search_similar_documents_by_chat(
-                query_text=queryT, 
+                query_text=search_text, 
                 user_id=user_id, 
                 chat_history_id=chat_history_id, 
-                top_k=top_k_text
+                top_k=top_k_text,
+                threshold_text=threshold_text
             )
 
         if has_pages:
@@ -1145,7 +1174,7 @@ def search_similar_api_unified():
                 user_id=user_id, 
                 chat_history_id=chat_history_id, 
                 top_k=top_k_pages, 
-                threshold=threshold
+                threshold=threshold_page
             )
     
     # =========================================================

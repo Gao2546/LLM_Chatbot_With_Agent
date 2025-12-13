@@ -143,7 +143,8 @@ router.get('/register', (req, res) => {
 router.get('/logout', async (req, res) => {
   const userId = req.session.user?.id;
   if (!userId){
-    res.status(400).json({ error: 'No session please login' });
+    res.redirect('/')
+    // res.status(400).json({ error: 'No session please login' });
   }
   else{
     await setCurrentChatId(userId, null);
