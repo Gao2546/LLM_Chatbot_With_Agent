@@ -47,3 +47,16 @@ ai_agent_core/build/auth.js
 ai_agent_core/build/db.js
 ai_agent_core/build/index.js
 api_local_server/build/index.js
+
+ai_agent_core/public/test-api.html
+api_server/check_schema.py
+backup_temp/
+download_minio.bat
+minio-data/
+minio-server/
+package-lock.json
+setup_local.bat
+sum_doc/
+
+final2.md
+package-lock.json

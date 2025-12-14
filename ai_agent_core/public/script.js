@@ -1368,7 +1368,9 @@ function displayMessage(text, className) {
         communityBtn.className = 'action-button community-button';
         communityBtn.title = 'View community';
         communityBtn.style.display = 'none';
-        communityBtn.onclick = () => goToCommunity(text);
+        // communityBtn.href = '/community';
+        // communityBtn.onclick = () => goToCommunity(text);
+        communityBtn.onclick = () => window.open('/communities');
         
         buttonsDiv.appendChild(verifyBtn);
         buttonsDiv.appendChild(communityBtn);
@@ -1523,7 +1525,10 @@ function displayMarkdownMessage(text, className) {
         communityBtn.className = 'action-button community-button';
         communityBtn.title = 'View community';
         communityBtn.style.display = 'none';
-        communityBtn.onclick = () => goToCommunity(messageElement.dataset.fullText || text);
+        // communityBtn.href = '/community';
+        // communityBtn.onclick = () => goToCommunity(messageElement.dataset.fullText || text);
+        // communityBtn.onclick = () => fetch('/community');
+        communityBtn.onclick = () => window.open('/communities');
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
@@ -1675,10 +1680,13 @@ function displayMarkdownMessageStream(text, messageElement) {
         communityBtn.className = 'action-button community-button';
         communityBtn.title = 'View community';
         communityBtn.style.display = 'none';
-        communityBtn.onclick = function() { 
-            const answer = messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
-            goToCommunity(answer); 
-        };
+        // communityBtn.href = '/community';
+        // communityBtn.onclick = function() { 
+        //     const answer = messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
+        //     goToCommunity(answer); 
+        // };
+        // communityBtn.onclick = () => fetch('/community');
+        communityBtn.onclick = () => window.open('/communities');
         
         // Add buttons directly to messageElement
         messageElement.appendChild(copyButton);
