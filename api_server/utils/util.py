@@ -2756,12 +2756,13 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
                 t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
-            WHERE %s = ANY(t2.active_users)
-              AND (t1.embedding <-> %s) <= %s
+            WHERE t2.user_id = %s
+                AND t2.chat_history_id = %s
+                AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
         """
-        cur.execute(query, (query_vector, user_id, query_vector, threshold_text, top_k))
+        cur.execute(query, (query_vector, user_id, chat_history_id, query_vector, threshold_text, top_k))
         results = cur.fetchall()
         cur.close()
 
