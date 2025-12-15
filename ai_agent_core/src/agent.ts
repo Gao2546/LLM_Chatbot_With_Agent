@@ -645,8 +645,8 @@ router.post('/message', async (req : Request, res : Response) => {
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
-          threshold_page: 1.1,
-          threshold_text: 0.8,
+          threshold_page: 1.5,
+          threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
@@ -1002,8 +1002,8 @@ router.post('/message', async (req : Request, res : Response) => {
             //     // ]
             //   },
             // ],
-            // stream: modeToUse == "ask" ? true : false,
-            stream: false,
+            stream: modeToUse == "ask" ? true : false,
+            // stream: false,
             "reasoning": {
 
               // One of the following (not both):
@@ -1032,8 +1032,8 @@ router.post('/message', async (req : Request, res : Response) => {
 
       let result = "";
       
-      // if (modeToUse == "code"){
-      if (modeToUse == "code" || modeToUse == "ask"){
+      if (modeToUse == "code"){
+      // if (modeToUse == "code" || modeToUse == "ask"){
         const openRouterData = await openRouterFetchResponse.json() as OpenRouterChatResponse;
         if (openRouterData.choices && openRouterData.choices[0]?.message?.content) {
           result = openRouterData.choices[0].message.content;
@@ -1400,8 +1400,8 @@ router.post('/edit-message', async (req, res) => {
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
-          threshold_page: 0.3,
-          threshold_text: 0.3,
+          threshold_page: 1.5,
+          threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,

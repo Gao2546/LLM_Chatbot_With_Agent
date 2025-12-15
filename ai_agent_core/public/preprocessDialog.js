@@ -728,6 +728,18 @@ async function showPreprocessDialog() {
 
         // 5. Send Request
         try {
+            // Reset UI
+            fileInput.value = '';
+            fileNameInput.value = '';
+            outputInput.value = '';
+            textArea.value = '';
+            textArea.disabled = false;
+            
+            processBtn.textContent = 'Process Document';
+            processBtn.style.opacity = '1';
+            processBtn.disabled = false;
+            dropdown.disabled = false;
+            
             const res = await fetch("/api/processDocument", {
                 method: "POST",
                 body: formData
