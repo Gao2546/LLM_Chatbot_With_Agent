@@ -2609,9 +2609,9 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
     # --- FALLBACK: Original SentenceTransformer logic ---
     print("Generating embedding using local SentenceTransformer model.")
     # model.to(device)
-    embedding = model.encode(text,device=device,task='retrieval')
+    embedding = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
     # model.to("cpu")
-    return embedding.tolist()
+    return embedding
 
 def clean_text(input_text: str) -> str:
     """
