@@ -1601,6 +1601,45 @@ class GemmaEmbeddings(Embeddings):
         return self._embed([text])[0].tolist()
 
 
+# === VERIFIED ANSWERS ENDPOINT ===
+@app.route('/encode_embedding', methods=['POST'])
+def encode_embedding():
+    """สร้าง embedding จากข้อความ
+    
+    Request body:
+    {
+        "text": "ข้อความที่ต้องการ embedding",
+        "dimensions": 1024  # optional (default: 1024 สำหรับ verified_answers)
+    }
+    """
+    try:
+        data = request.json
+        text = data.get('text', '')
+        dimensions = data.get('dimensions', 1024)  # Default: 1024
+        
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        # ใช้ encode_text_for_embedding จาก utils
+        # มันจะ auto-select model ตามจำนวน dimensions
+        embedding = encode_text_for_embedding(text, target_dimensions=dimensions)
+        
+        # ตรวจสอบ dimensions ที่ได้กลับมา
+        actual_dimensions = len(embedding)
+        
+        return jsonify({
+            'success': True,
+            'embedding': embedding,
+            'dimensions': actual_dimensions,
+            'requested_dimensions': dimensions
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 if __name__ == '__main__':
     # path_keys = os.popen("find ../ -name '.key'").read().split("\n")[0]
     # with open(path_keys, "r") as f:
@@ -1663,4 +1702,4 @@ if __name__ == '__main__':
     #             n_class=n_class
 
     #         )
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)

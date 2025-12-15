@@ -2545,6 +2545,8 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
       
       // Determine if this is pending (request type with no positive rating)
       const verificationTypes = row.verification_types || [];
+      const ratingCount = parseInt(row.rating_count) || 0;
+      const requiredReviewers = (row.requested_departments_list || []).length > 0 ? 2 : 1;
       const isPending = verificationTypes.includes('request') && score <= 0;
       const isVerified = (parseInt(row.rating_count) || 0) > 0 && score > 0;
       
@@ -2787,7 +2789,7 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     
     // Fetch comments from comments table
     const commentsResult = await pool.query(
-      `SELECT id, question_id, user_id, username, text, department, attachments, created_at as "createdAt", 'comment' as source
+      `SELECT id, question_id, user_id, username, comment_text as text, department, attachments, created_at as "createdAt", 'comment' as source
        FROM comments 
        WHERE question_id = $1
        ORDER BY created_at DESC`,
@@ -2836,14 +2838,20 @@ router.post('/add-comment', async (req: Request, res: Response) => {
     
     if (!questionId || !text) {
       console.error('Missing required fields:', { questionId, text });
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
+      return res.status(400).json({ success: false, error: 'Missing required fields: questionId and text are required' });
+    }
+
+    // Validate attachments format
+    if (!Array.isArray(attachments)) {
+      console.error('Invalid attachments format:', typeof attachments);
+      return res.status(400).json({ success: false, error: 'Attachments must be an array' });
     }
 
     // Save comment to database with department and attachments
     const result = await pool.query(
-      `INSERT INTO comments (question_id, user_id, username, text, department, attachments, created_at)
+      `INSERT INTO comments (question_id, user_id, username, comment_text, department, attachments, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       RETURNING id, question_id, user_id, username, text, department, attachments, created_at as "createdAt", 'comment' as source`,
+       RETURNING id, question_id, user_id, username, comment_text as text, department, attachments, created_at as "createdAt", 'comment' as source`,
       [questionId, userId || null, username || 'Anonymous', text, department || null, JSON.stringify(attachments)]
     );
 
@@ -2851,7 +2859,8 @@ router.post('/add-comment', async (req: Request, res: Response) => {
     res.json({ success: true, comment: result.rows[0] });
   } catch (error) {
     console.error('Error adding comment:', error);
-    res.status(500).json({ success: false, error: String(error) });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ success: false, error: `Failed to save comment: ${errorMessage}` });
   }
 });
 
