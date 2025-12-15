@@ -48,9 +48,9 @@ from minio.error import S3Error
 from typing import List, Optional, Dict, Any, Union
 
 
-from vllm import LLM, SamplingParams
-from vllm.config import PoolerConfig
-from vllm.inputs.data import TextPrompt
+# from vllm import LLM, SamplingParams
+# from vllm.config import PoolerConfig
+# from vllm.inputs.data import TextPrompt
 
 dotenv.load_dotenv()
 
