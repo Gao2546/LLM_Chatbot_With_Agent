@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     tags TEXT[],
     department VARCHAR(255),
     verification_type VARCHAR(50) DEFAULT 'staging',
-    question_embedding VECTOR(384),
+    question_embedding VECTOR(1024),
+    answer_embedding VECTOR(1024),
     avg_rating FLOAT DEFAULT 0,
     verified_count INT DEFAULT 0,
     rating_count INT DEFAULT 0,
@@ -188,6 +189,9 @@ CREATE TABLE IF NOT EXISTS verified_answers (
 const createVerifiedAnswersIndexQuery = `
 CREATE INDEX IF NOT EXISTS idx_verified_answers_embedding 
 ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_answer_embedding 
+ON verified_answers USING ivfflat (answer_embedding vector_cosine_ops);
 `;
 
 const createAnswerVerificationsTableQuery = `
@@ -1027,6 +1031,7 @@ async function saveVerifiedAnswer(
   question: string,
   answer: string,
   questionEmbedding: number[],
+  answerEmbedding?: number[],
   userId?: number,
   rating?: number,
   commenterName?: string,
@@ -1060,16 +1065,20 @@ async function saveVerifiedAnswer(
       }
     } else {
       // Answer doesn't exist - create new one
-      // Format embedding as PostgreSQL vector string (allow NULL if no embedding)
-      let embeddingStr = null;
+      // Format embeddings as PostgreSQL vector string (allow NULL if no embedding)
+      let questionEmbeddingStr = null;
       if (questionEmbedding && questionEmbedding.length > 0) {
-        embeddingStr = `[${questionEmbedding.join(',')}]`;
+        questionEmbeddingStr = `[${questionEmbedding.join(',')}]`;
+      }
+      let answerEmbeddingStr = null;
+      if (answerEmbedding && answerEmbedding.length > 0) {
+        answerEmbeddingStr = `[${answerEmbedding.join(',')}]`;
       }
       const result = await pool.query(
-        `INSERT INTO verified_answers (question, answer, question_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments)
-         VALUES ($1, $2, $3, $4, 0, 0, $5, $6)
+        `INSERT INTO verified_answers (question, answer, question_embedding, answer_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments)
+         VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7)
          RETURNING id`,
-        [question, answer, embeddingStr, 0, verificationType || 'self', requestedDepartments || []]
+        [question, answer, questionEmbeddingStr, answerEmbeddingStr, 0, verificationType || 'self', requestedDepartments || []]
       );
       answerId = result.rows[0].id;
     }
