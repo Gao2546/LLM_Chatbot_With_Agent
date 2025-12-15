@@ -1009,7 +1009,8 @@ def process_document_api():
     return jsonify({
         "status": "success", 
         "message": f"Successfully processed {len(processed_files)} items.",
-        "details": processed_files
+        "details": processed_files,
+        "FileID": uploaded_file_id,
     })
 
 

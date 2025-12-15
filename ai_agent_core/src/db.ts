@@ -61,25 +61,26 @@ CREATE TABLE IF NOT EXISTS chat_history (
 // UPDATED: Replaced file_data BYTEA with object_name TEXT
 const createUploadedFilesTableQuery = `
 CREATE TABLE IF NOT EXISTS uploaded_files (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    chat_history_id INTEGER NOT NULL,
-    file_name TEXT NOT NULL,
-    object_name TEXT UNIQUE NOT NULL, -- Stores the unique key in MinIO
-    mime_type VARCHAR(255),
-    file_size_bytes BIGINT,
-    active_users INTEGER[] DEFAULT ARRAY[]::INTEGER[], -- <<< NEW COLUMN FOR ACTIVE USERS
-    uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  chat_history_id INTEGER NOT NULL,
+  file_name TEXT NOT NULL,
+  object_name TEXT UNIQUE NOT NULL, -- Stores the unique key in MinIO
+  mime_type VARCHAR(255),
+  file_size_bytes BIGINT,
+  active_users INTEGER[] DEFAULT ARRAY[]::INTEGER[], -- <<< NEW COLUMN FOR ACTIVE USERS
+  file_process_status TEXT DEFAULT 'process',
+  uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_file_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
+  CONSTRAINT fk_file_user
+    FOREIGN KEY (user_id)
+    REFERENCES users(id)
+    ON DELETE CASCADE,
 
-    CONSTRAINT fk_file_chat
-        FOREIGN KEY (chat_history_id)
-        REFERENCES chat_history(id)
-        ON DELETE CASCADE
+  CONSTRAINT fk_file_chat
+    FOREIGN KEY (chat_history_id)
+    REFERENCES chat_history(id)
+    ON DELETE CASCADE
 );
 `;
 
@@ -1238,7 +1239,7 @@ async function deleteAllGuestUsersAndChats() {
 
 async function getFilesByChatId(chatId: number) {
   const query = `
-    SELECT id, file_name, object_name, mime_type, file_size_bytes, active_users, uploaded_at 
+    SELECT id, file_name, object_name, mime_type, file_size_bytes, active_users, file_process_status, uploaded_at 
     FROM uploaded_files 
     WHERE chat_history_id = $1 
     ORDER BY uploaded_at DESC
@@ -1426,6 +1427,28 @@ async function deleteQuestionAttachment(attachmentId: number): Promise<void> {
   }
 }
 
+/**
+ * Updates the file_process_status for a specific uploaded file.
+ * @param fileId The ID of the file
+ * @param status The new status string (e.g., 'process', 'done', 'error')
+ * @returns The updated file record (id and file_process_status)
+ */
+async function setFileProcessStatus(fileId: number, status: string) {
+  const query = `
+    UPDATE uploaded_files
+    SET file_process_status = $1
+    WHERE id = $2
+    RETURNING id, file_process_status;
+  `;
+  try {
+    const result = await pool.query(query, [status, fileId]);
+    return result.rows[0];
+  } catch (error) {
+    console.error(`Error setting file_process_status for file ${fileId}:`, error);
+    throw error;
+  }
+}
+
 // These startup cleanup functions can be run if needed.
 export {
   // User Functions
@@ -1464,6 +1487,7 @@ export {
   removeActiveUserFromFile,
   getDocSearchStatus,
   setDocSearchStatus,
+  setFileProcessStatus,
 
   // Verified Answers Functions (จากเดิม verifiedAnswers.ts)
   saveVerifiedAnswer,

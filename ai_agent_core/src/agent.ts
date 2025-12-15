@@ -47,6 +47,7 @@ import pool, {
     removeActiveUserFromFile,  // <-- Import this
     getDocSearchStatus,
     setDocSearchStatus,
+    setFileProcessStatus,
 } from './db.js';
 import { callToolFunction, GetSocketIO } from "./api.js"
 
@@ -65,6 +66,7 @@ const ai = new GoogleGenAI({apiKey:process.env.Google_API_KEY});
 
 import fs = require('fs');
 import { get } from 'http';
+import { json } from 'stream/consumers';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -480,8 +482,11 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
           maxContentLength: Infinity,
           maxBodyLength: Infinity
       });
-
-      // 4. Return Python response to Client
+      // Check if the Python server returned a "success" status and update file process status
+      if (flaskRes.data && flaskRes.data.status === "success") {
+        await setFileProcessStatus(flaskRes.data.FileID, "finish");
+      }
+      // 5. Return Python response to Client
       res.json(flaskRes.data);
 
   } catch (err: any) {

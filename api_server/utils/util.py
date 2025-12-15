@@ -1576,7 +1576,7 @@ def get_image_embedding_jinna_api(
 
     create_search_prompt = f"""
 Act as a document search engine (PDF document search by vector similarity). 
-Write a single, concise sentence in english that simulates a direct excerpt from a document page answering the query below. 
+Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
 Include likely keywords and factual phrasing.
 
 User Query: {text}
@@ -3641,6 +3641,8 @@ Based on the following {len(image_bytes_list)} document pages:
 Please extract data to markdown (keep all original data ignore not match content) for use to answer the question:
 "{original_query}"
 *** Do not answer the question. ***
+*** Extract all content from the document. ***
+*** If the provided content does not contain the answer, do not Extract that content. ***
 
 ### Relevance Filter
 If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
