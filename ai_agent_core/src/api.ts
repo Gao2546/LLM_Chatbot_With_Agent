@@ -956,6 +956,7 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
         toolParameters.question,
         toolParameters.answer,
         toolParameters.question_embedding,
+        toolParameters.answer_embedding,
         toolParameters.user_id,
         toolParameters.rating,
         toolParameters.commenter_name
@@ -991,12 +992,13 @@ async function SaveVerifiedAnswer(
   question: string,
   answer: string,
   questionEmbedding: number[],
+  answerEmbedding?: number[],
   userId?: number,
   rating: number = 1,
   commenterName: string = 'Anonymous'
 ) {
   try {
-    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, userId, rating, commenterName);
+    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, rating, commenterName);
     await updateAnswerRating(result.answerId);
     return { success: true, answerId: result.answerId };
   } catch (error) {

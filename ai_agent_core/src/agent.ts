@@ -155,23 +155,48 @@ export default async function agentRouters(ios: SocketIOServer) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
-      // สร้าง embedding จาก Python API server (สำหรับ verified_answers ต้อง 384 dimensions)
-      const embeddingRes = await axios.post(
-        `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
-        { 
-          text: question,
-          dimensions: 384  // ← ต้องเป็น 384 dimensions สำหรับ verified_answers table
-        }
-      );
-      const embedding = embeddingRes.data.embedding;
+      // สร้าง embedding สำหรับ question และ answer จาก Python API server (ต้อง 1024 dimensions)
+      let questionEmbedding: number[] = [];
+      let answerEmbedding: number[] = [];
 
-      // ตรวจสอบ dimensions
-      if (embedding.length !== 384) {
-        throw new Error(`Invalid embedding dimensions: expected 384, got ${embedding.length}`);
+      try {
+        const questionEmbeddingRes = await axios.post(
+          `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
+          { 
+            text: question,
+            dimensions: 1024
+          }
+        );
+        questionEmbedding = questionEmbeddingRes.data.embedding;
+
+        // ตรวจสอบ dimensions สำหรับ question
+        if (questionEmbedding.length !== 1024) {
+          throw new Error(`Invalid question embedding dimensions: expected 1024, got ${questionEmbedding.length}`);
+        }
+      } catch (e) {
+        console.warn('Could not get question embedding:', e);
       }
 
-      // บันทึกคะแนน
-      const result = await saveVerifiedAnswer(question, answer, embedding, undefined, rating, userName);
+      try {
+        const answerEmbeddingRes = await axios.post(
+          `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
+          { 
+            text: answer,
+            dimensions: 1024
+          }
+        );
+        answerEmbedding = answerEmbeddingRes.data.embedding;
+
+        // ตรวจสอบ dimensions สำหรับ answer
+        if (answerEmbedding.length !== 1024) {
+          throw new Error(`Invalid answer embedding dimensions: expected 1024, got ${answerEmbedding.length}`);
+        }
+      } catch (e) {
+        console.warn('Could not get answer embedding:', e);
+      }
+
+      // บันทึกคะแนน พร้อมทั้ง question และ answer embeddings
+      const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, undefined, rating, userName);
       await updateAnswerRating(result.answerId);
 
       res.json({ success: true, answerId: result.answerId });
@@ -190,7 +215,7 @@ export default async function agentRouters(ios: SocketIOServer) {
         return res.status(400).json({ error: 'Question required' });
       }
 
-      // สร้าง embedding (สำหรับ verified_answers ต้อง 384 dimensions)
+      // สร้าง embedding (สำหรับ verified_answers ต้อง 1024 dimensions)
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       console.log(`Calling embedding API at ${API_SERVER_URL}/encode_embedding...`);
       
@@ -200,7 +225,7 @@ export default async function agentRouters(ios: SocketIOServer) {
           `${API_SERVER_URL}/encode_embedding`,
           { 
             text: question,
-            dimensions: 384  // ← ต้องเป็น 384 dimensions
+            dimensions: 1024  // ← ต้องเป็น 1024 dimensions
           },
           { timeout: 30000 } // 30 second timeout
         );
@@ -224,8 +249,8 @@ export default async function agentRouters(ios: SocketIOServer) {
       }
 
       // ตรวจสอบ dimensions
-      if (embedding.length !== 384) {
-        console.warn(`Warning: Expected 384 dimensions, got ${embedding.length}. Proceeding anyway...`);
+      if (embedding.length !== 1024) {
+        console.warn(`Warning: Expected 1024 dimensions, got ${embedding.length}. Proceeding anyway...`);
       }
 
       // ค้นหา
@@ -2212,30 +2237,43 @@ router.post('/rate-answer', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    // Get embedding from Python API
+    // Get embeddings from Python API
     let questionEmbedding: number[] = [];
+    let answerEmbedding: number[] = [];
     try {
       const apiUrl = process.env.API_SERVER_URL;
       if (apiUrl) {
-        const embedRes = await fetch(`${apiUrl}/encode_embedding`, {
+        // Get question embedding
+        const questionEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: question, dimensions: 384 })
+          body: JSON.stringify({ text: question, dimensions: 1024 })
         });
-        if (embedRes.ok) {
-          const embedData: any = await embedRes.json();
+        if (questionEmbedRes.ok) {
+          const embedData: any = await questionEmbedRes.json();
           questionEmbedding = embedData.embedding || [];
+        }
+
+        // Get answer embedding
+        const answerEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: answer, dimensions: 1024 })
+        });
+        if (answerEmbedRes.ok) {
+          const embedData: any = await answerEmbedRes.json();
+          answerEmbedding = embedData.embedding || [];
         }
       }
     } catch (e) {
-      console.warn('Could not get embedding for question:', e);
-      // Continue without embedding
+      console.warn('Could not get embeddings:', e);
+      // Continue without embeddings
     }
 
     // Save to database using verifiedAnswers function
     let result;
     try {
-      result = await saveVerifiedAnswer(question, answer, questionEmbedding, userId, rating, userName);
+      result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, rating, userName);
     } catch (dbError) {
       console.error('Database error in saveVerifiedAnswer:', dbError);
       return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
@@ -2321,24 +2359,37 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       return res.status(400).json({ success: false, error: 'Invalid rating value. Must be -1, 0, or 1' });
     }
 
-    // Get embedding from Python API
+    // Get embeddings from Python API
     let questionEmbedding: number[] = [];
+    let answerEmbedding: number[] = [];
     try {
       const apiUrl = process.env.API_SERVER_URL;
       if (apiUrl) {
-        const embedRes = await fetch(`${apiUrl}/encode_embedding`, {
+        // Get question embedding
+        const questionEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: question })
+          body: JSON.stringify({ text: question, dimensions: 1024 })
         });
-        if (embedRes.ok) {
-          const embedData: any = await embedRes.json();
+        if (questionEmbedRes.ok) {
+          const embedData: any = await questionEmbedRes.json();
           questionEmbedding = embedData.embedding || [];
+        }
+
+        // Get answer embedding
+        const answerEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: answer, dimensions: 1024 })
+        });
+        if (answerEmbedRes.ok) {
+          const embedData: any = await answerEmbedRes.json();
+          answerEmbedding = embedData.embedding || [];
         }
       }
     } catch (e) {
-      console.warn('Could not get embedding for question:', e);
-      // Continue without embedding
+      console.warn('Could not get embeddings:', e);
+      // Continue without embeddings
     }
 
     // Save verified answer to database
@@ -2347,7 +2398,8 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       result = await saveVerifiedAnswer(
         question, 
         answer, 
-        questionEmbedding, 
+        questionEmbedding,
+        answerEmbedding,
         userId, 
         validatedRating, 
         userName || 'Anonymous', 
