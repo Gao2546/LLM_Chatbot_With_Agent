@@ -15,7 +15,7 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
 import torch
-from colpali_engine.models import ColIdefics3, ColIdefics3Processor
+# from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 
 # New imports for Docling and concurrent processing
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
@@ -99,7 +99,7 @@ if LOCAL:
         bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
         bnb_4bit_use_double_quant=True  # Saves a bit more memory
     )
-    
+
     # 2. Load the model with the config
     model = SentenceTransformer(
         "jinaai/jina-embeddings-v4",
@@ -111,9 +111,9 @@ if LOCAL:
         },
     )
     clear_gpu()
-    
+
     print(model)
-    
+
     uses_mem = get_model_memory(model)
 
 # Now move to GPU
