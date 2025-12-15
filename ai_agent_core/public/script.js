@@ -1968,6 +1968,7 @@ function populateModels(returnDefault = false) {
         { id: '{_Ollama_API_}gpt-oss:20b', name: 'OLgpt-oss:20b'},
         // { id: '{_Ollama_API_}gemma3:12b', name: 'gemma3:12b' },
         // { id: '{_Ollama_API_}gemma3:27b', name: 'gemma3:27b' },
+        { id: '{_Ollama_API_}qwen3:4b', name: 'OLqwen3:4b'},
         { id: '{_Google_API_}gemma-3-1b-it', name: 'GGgemma-3-1b-it'},
         { id: '{_Google_API_}gemma-3-4b-it', name: 'GGemma-3-4b-it'},
         { id: '{_Google_API_}gemma-3-12b-it', name: 'GGgemma-3-12b-it'},

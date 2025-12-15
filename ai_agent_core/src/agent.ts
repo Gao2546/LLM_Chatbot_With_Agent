@@ -977,8 +977,8 @@ router.post('/message', async (req : Request, res : Response) => {
             //     // ]
             //   },
             // ],
-            // stream: modeToUse == "ask" ? true : false,
-            stream: false,
+            stream: modeToUse == "ask" ? true : false,
+            // stream: false,
             "reasoning": {
 
               // One of the following (not both):
@@ -1007,8 +1007,8 @@ router.post('/message', async (req : Request, res : Response) => {
 
       let result = "";
       
-      // if (modeToUse == "code"){
-      if (modeToUse == "code" || modeToUse == "ask"){
+      if (modeToUse == "code"){
+      // if (modeToUse == "code" || modeToUse == "ask"){
         const openRouterData = await openRouterFetchResponse.json() as OpenRouterChatResponse;
         if (openRouterData.choices && openRouterData.choices[0]?.message?.content) {
           result = openRouterData.choices[0].message.content;
