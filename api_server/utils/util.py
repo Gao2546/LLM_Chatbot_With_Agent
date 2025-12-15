@@ -85,37 +85,36 @@ def clear_gpu():
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # This model remains for text embedding (Legacy Mode), unchanged.
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
+# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
 # model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
 # model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
 
 # Quantization model
 
-# 1. Define the 4-bit configuration
-# bnb_config = BitsAndBytesConfig(
-#     load_in_4bit=True,
-#     bnb_4bit_quant_type="nf4",      # Normalized Float 4 (best for accuracy)
-#     bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
-#     bnb_4bit_use_double_quant=True  # Saves a bit more memory
-# )
-
-# # 2. Load the model with the config
-# model = SentenceTransformer(
-#     "jinaai/jina-embeddings-v4",
-#     trust_remote_code=True,
-#     model_kwargs={
-#         "default_task": "retrieval",
-#         "quantization_config": bnb_config,
-#         "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
-#     },
-#     # Note: 'device=device' is removed because device_map="auto" handles it
-#     # device="cpu"
-# )
-clear_gpu()
-
-print(model)
-
-uses_mem = get_model_memory(model)
+if LOCAL:
+    # 1. Define the 4-bit configuration
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",      # Normalized Float 4 (best for accuracy)
+        bnb_4bit_compute_dtype=torch.bfloat16, # Use bfloat16 for computation (requires Ampere+ GPU), otherwise use float16
+        bnb_4bit_use_double_quant=True  # Saves a bit more memory
+    )
+    
+    # 2. Load the model with the config
+    model = SentenceTransformer(
+        "jinaai/jina-embeddings-v4",
+        trust_remote_code=True,
+        model_kwargs={
+            "default_task": "retrieval",
+            "quantization_config": bnb_config,
+            "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
+        },
+    )
+    clear_gpu()
+    
+    print(model)
+    
+    uses_mem = get_model_memory(model)
 
 # Now move to GPU
 # model.to(device)
