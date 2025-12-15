@@ -2547,7 +2547,7 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
       const verificationTypes = row.verification_types || [];
       const ratingCount = parseInt(row.rating_count) || 0;
       const requiredReviewers = (row.requested_departments_list || []).length > 0 ? 2 : 1;
-      const isPending = verificationTypes.includes('request') && score <= 0;
+      const isPending = verificationTypes.includes('request') && ratingCount < requiredReviewers;
       const isVerified = (parseInt(row.rating_count) || 0) > 0 && score > 0;
       
       return {
