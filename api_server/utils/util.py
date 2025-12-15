@@ -3761,7 +3761,7 @@ def ollama_embed_text(text: Union[str, List[str]], model: str = "nomic-embed-tex
     else:
         inputs = text
     
-    url = "http://localhost:11434/api/embed"
+    url = "http://localhost:11434/api/embeddings"
     payload = {
         "model": model,
         "input": inputs
