@@ -85,6 +85,8 @@ async function readFile(filename: string) {
 
 let setting_prompts : string = await readFile("./build/setting.txt") as string;
 
+console.log("Setting Prompt Loaded: ", setting_prompts.substring(0, 100), "...");
+
 interface ToolData {
   toolName: string;
   arguments: {[key: string]: string[]};
@@ -733,7 +735,7 @@ router.post('/message', async (req : Request, res : Response) => {
                    "\n\n\n\n------------------------- **SYSTEM INSTRUCTION**---------------------------\n\n" + `## **If user do not mation to user system information do not talk about that\n\n` + `## **You are assistance\n\n` + `## **You must answer user question\n\n` + `## **If in normal conversation do not use any markdown Code Block in three backticks\n\n` + `## **Use Markdown Code Block in three backticks only in code\n\n` 
                    + `----------------------------------- **END SYSTEM INSTRUCTION** -----------------------------------\n\n` +
                     question;
-        // console.log(question)
+        console.log(question)
       }
     }
     catch(err) {
