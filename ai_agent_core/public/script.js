@@ -610,22 +610,40 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             if (data.userId) {
                 socket.emit('register', { userId: data.userId });
                 messagesDiv.innerHTML = ''; // Clear existing messages
+                let lastUserMsg = null; // Track user message for pairing with next agent response
+                let lastAgentMsg = null; // Track last agent response for global variable
+                
                 if (data.chatHistory && data.chatHistory.length > 0) {
                     data.chatHistory.forEach(message => {
                         if (message.startsWith('user:')) {
-                            // displayMessage(message.substring(5).trim(), 'user-message');
-                            displayMarkdownMessage(message.substring(5).trim(), 'user-message');
+                            const userText = message.substring(5).trim();
+                            lastUserMsg = userText; // Store this user message to pair with next agent response
+                            displayMarkdownMessage(userText, 'user-message');
                         } 
                         else if (message.startsWith('assistance:')) {
-                            displayMarkdownMessage(message.substring(11).trim(), 'agent-message');
+                            const agentText = message.substring(11).trim();
+                            lastAgentMsg = agentText; // Store as last agent response
+                            // Pair this agent response with the most recent user message
+                            displayMarkdownMessage(agentText, 'agent-message', lastUserMsg);
+                            // After pairing, don't reset lastUserMsg - keep it for potential follow-up
                         }
                         else if (message.startsWith('img_url:')) {
-                        // Extract the URL by slicing the string after "img_url:"
-                        const imageUrl = message.substring("img_url:".length).trim();
-                        console.log(imageUrl);
-                        displayImageMessage(imageUrl, 'img-message');
-                    }
+                            // Extract the URL by slicing the string after "img_url:"
+                            const imageUrl = message.substring("img_url:".length).trim();
+                            console.log(imageUrl);
+                            displayImageMessage(imageUrl, 'img-message');
+                        }
                     });
+                    
+                    // Store the last user message and agent response for verify/rating functions after reload
+                    if (lastUserMsg) {
+                        window.lastUserMessage = lastUserMsg;
+                        console.log('✅ Restored last user message:', lastUserMsg.substring(0, 50) + '...');
+                    }
+                    if (lastAgentMsg) {
+                        lastAgentResponse = lastAgentMsg;
+                        console.log('✅ Restored last agent response:', lastAgentMsg.substring(0, 50) + '...');
+                    }
                 }
 
                 // Validate and set Mode dropdown
@@ -1495,7 +1513,7 @@ const markdown = window.markdownit({
 });
 
 
-function displayMarkdownMessage(text, className) {
+function displayMarkdownMessage(text, className, userQuestion = null) {
     const html = markdown.render(text);
     const messageElement = document.createElement('div');
     messageElement.innerHTML = html;
@@ -1504,6 +1522,12 @@ function displayMarkdownMessage(text, className) {
     
     // Add copy button for agent messages
     if (className === 'agent-message') {
+        // Store the user question for this agent response
+        if (userQuestion) {
+            messageElement.dataset.userQuestion = userQuestion;
+        } else if (window.lastUserMessage) {
+            messageElement.dataset.userQuestion = window.lastUserMessage;
+        }
         const copyButton = document.createElement('button');
         copyButton.innerHTML = '<i class="fas fa-copy"></i>';
         copyButton.className = 'copy-button';
@@ -1636,6 +1660,11 @@ function displayMarkdownMessageStream(text, messageElement) {
         messageElement.insertBefore(contentDiv, messageElement.firstChild);
         // Store in separate attribute for streaming
         messageElement.dataset.streamingText = text;
+        
+        // Store the user question for this streaming agent response
+        if (window.lastUserMessage) {
+            messageElement.dataset.userQuestion = window.lastUserMessage;
+        }
     } else {
         // Update streaming text (will be overridden by response data later)
         messageElement.dataset.streamingText = text;
@@ -2707,6 +2736,7 @@ async function rateAnswer(answerText, rating) {
         }
         const sessionData = await sessionResponse.json();
         const userName = sessionData?.username || 'Anonymous';
+        const userId = sessionData?.userId;  // Get userId from session
         
         const response = await fetch('/api/rate-answer', {
             method: 'POST',
@@ -2715,7 +2745,8 @@ async function rateAnswer(answerText, rating) {
                 question: lastUserMessage,
                 answer: answerText,
                 rating: rating,
-                userName: userName
+                userId: userId,
+                username: userName
             })
         });
         
@@ -2774,7 +2805,7 @@ async function verifyAnswer(answerText, verifyBtn) {
 }
 
 // Show Verify Modal (Community-style)
-function showVerifyModal(question, answer, verifyBtn) {
+async function showVerifyModal(question, answer, verifyBtn) {
     // Remove existing modal if any
     const existingModal = document.getElementById('verifyModal');
     if (existingModal) existingModal.remove();
@@ -2785,116 +2816,32 @@ function showVerifyModal(question, answer, verifyBtn) {
     // Available departments
     const departments = ['WT', 'FT', 'PE', 'QA', 'IT', 'MFG', 'ENG', 'RnD'];
     
-    // Create modal HTML
-    const modalHTML = `
-        <div class="verify-modal show" id="verifyModal">
-            <div class="verify-modal-content">
-                <div class="verify-modal-header">
-                    <div class="verify-modal-title">
-                        <i class="fas fa-check-circle"></i>
-                        Verify Answer
-                    </div>
-                    <button class="verify-modal-close" id="verifyModalClose">&times;</button>
-                </div>
-                
-                <div class="verify-info-box">
-                    <i class="fas fa-info-circle"></i>
-                    <span>การ Verify จะบันทึกคำถาม-คำตอบนี้ไปยัง Community เพื่อให้ผู้อื่นสามารถค้นหาและใช้งานได้</span>
-                </div>
-                
-                <div class="verify-preview-section">
-                    <div class="verify-preview-label">
-                        <i class="fas fa-question-circle"></i> Question
-                    </div>
-                    <div class="verify-preview-box question" id="verifyQuestion">${escapeHtml(question)}</div>
-                </div>
-                
-                <div class="verify-preview-section">
-                    <div class="verify-preview-label">
-                        <i class="fas fa-comment-dots"></i> Answer Preview
-                    </div>
-                    <div class="verify-preview-box answer" id="verifyAnswer">${escapeHtml(answer.substring(0, 500))}${answer.length > 500 ? '...' : ''}</div>
-                </div>
-                
-                <div class="verify-score-section">
-                    <div class="verify-score-label">
-                        <i class="fas fa-thumbs-up"></i> Rate this answer:
-                    </div>
-                    <div class="verify-score-buttons">
-                        <button type="button" class="rating-btn" data-rating="-1">❌ Incorrect</button>
-                        <button type="button" class="rating-btn" data-rating="0">➖ Neutral</button>
-                        <button type="button" class="rating-btn" data-rating="1">✓ Correct</button>
-                    </div>
-                    <input type="hidden" id="verifyScore" value="0">
-                </div>
-                
-                <div class="verify-tags-section">
-                    <div class="verify-tags-label">
-                        <i class="fas fa-tags"></i> Select Tags (Optional)
-                    </div>
-                    <div class="verify-tags-grid" id="verifyTagsGrid">
-                        ${availableTags.map(tag => `
-                            <div class="verify-tag-item" data-tag="${tag}">${tag}</div>
-                        `).join('')}
-                    </div>
-                </div>
-                
-                <div class="verify-comment-section">
-                    <div class="verify-comment-label">
-                        <i class="fas fa-edit"></i> Comment (Optional)
-                    </div>
-                    <textarea class="verify-comment-input" id="verifyComment" placeholder="เพิ่มหมายเหตุหรือคอมเมนต์..."></textarea>
-                </div>
-                
-                <div class="verify-type-section">
-                    <div class="verify-type-label">Verification type</div>
-                    <div class="verify-radio-group">
-                        <label class="verify-radio-item">
-                            <input type="radio" name="verificationType" value="self" checked>
-                            <span class="verify-radio-text">Verify this answer "by my department"</span>
-                            <span class="verify-dept-badge" id="userDeptBadge">WT</span>
-                        </label>
-                        <label class="verify-radio-item">
-                            <input type="radio" name="verificationType" value="request">
-                            <span class="verify-radio-text">Request verification from other department(s)</span>
-                        </label>
-                    </div>
-                    
-                    <div class="verify-dept-select-wrapper" id="deptSelectWrapper" style="display: none;">
-                        <div class="verify-dept-dropdown" id="deptDropdown">
-                            <div class="verify-dept-dropdown-header" id="deptDropdownHeader">
-                                <span class="verify-dept-dropdown-text" id="deptDropdownText">Select department(s)...</span>
-                                <span class="verify-dept-dropdown-arrow">▼</span>
-                            </div>
-                            <div class="verify-dept-dropdown-menu" id="deptDropdownMenu">
-                                ${departments.map(dept => `
-                                    <label class="verify-dept-dropdown-item">
-                                        <input type="checkbox" name="requestDept" value="${dept}">
-                                        <span class="verify-dept-checkbox-box"></span>
-                                        <span class="verify-dept-checkbox-text">${dept}</span>
-                                    </label>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="verify-checkbox-section">
-                    <label class="verify-checkbox-item">
-                        <input type="checkbox" id="notifyCheckbox">
-                        <span class="verify-checkbox-text">Notify me when the answer is verified</span>
-                    </label>
-                </div>
-                
-                <div class="verify-modal-actions">
-                    <button class="verify-btn-cancel" id="verifyBtnCancel">Cancel</button>
-                    <button class="verify-btn-submit" id="verifyBtnSubmit">
-                        <i class="fas fa-check"></i> Submit Review
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
+    // Fetch template from external file
+    let templateHTML = '';
+    try {
+        const response = await fetch('/verifyAnswer1_page.html');
+        templateHTML = await response.text();
+    } catch (error) {
+        console.error('Error loading verify modal template:', error);
+        return;
+    }
+    
+    // Build dynamic content
+    const tagsHTML = availableTags.map(tag => `<div class="verify-tag-item" data-tag="${tag}">${tag}</div>`).join('');
+    const departmentsHTML = departments.map(dept => `
+        <label class="verify-dept-dropdown-item">
+            <input type="checkbox" name="requestDept" value="${dept}">
+            <span class="verify-dept-checkbox-box"></span>
+            <span class="verify-dept-checkbox-text">${dept}</span>
+        </label>
+    `).join('');
+    
+    // Replace placeholders in template
+    let modalHTML = templateHTML
+        .replace('{{QUESTION}}', escapeHtml(question))
+        .replace('{{ANSWER}}', escapeHtml(answer.substring(0, 500)) + (answer.length > 500 ? '...' : ''))
+        .replace('{{TAGS}}', tagsHTML)
+        .replace('{{DEPARTMENTS}}', departmentsHTML);
     
     // Add modal to body
     document.body.insertAdjacentHTML('beforeend', modalHTML);
@@ -2905,34 +2852,72 @@ function showVerifyModal(question, answer, verifyBtn) {
     const cancelBtn = document.getElementById('verifyBtnCancel');
     const submitBtn = document.getElementById('verifyBtnSubmit');
     const tagsGrid = document.getElementById('verifyTagsGrid');
-    const deptSelectWrapper = document.getElementById('deptSelectWrapper');
-    const deptDropdownHeader = document.getElementById('deptDropdownHeader');
-    const deptDropdownMenu = document.getElementById('deptDropdownMenu');
-    const deptDropdownText = document.getElementById('deptDropdownText');
+    const myDeptSelectWrapper = document.getElementById('myDeptSelectWrapper');
+    const requestDeptSelectWrapper = document.getElementById('requestDeptSelectWrapper');
+    const myDeptDropdownHeader = document.getElementById('myDeptDropdownHeader');
+    const myDeptDropdownMenu = document.getElementById('myDeptDropdownMenu');
+    const myDeptDropdownText = document.getElementById('myDeptDropdownText');
+    const requestDeptDropdownHeader = document.getElementById('requestDeptDropdownHeader');
+    const requestDeptDropdownMenu = document.getElementById('requestDeptDropdownMenu');
+    const requestDeptDropdownText = document.getElementById('requestDeptDropdownText');
     
-    // Dropdown toggle handler
-    deptDropdownHeader.addEventListener('click', () => {
-        deptDropdownMenu.classList.toggle('show');
-        deptDropdownHeader.classList.toggle('open');
+    // Radio button toggle handler - show/hide dropdown based on verification type
+    const radioButtons = document.querySelectorAll('input[name="verificationType"]');
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'self') {
+                myDeptSelectWrapper.style.display = 'block';
+                requestDeptSelectWrapper.style.display = 'none';
+            } else {
+                myDeptSelectWrapper.style.display = 'none';
+                requestDeptSelectWrapper.style.display = 'block';
+            }
+        });
     });
     
-    // Update dropdown text when checkboxes change
-    deptDropdownMenu.addEventListener('change', () => {
+    // My Department Dropdown toggle handler
+    myDeptDropdownHeader.addEventListener('click', () => {
+        myDeptDropdownMenu.classList.toggle('show');
+        myDeptDropdownHeader.classList.toggle('open');
+    });
+    
+    // Request Department Dropdown toggle handler
+    requestDeptDropdownHeader.addEventListener('click', () => {
+        requestDeptDropdownMenu.classList.toggle('show');
+        requestDeptDropdownHeader.classList.toggle('open');
+    });
+    
+    // Update my department dropdown text when checkboxes change
+    myDeptDropdownMenu.addEventListener('change', () => {
+        const checked = Array.from(document.querySelectorAll('input[name="myDept"]:checked'));
+        if (checked.length > 0) {
+            myDeptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
+            myDeptDropdownText.classList.add('has-selection');
+        } else {
+            myDeptDropdownText.textContent = 'Select department...';
+            myDeptDropdownText.classList.remove('has-selection');
+        }
+    });
+    
+    // Update request department dropdown text when checkboxes change
+    requestDeptDropdownMenu.addEventListener('change', () => {
         const checked = Array.from(document.querySelectorAll('input[name="requestDept"]:checked'));
         if (checked.length > 0) {
-            deptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
-            deptDropdownText.classList.add('has-selection');
+            requestDeptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
+            requestDeptDropdownText.classList.add('has-selection');
         } else {
-            deptDropdownText.textContent = 'Select department(s)...';
-            deptDropdownText.classList.remove('has-selection');
+            requestDeptDropdownText.textContent = 'Select department...';
+            requestDeptDropdownText.classList.remove('has-selection');
         }
     });
     
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.verify-dept-dropdown')) {
-            deptDropdownMenu.classList.remove('show');
-            deptDropdownHeader.classList.remove('open');
+            myDeptDropdownMenu.classList.remove('show');
+            myDeptDropdownHeader.classList.remove('open');
+            requestDeptDropdownMenu.classList.remove('show');
+            requestDeptDropdownHeader.classList.remove('open');
         }
     });
     
@@ -2952,18 +2937,6 @@ function showVerifyModal(question, answer, verifyBtn) {
                 selectedTags.push(tag);
             }
         }
-    });
-    
-    // Radio button handler for verification type
-    const radioButtons = document.querySelectorAll('input[name="verificationType"]');
-    radioButtons.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            if (e.target.value === 'request') {
-                deptSelectWrapper.style.display = 'block';
-            } else {
-                deptSelectWrapper.style.display = 'none';
-            }
-        });
     });
     
     // Rating buttons handler
@@ -3012,9 +2985,12 @@ function showVerifyModal(question, answer, verifyBtn) {
     submitBtn.addEventListener('click', async () => {
         const comment = document.getElementById('verifyComment').value.trim();
         const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
-        const selectedDepts = Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
+        // Collect departments based on selected verification type
+        const selectedDepts = verificationType === 'self' 
+            ? Array.from(document.querySelectorAll('input[name="myDept"]:checked')).map(cb => cb.value)
+            : Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
         const notifyMe = document.getElementById('notifyCheckbox').checked;
-        const score = parseInt(document.getElementById('verifyScore').value) || 80;
+        const score = parseInt(document.getElementById('verifyScore').value) || 0;
         
         // Disable button while processing
         submitBtn.disabled = true;
@@ -3044,7 +3020,7 @@ function showVerifyModal(question, answer, verifyBtn) {
                     tags: selectedTags,
                     verificationType: verificationType,
                     requestedDepartments: selectedDepts,
-                    notifyOnVerified: notifyMe
+                    notifyMe: notifyMe
                 })
             });
             

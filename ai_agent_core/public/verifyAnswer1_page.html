@@ -1,0 +1,124 @@
+<div class="verify-modal show" id="verifyModal">
+    <div class="verify-modal-content">
+        <div class="verify-modal-header">
+            <div class="verify-modal-title">
+                <i class="fas fa-check-circle"></i>
+                Verify Answer
+            </div>
+            <button class="verify-modal-close" id="verifyModalClose">&times;</button>
+        </div>
+        
+        <div class="verify-info-box">
+            <i class="fas fa-info-circle"></i>
+            <span>การ Verify จะบันทึกคำถาม-คำตอบนี้ไปยัง Community เพื่อให้ผู้อื่นสามารถค้นหาและใช้งานได้</span>
+        </div>
+        
+        <div class="verify-preview-section">
+            <div class="verify-preview-label">
+                <i class="fas fa-question-circle"></i> Question
+            </div>
+            <div class="verify-preview-box question" id="verifyQuestion">{{QUESTION}}</div>
+        </div>
+        
+        <div class="verify-preview-section">
+            <div class="verify-preview-label">
+                <i class="fas fa-comment-dots"></i> Answer Preview
+            </div>
+            <div class="verify-preview-box answer" id="verifyAnswer">{{ANSWER}}</div>
+        </div>
+        
+        <div class="verify-score-section">
+            <div class="verify-score-label">
+                <i class="fas fa-thumbs-up"></i> Rate this answer:
+            </div>
+            <div class="verify-score-buttons">
+                <button type="button" class="rating-btn" data-rating="-1">❌ Incorrect</button>
+                <button type="button" class="rating-btn" data-rating="0">➖ Neutral</button>
+                <button type="button" class="rating-btn" data-rating="1">✓ Correct</button>
+            </div>
+            <input type="hidden" id="verifyScore" value="0">
+        </div>
+        
+        <div class="verify-tags-section">
+            <div class="verify-tags-label">
+                <i class="fas fa-tags"></i> Select Tags (Optional)
+            </div>
+            <div class="verify-tags-grid" id="verifyTagsGrid">
+                {{TAGS}}
+            </div>
+        </div>
+        
+        <div class="verify-comment-section">
+            <div class="verify-comment-label">
+                <i class="fas fa-edit"></i> Comment (Optional)
+            </div>
+            <textarea class="verify-comment-input" id="verifyComment" placeholder="เพิ่มหมายเหตุหรือคอมเมนต์..."></textarea>
+        </div>
+        
+        <div class="verify-type-section">
+            <div class="verify-type-label">Verification type</div>
+            <div class="verify-radio-group">
+                <div>
+                    <label class="verify-radio-item">
+                        <input type="radio" name="verificationType" value="self" checked>
+                        <span class="verify-radio-text">Verify this answer "by my department"</span>
+                    </label>
+                    <!-- My Department Dropdown -->
+                    <div class="verify-dept-select-wrapper" id="myDeptSelectWrapper" style="display: block; margin-left: 24px; margin-top: 8px;">
+                        <div class="verify-dept-dropdown" id="myDeptDropdown">
+                            <div class="verify-dept-dropdown-header" id="myDeptDropdownHeader">
+                                <span class="verify-dept-dropdown-text" id="myDeptDropdownText">Select department...</span>
+                                <span class="verify-dept-dropdown-arrow">▼</span>
+                            </div>
+                            <div class="verify-dept-dropdown-menu" id="myDeptDropdownMenu">
+                                <label class="verify-dept-dropdown-item">
+                                    <input type="checkbox" name="myDept" value="WT">
+                                    <span class="verify-dept-checkbox-box"></span>
+                                    <span class="verify-dept-checkbox-text">WT</span>
+                                </label>
+                                <label class="verify-dept-dropdown-item">
+                                    <input type="checkbox" name="myDept" value="FT">
+                                    <span class="verify-dept-checkbox-box"></span>
+                                    <span class="verify-dept-checkbox-text">FT</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 12px;">
+                    <label class="verify-radio-item">
+                        <input type="radio" name="verificationType" value="request">
+                        <span class="verify-radio-text">Request verification from other department</span>
+                    </label>
+                    <!-- Request Department Dropdown -->
+                    <div class="verify-dept-select-wrapper" id="requestDeptSelectWrapper" style="display: none; margin-left: 24px; margin-top: 8px;">
+                        <div class="verify-dept-dropdown" id="requestDeptDropdown">
+                            <div class="verify-dept-dropdown-header" id="requestDeptDropdownHeader">
+                                <span class="verify-dept-dropdown-text" id="requestDeptDropdownText">Select department...</span>
+                                <span class="verify-dept-dropdown-arrow">▼</span>
+                            </div>
+                            <div class="verify-dept-dropdown-menu" id="requestDeptDropdownMenu">
+                                {{DEPARTMENTS}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="verify-checkbox-section">
+            <label class="verify-checkbox-item">
+                <input type="checkbox" id="notifyCheckbox">
+                <span class="verify-checkbox-text">Notify me when the answer is verified</span>
+            </label>
+        </div>
+        
+        <div class="verify-modal-actions">
+            <button class="verify-btn-cancel" id="verifyBtnCancel">Cancel</button>
+            <button class="verify-btn-submit" id="verifyBtnSubmit">
+                <i class="fas fa-check"></i> Submit Review
+            </button>
+        </div>
+    </div>
+</div>

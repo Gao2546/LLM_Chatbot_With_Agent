@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     requested_departments TEXT[],
     due_date TIMESTAMP,
     created_by VARCHAR(255),
+    notify_me BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     last_updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -204,7 +205,8 @@ CREATE TABLE IF NOT EXISTS answer_verifications (
     verification_type VARCHAR(50) DEFAULT 'self',
     requested_departments TEXT[],
     due_date TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(verified_answer_id, user_id)
 );
 `;
 
@@ -272,6 +274,57 @@ const createQuestionAttachmentsIndexQuery = `
 CREATE INDEX IF NOT EXISTS idx_question_attachments_question 
 ON question_attachments(question_id);
 `;
+
+// ALTER TABLE to add missing columns
+const alterVerifiedAnswersAddNotifyMeQuery = `
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='notify_me'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN notify_me BOOLEAN DEFAULT FALSE;
+    END IF;
+END
+$$;
+`;
+
+const alterVerifiedAnswersAddTagsQuery = `
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='tags'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN tags TEXT[];
+    END IF;
+END
+$$;
+`;
+
+const alterAnswerVerificationsAddUniqueConstraint = `
+DO $$
+BEGIN
+    -- First, remove duplicate records keeping only the latest one
+    DELETE FROM answer_verifications a
+    USING answer_verifications b
+    WHERE a.id < b.id 
+      AND a.verified_answer_id = b.verified_answer_id 
+      AND a.user_id = b.user_id;
+    
+    -- Then add UNIQUE constraint if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'answer_verifications_user_answer_unique'
+    ) THEN
+        ALTER TABLE answer_verifications 
+        ADD CONSTRAINT answer_verifications_user_answer_unique 
+        UNIQUE (verified_answer_id, user_id);
+    END IF;
+END
+$$;
+`;
+
 // --- NEW HELPER FOR DUMMY DATA ---
 /**
  * Creates a System User (ID 0) and a Dummy Chat History (ID -1).
@@ -488,6 +541,18 @@ async function initializeDatabase() {
       $$;
     `);
     console.log('DB: Views column added to verified_answers table');
+
+    // Add notify_me column if not exists
+    await pool.query(alterVerifiedAnswersAddNotifyMeQuery);
+    console.log('DB: notify_me column added to verified_answers table');
+
+    // Add tags column if not exists
+    await pool.query(alterVerifiedAnswersAddTagsQuery);
+    console.log('DB: tags column added to verified_answers table');
+
+    // Add UNIQUE constraint to prevent duplicate user ratings
+    await pool.query(alterAnswerVerificationsAddUniqueConstraint);
+    console.log('DB: UNIQUE constraint added to answer_verifications table');
 
     // await pool.query(alterUsersTableQuery);
     console.log('DB: Foreign key added to users table');
@@ -1036,7 +1101,9 @@ async function saveVerifiedAnswer(
   commenterName?: string,
   comment?: string,
   verificationType?: string,
-  requestedDepartments?: string[]
+  requestedDepartments?: string[],
+  notifyMe?: boolean,
+  tags?: string[]
 ) {
   try {
     // First, check if this answer already exists (by question + answer)
@@ -1074,10 +1141,10 @@ async function saveVerifiedAnswer(
         answerEmbeddingStr = `[${answerEmbedding.join(',')}]`;
       }
       const result = await pool.query(
-        `INSERT INTO verified_answers (question, answer, question_embedding, answer_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments)
-         VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7)
+        `INSERT INTO verified_answers (question, answer, question_embedding, answer_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments, notify_me, tags)
+         VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7, $8, $9)
          RETURNING id`,
-        [question, answer, questionEmbeddingStr, answerEmbeddingStr, 0, verificationType || 'self', requestedDepartments || []]
+        [question, answer, questionEmbeddingStr, answerEmbeddingStr, 0, verificationType || 'self', requestedDepartments || [], notifyMe || false, tags || []]
       );
       answerId = result.rows[0].id;
     }
@@ -1086,33 +1153,47 @@ async function saveVerifiedAnswer(
     // If requesting verification from others, set rating to 0 (pending)
     const actualRating = verificationType === 'request' ? 0 : (rating ?? 1);
 
+    // Convert userId to integer to match database type
+    const userIdInt = userId ? parseInt(String(userId), 10) : null;
+    if (userId && isNaN(userIdInt!)) {
+      console.warn(`DB: Invalid userId=${userId}, cannot convert to integer`);
+    }
+
+    console.log(`DB: Attempting to save rating - userId=${userIdInt}, rating=${rating}, actualRating=${actualRating}, answerId=${answerId}`);
+
     // Check if this user already rated this answer
-    if (userId && rating !== undefined) {
+    if (userIdInt && rating !== undefined) {
+      console.log(`DB: Checking existing rating for answerId=${answerId}, userId=${userIdInt}`);
       const userRating = await pool.query(
         `SELECT id FROM answer_verifications 
          WHERE verified_answer_id = $1 AND user_id = $2 
          LIMIT 1`,
-        [answerId, userId]
+        [answerId, userIdInt]
       );
 
       if (userRating.rows.length > 0) {
         // User already rated this answer - update instead of insert
-        await pool.query(
+        console.log(`DB: Updating existing rating for answerId=${answerId}, userId=${userIdInt}, newRating=${actualRating}`);
+        const updateResult = await pool.query(
           `UPDATE answer_verifications 
            SET rating = $1, commenter_name = $2, comment = $3, verification_type = $4, requested_departments = $5
            WHERE verified_answer_id = $6 AND user_id = $7`,
-          [actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || [], answerId, userId]
+          [actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || [], answerId, userIdInt]
         );
+        console.log(`DB: UPDATE result - ${updateResult.rowCount} row(s) updated`);
+        console.log(`DB: Updated ${updateResult.rowCount} rows`);
       } else {
         // New rating from this user
+        console.log(`DB: Inserting new rating for answerId=${answerId}, userId=${userIdInt}`);
         await pool.query(
           `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [answerId, userId, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
+          [answerId, userIdInt, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
         );
       }
     } else if (rating !== undefined) {
       // Anonymous user - always allow new rating
+      console.log(`DB: Inserting anonymous rating for answerId=${answerId}`);
       await pool.query(
         `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -1199,7 +1280,7 @@ async function updateAnswerRating(answerId: number) {
     const result = await pool.query(
       `UPDATE verified_answers
        SET avg_rating = (
-         SELECT AVG(rating) FROM answer_verifications WHERE verified_answer_id = $1
+         SELECT COALESCE(SUM(rating), 0) FROM answer_verifications WHERE verified_answer_id = $1
        ),
        verified_count = (
          SELECT COUNT(DISTINCT user_id) FROM answer_verifications WHERE verified_answer_id = $1 AND rating > 0
