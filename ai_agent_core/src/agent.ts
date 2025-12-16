@@ -2331,7 +2331,7 @@ const uploadFiles = multer({
 router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Request, res: Response) => {
   try {
     // Handle both FormData (with files) and JSON
-    let question, answer, comment, userName, rating, verificationType, requestedDepartments;
+    let question, answer, comment, userName, rating, verificationType, requestedDepartments, notifyMe, tags;
     let files: Express.Multer.File[] = [];
 
     // Check if request has multipart form data
@@ -2345,9 +2345,11 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       rating = req.body.rating ?? 1;
       verificationType = req.body.verificationType || 'self';
       requestedDepartments = req.body.requestedDepartments ? JSON.parse(req.body.requestedDepartments) : [];
+      notifyMe = req.body.notifyMe === 'true' || req.body.notifyMe === true;
+      tags = req.body.tags ? JSON.parse(req.body.tags) : [];
     } else {
       // JSON case (no files)
-      ({ question, answer, comment, userName, rating = 1, verificationType = 'self', requestedDepartments = [] } = req.body);
+      ({ question, answer, comment, userName, rating = 1, verificationType = 'self', requestedDepartments = [], notifyMe = false, tags = [] } = req.body);
     }
 
     const userId = req.session.user?.id;
@@ -2410,7 +2412,9 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
         userName || 'Anonymous', 
         comment || '',
         verificationType,
-        requestedDepartments
+        requestedDepartments,
+        notifyMe,
+        tags
       );
     } catch (dbError) {
       console.error('Database error in saveVerifiedAnswer:', dbError);
@@ -2450,7 +2454,7 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
         console.log('Verification saved with comment:', comment);
       }
       
-      console.log(`Verification type: ${verificationType}, Requested departments: ${requestedDepartments.join(', ')}`);
+      console.log(`Verification type: ${verificationType}, Requested departments: ${requestedDepartments.join(', ')}, Notify: ${notifyMe}`);
     }
 
     res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
@@ -2788,48 +2792,83 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
 // POST /api/rate-answer - Rate an answer (quick rating without full verification)
 router.post('/rate-answer', async (req: Request, res: Response) => {
   try {
-    const { questionId, rating, userId, username } = req.body;
+    const { questionId, question, answer, rating, userId, username } = req.body;
     
-    if (!questionId || rating === undefined) {
+    // Either questionId or (question + answer) must be provided
+    let answerId = questionId;
+    
+    if (!answerId && question && answer) {
+      // Find verified_answer by question + answer
+      const result = await pool.query(
+        `SELECT id FROM verified_answers WHERE question = $1 AND answer = $2 LIMIT 1`,
+        [question, answer]
+      );
+      if (result.rows.length === 0) {
+        return res.status(400).json({ success: false, error: 'Answer not found' });
+      }
+      answerId = result.rows[0].id;
+    }
+    
+    if (!answerId || rating === undefined) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     
-    // Check if user already rated
+    // Validate userId - must be present for UPDATE logic to work
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User must be logged in to rate answers' });
+    }
+    
+    // Convert userId to integer to match database type
+    const userIdInt = parseInt(userId, 10);
+    if (isNaN(userIdInt)) {
+      return res.status(400).json({ success: false, error: 'Invalid userId' });
+    }
+    
+    console.log(`Rating answer ${answerId}: userId=${userIdInt}, rating=${rating}`);
+    
+    // Check if user already rated (use IS NULL for safety)
     const existingRating = await pool.query(
       `SELECT id FROM answer_verifications WHERE verified_answer_id = $1 AND user_id = $2`,
-      [questionId, userId]
+      [answerId, userIdInt]
     );
+    
+    console.log(`Found existing rating: ${existingRating.rows.length > 0 ? 'YES' : 'NO'}`);
     
     if (existingRating.rows.length > 0) {
       // Update existing rating
-      await pool.query(
+      console.log(`Updating rating for user ${userIdInt} on answer ${answerId}`);
+      const updateResult = await pool.query(
         `UPDATE answer_verifications SET rating = $1, created_at = NOW() WHERE id = $2`,
         [rating, existingRating.rows[0].id]
       );
+      console.log(`Update result: ${updateResult.rowCount} rows affected`);
     } else {
       // Insert new rating
+      console.log(`Inserting new rating for user ${userIdInt} on answer ${answerId}`);
       await pool.query(
         `INSERT INTO answer_verifications (verified_answer_id, user_id, commenter_name, rating, verification_type, created_at)
          VALUES ($1, $2, $3, $4, 'rating', NOW())`,
-        [questionId, userId, username || 'Anonymous', rating]
+        [answerId, userIdInt, username || 'Anonymous', rating]
       );
     }
     
-    // Update avg_rating in verified_answers
+    // Update avg_rating in verified_answers (using SUM for score calculation)
     const scoreResult = await pool.query(
-      `SELECT COALESCE(AVG(CAST(rating AS FLOAT)), 0) as avg_rating, COUNT(*) as rating_count 
+      `SELECT COALESCE(SUM(rating), 0) as avg_rating, COUNT(*) as rating_count 
        FROM answer_verifications WHERE verified_answer_id = $1`,
-      [questionId]
+      [answerId]
     );
+    
+    console.log(`New avg_rating: ${scoreResult.rows[0].avg_rating}, rating_count: ${scoreResult.rows[0].rating_count}`);
     
     await pool.query(
       `UPDATE verified_answers SET avg_rating = $1, rating_count = $2 WHERE id = $3`,
-      [scoreResult.rows[0].avg_rating, scoreResult.rows[0].rating_count, questionId]
+      [scoreResult.rows[0].avg_rating, scoreResult.rows[0].rating_count, answerId]
     );
     
     res.json({ 
       success: true, 
-      newScore: scoreResult.rows[0].total_score,
+      newScore: scoreResult.rows[0].avg_rating,
       ratingCount: scoreResult.rows[0].rating_count 
     });
   } catch (error) {
