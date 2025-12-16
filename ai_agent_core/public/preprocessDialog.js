@@ -373,6 +373,7 @@ async function showPreprocessDialog() {
                 // Check if current user is in the active_users array
                 const activeUsers = fileObj.active_users || [];
                 const isActiveByMe = currentUserId && activeUsers.includes(currentUserId);
+                const fileProcessStatus = fileObj.file_process_status;
 
                 // Create Item Container
                 const docItem = document.createElement('div');
@@ -403,7 +404,14 @@ async function showPreprocessDialog() {
                 
                 // 3. Active Indicator (Visual Feedback)
                 const statusSpan = document.createElement('span');
-                statusSpan.className = 'pp-doc-status'; 
+                if (fileProcessStatus === "process"){
+                    statusSpan.className = 'pp-doc-status pp-loading'; // Add loading class immediately
+                    statusSpan.style.display = 'inline-block'; // Force visible
+                }
+                else{
+                    statusSpan.className = 'pp-doc-status'; // Add loading class immediately
+                    statusSpan.style.display = 'none'; // Force visible
+                }
                 
                 // 4. Delete Button
                 const delBtn = document.createElement('span');
@@ -750,8 +758,13 @@ async function showPreprocessDialog() {
             const result = await res.json();
             
             // SUCCESS: Refresh the real list (this will naturally remove the temp item)
-            await fetchAndRenderDocuments();
-            // alert('Processing complete!');
+            if (result.status === 'success') {
+                await fetchAndRenderDocuments();
+                // alert('Processing complete!');
+            }
+            else {
+                alert(`Processing failed: ${result.message || 'Unknown error'}`);;
+            }
 
         } catch (error) {
             console.error(error);
