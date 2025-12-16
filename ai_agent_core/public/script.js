@@ -2033,6 +2033,8 @@ function populateModels(returnDefault = false) {
         { id: '{_OpenRouter_API_}openai/gpt-oss-20b:free', name: 'ORgpt-oss-20b:free'},
         { id: '{_OpenRouter_API_}openai/gpt-oss-120b', name: 'ORgpt-oss-120b'},
         { id: '{_OpenRouter_API_}openai/gpt-oss-120b:free', name: 'ORgpt-oss-120b:free'},
+        { id: '{_OpenRouter_API_}openai/gpt-4o-mini', name: 'ORgpt-4o-mini'},
+        { id: '{_OpenRouter_API_}openai/gpt-4o-mini:free', name: 'ORgpt-4o-mini:free'},
         { id: '{_OpenRouter_API_}google/gemma-3-27b-it:free', name: 'ORgemma-3-27b-it:free'},
         { id: '{_OpenRouter_API_}google/gemma-3-27b-it', name: 'ORgemma-3-27b-it'},
         { id: '{_OpenRouter_API_}google/gemma-3-12b-it:free', name: 'ORgemma-3-12b-it:free'},
