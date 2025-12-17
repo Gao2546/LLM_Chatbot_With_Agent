@@ -3659,12 +3659,12 @@ Provide your response in Markdown format, following the tagging guidelines provi
         #                  "If the image contains text, extract and summarize it...")
         # # Prompt for OpenRouter VLM
         # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-        # vlm_response = OpenRouterInference(
-        vlm_response = DeepInfraInference(
+        vlm_response = OpenRouterInference(
+        # vlm_response = DeepInfraInference(
             prompt=prompt,
             system_prompt=system_prompt,
             image_bytes_list=image_bytes_list,
-            model_name= 'Qwen/Qwen3-VL-8B-Instruct'#'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
         )
         print("DeepInfra VLM response received.")
         print(vlm_response)
