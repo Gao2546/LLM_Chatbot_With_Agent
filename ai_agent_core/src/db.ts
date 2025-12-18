@@ -1315,26 +1315,28 @@ async function filterQuestionsByType(
         break;
 
       case 'pending-review':
-        // verification_type = 'request' AND verification_count > 0 (has started review but not complete)
+        // verification_type = 'request' AND has actual verified count > 0 but < total_requested_depts
         query += ` WHERE va.verification_type = 'request'
+                   AND ARRAY_LENGTH(va.requested_departments, 1) > 0
                    AND (SELECT COUNT(*) FROM answer_verifications 
-                    WHERE verified_answer_id = va.id) > 0`;
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) > 0
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) < ARRAY_LENGTH(va.requested_departments, 1)`;
         break;
 
       case 'unverified':
-        // No verification at all AND not self-verified
-        query += ` WHERE (SELECT COUNT(*) FROM answer_verifications 
-                    WHERE verified_answer_id = va.id) = 0
-                   AND va.verification_type != 'self'`;
+        // verification_type = 'request' AND verification_count = 0 (no actual verifications yet)
+        query += ` WHERE va.verification_type = 'request'
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) = 0`;
         break;
 
       case 'verified':
-        // Self-verified (verification_type = 'self') OR fully verified (verification_count >= total_requested_depts when it's a request)
-        query += ` WHERE va.verification_type = 'self'
-                   OR (va.verification_type = 'request' 
-                       AND ARRAY_LENGTH(va.requested_departments, 1) > 0
-                       AND (SELECT COUNT(*) FROM answer_verifications 
-                        WHERE verified_answer_id = va.id) >= ARRAY_LENGTH(va.requested_departments, 1))`;
+        // Self-verified OR fully verified request (count match AND > 0)
+        query += ` WHERE (va.verification_type = 'self')`;
         break;
 
       case 'all':
@@ -1383,6 +1385,30 @@ async function filterQuestionsByType(
   } catch (error) {
     console.error('Error filtering questions:', error);
     throw error;
+  }
+}
+
+/**
+ * Get Hot Tags - Most used tags from all questions
+ */
+async function getHotTags(limit: number = 8) {
+  try {
+    const result = await pool.query(`
+      SELECT tag, COUNT(*) as count
+      FROM verified_answers, UNNEST(tags) AS tag
+      WHERE tags IS NOT NULL AND ARRAY_LENGTH(tags, 1) > 0
+      GROUP BY tag
+      ORDER BY count DESC
+      LIMIT $1
+    `, [limit]);
+
+    return result.rows.map(row => ({
+      tag: row.tag,
+      count: parseInt(row.count) || 0
+    }));
+  } catch (error) {
+    console.error('Error getting hot tags:', error);
+    return [];
   }
 }
 
@@ -1674,6 +1700,9 @@ export {
   getQuestionAttachments,
   getQuestionAttachmentData,
   deleteQuestionAttachment,
+
+  // Hot Tags Function
+  getHotTags,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags } from './db.js';
 
 dotenv.config();
 
@@ -2568,12 +2568,24 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
   }
 });
 
+// GET /api/hot-tags - Get hot tags
+router.get('/hot-tags', async (req: Request, res: Response) => {
+  try {
+    const { limit = 8 } = req.query;
+    const hotTags = await getHotTags(parseInt(limit as string) || 8);
+    res.json({ success: true, tags: hotTags });
+  } catch (error) {
+    console.error('❌ Error getting hot tags:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
 // GET /api/filter-questions - Filter questions by type
 router.get('/filter-questions', async (req: Request, res: Response) => {
   try {
     const { type = 'all', username, sortBy = 'newest', limit = 100 } = req.query;
 
-    if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified'].includes(type as string)) {
+    if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified', 'verified'].includes(type as string)) {
       return res.status(400).json({ success: false, error: 'Invalid filter type' });
     }
 

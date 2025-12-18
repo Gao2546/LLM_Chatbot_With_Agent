@@ -119,13 +119,20 @@
 
                     <!-- Tags Field -->
                     <div class="form-section">
-                        <label class="form-label">
-                            Tags
-                        </label>
-                        <p class="form-hint">Add up to 5 tags to describe what your question is about (optional).</p>
-                        <div class="tags-input-container">
-                            <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #999;"></i>
-                            <input type="text" id="questionTags" class="form-input" placeholder="e.g. (laravel html ajax)" style="padding-left: 35px;">
+                        <div style="margin-top: 0;">
+                            <label style="font-size: 13px; color: #666; margin-bottom: 8px; display: block; font-weight: 600;">
+                                <i class="fas fa-tags" style="margin-right: 6px;"></i>Add Tags
+                            </label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="text" id="questionTags" placeholder="Type tag name and press Enter or click +" 
+                                    style="flex: 1; padding: 10px 14px; border: 2px solid #3a3a3a; border-radius: 8px; background: rgba(10, 130, 118, 0.08); color: #2a2a2a; font-size: 13px; transition: all 0.2s;">
+                                <button type="button" id="addTagBtn" 
+                                    style="padding: 10px 16px; background: #0a8276; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; display: flex; align-items: center; gap: 6px;">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Add</span>
+                                </button>
+                            </div>
+                            <div id="tagsContainer" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;"></div>
                         </div>
                     </div>
 
@@ -947,16 +954,15 @@
 
                 // Count verified questions using same logic as community.html
                 const verifiedCount = allQuestions.filter(q => {
-                    // For request type: all requested departments must have verified
-                    if (q.verification_type === 'request' && q.requested_departments) {
-                        const requestedDepts = Array.isArray(q.requested_departments) 
-                            ? q.requested_departments 
-                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                        const deptCount = requestedDepts.length;
-                        return deptCount > 0;
+                    if (q.verification_type === 'self') {
+                        return true; // Self-verified is always considered verified
+                    } else if (q.verification_type === 'request') {
+                        // For request type: all requested departments must have verified
+                        const verificationCount = q.verification_count || 0;
+                        const totalRequestedDepts = q.total_requested_depts || 0;
+                        return totalRequestedDepts > 0 && verificationCount === totalRequestedDepts;
                     }
-                    // For self type: include all
-                    return q.verification_type === 'self';
+                    return false;
                 }).length;
 
                 document.getElementById('verifiedCount').textContent = verifiedCount;
@@ -979,9 +985,13 @@
                 return;
             }
 
-            // Sort by score (descending) and get top 3
+            // Sort by vote_score (descending) and get top 3
             const topQuestions = [...allQuestions]
-                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .sort((a, b) => {
+                    const scoreA = a.vote_score || a.score || 0;
+                    const scoreB = b.vote_score || b.score || 0;
+                    return scoreB - scoreA;
+                })
                 .slice(0, 3);
 
             // Update Hot Questions list
@@ -1225,7 +1235,6 @@
         async function submitQuestion() {
             const title = document.getElementById('questionTitle').value.trim();
             const body = tinymce.get('questionBody') ? tinymce.get('questionBody').getContent() : document.getElementById('questionBody').value;
-            const tags = document.getElementById('questionTags').value.trim();
             const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
 
             if (!title) {
@@ -1237,7 +1246,7 @@
                 alert('Please enter a body');
                 return;
             }
-            const tagArray = tags ? tags.split(/[\s,]+/).filter(t => t) : [];
+            const tagArray = customTags.length > 0 ? customTags : [];
 
             try {
                 // Get session data
@@ -1349,6 +1358,60 @@
                 alert('Failed to submit question: ' + e.message);
             }
         }
+
+        // Tags functionality
+        let customTags = [];
+
+        function addCustomTag() {
+            const input = document.getElementById('questionTags');
+            const tagName = input.value.trim();
+            
+            if (!tagName) {
+                return;
+            }
+            
+            if (customTags.length >= 5) {
+                alert('Maximum 5 tags allowed');
+                return;
+            }
+            
+            if (customTags.includes(tagName)) {
+                alert('This tag already exists');
+                return;
+            }
+            
+            customTags.push(tagName);
+            renderCustomTags();
+            input.value = '';
+        }
+
+        function removeCustomTag(tagName) {
+            customTags = customTags.filter(t => t !== tagName);
+            renderCustomTags();
+        }
+
+        function renderCustomTags() {
+            const container = document.getElementById('tagsContainer');
+            container.innerHTML = customTags.map(tag => `
+                <span style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #0a8276; color: white; border-radius: 6px; font-size: 13px; font-weight: 500;">
+                    <span>${tag}</span>
+                    <button onclick="removeCustomTag('${tag}')" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-size: 16px; line-height: 1; opacity: 0.8; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
+                        ×
+                    </button>
+                </span>
+            `).join('');
+        }
+
+        // Add tag button click event
+        document.getElementById('addTagBtn').addEventListener('click', addCustomTag);
+
+        // Add tag on Enter key press
+        document.getElementById('questionTags').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addCustomTag();
+            }
+        });
 
         // Initialize TinyMCE editor (WYSIWYG - What You See Is What You Get)
         function initializeTinyMCE() {
