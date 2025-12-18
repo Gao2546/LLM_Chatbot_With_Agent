@@ -240,6 +240,8 @@
             console.log('💬 setupCommentSubmit completed');
             setupRatingButtons();
             console.log('⭐ setupRatingButtons completed');
+            setupVerificationDepartments();
+            console.log('🏢 setupVerificationDepartments completed');
             setupTheme();
             console.log('🎨 setupTheme completed');
             console.log('✅ All setup functions completed');
@@ -334,7 +336,7 @@
             currentQuestion = q; // Store for verify button visibility check
             
             console.log('🔍 renderQuestionDetail called with:', q);
-            console.log('🔍 verification_types:', q.verification_types);
+            console.log('🔍 verification_type:', q.verification_type);
             console.log('🔍 requested_departments_list:', q.requested_departments_list);
             
             // Ensure requested_departments_list is an array
@@ -356,13 +358,13 @@
             console.log('🔍 deptsList:', deptsList);
             
             // Initial badge and pending info (will be updated after verifications load)
-            const verificationBadge = q.verification_types && q.verification_types.includes('request')
+            const verificationBadge = q.verification_type === 'request' && deptsList && deptsList.length > 0
                 ? '<span class="detail-verified-badge pending" id="verificationBadge">⏳ Pending</span>'
                 : (q.rating_count || 0) > 0 
                 ? '<span class="detail-verified-badge verified" id="verificationBadge">✓ Verified</span>'
                 : '';
 
-            const pendingInfo = q.verification_types && q.verification_types.includes('request') && deptsList && deptsList.length > 0
+            const pendingInfo = q.verification_type === 'request' && deptsList && deptsList.length > 0
                 ? `<div class="detail-pending-info" id="pendingInfo">
                     <i class="fas fa-hourglass-end"></i> Pending verification from: ${deptsList.join(', ')}
                     <button class="view-status-btn" onclick="showVerificationStatus()">View verification status</button>
@@ -388,9 +390,9 @@
                             
                             <div class="detail-question-meta">
                         <div class="detail-meta-item">
-                            <div class="detail-meta-avatar">${(q.user_name || 'U')[0].toUpperCase()}</div>
+                            <div class="detail-meta-avatar">${(q.created_by || q.user_name || 'U')[0].toUpperCase()}</div>
                             <div class="detail-meta-user">
-                                <span class="detail-meta-name">${q.user_name || 'Anonymous'}</span>
+                                <span class="detail-meta-name">${q.created_by || q.user_name || 'Anonymous'}</span>
                                 <span class="detail-meta-time">${formatDate(q.created_at)}</span>
                             </div>
                         </div>
@@ -415,6 +417,15 @@
                     <!-- Quick Verification Section for Departments -->
                     <div id="quickVerificationSection" class="quick-verification-section" style="display: none;">
                         <div class="verification-title">Your Verification</div>
+                        
+                        <!-- Department Selection Box -->
+                        <div class="verification-dept-section">
+                            <label class="verification-label">Select Department <span style="color: red;">*</span></label>
+                            <div id="verificationDeptBox" class="verification-dept-box">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
                         <div class="verification-buttons">
                             <button class="verify-btn helpful" onclick="submitVerification(1)">
                                 <i class="fas fa-thumbs-up"></i> Helpful
@@ -670,24 +681,18 @@
                 return;
             }
             
-            // Get unique departments that have verified with rating = 1
+            // Update verification status based on department verification
             console.log('🔍 Step 1: All verifications loaded:', verifications.length, verifications);
             
-            const positiveVerifications = verifications.filter(v => v.rating === 1);
-            console.log('🔍 Step 2: Positive verifications (rating=1):', positiveVerifications.length, positiveVerifications);
+            const requestedDepts = currentQuestion.requested_departments_list || [];
+            const verificationDepts = verifications
+                .filter(v => v.verification_type === 'department')
+                .map(v => v.requested_departments)
+                .flat();
+            console.log('🔍 Step 2: Verification departments:', verificationDepts);
             
-            const departmentsExtracted = positiveVerifications.map(v => {
-                console.log('🔍 Step 3: Extracting department from:', v, '-> department:', v.department);
-                return v.department;
-            });
-            console.log('🔍 Step 4: Departments extracted:', departmentsExtracted);
-            
-            const verifiedDepts = [...new Set(departmentsExtracted.filter(d => d))];
-            console.log('🔍 Step 5: Unique verified departments:', verifiedDepts);
-            
-            // Check if all requested departments are in the verified list
-            const allDepartmentsVerified = currentQuestion.requested_departments_list.every(dept => 
-                verifiedDepts.includes(dept)
+            const allDepartmentsVerified = requestedDepts.every(dept => 
+                verificationDepts.includes(dept)
             );
             
             console.log('🔄 Updating verification banner:', {
@@ -700,7 +705,7 @@
             const badgeEl = document.getElementById('verificationBadge');
             const pendingInfoEl = document.getElementById('pendingInfo');
             
-            if (badgeEl && currentQuestion.verification_types && currentQuestion.verification_types.includes('request')) {
+            if (badgeEl && currentQuestion.verification_type === 'request') {
                 if (allDepartmentsVerified) {
                     // All verified - change to green and show departments
                     badgeEl.className = 'detail-verified-badge verified';
@@ -806,6 +811,29 @@
                     await rateAnswer(rating);
                 });
             });
+        }
+
+        // Setup Verification Departments Selection
+        const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'PE', 'QA', 'IT'];
+        
+        function setupVerificationDepartments() {
+            const deptBox = document.getElementById('verificationDeptBox');
+            if (!deptBox) return;
+            
+            deptBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+                <div class="verification-dept-checkbox">
+                    <input type="checkbox" class="verification-dept-checkbox-input" value="${dept}" />
+                    <label>${dept}</label>
+                </div>
+            `).join('');
+        }
+        
+        function getSelectedVerificationDepartments() {
+            const deptBox = document.getElementById('verificationDeptBox');
+            if (!deptBox) return [];
+            
+            return Array.from(deptBox.querySelectorAll('.verification-dept-checkbox-input:checked'))
+                .map(checkbox => checkbox.value);
         }
 
         async function rateAnswer(rating) {
@@ -1486,6 +1514,13 @@
                 return;
             }
 
+            // Get selected departments
+            const selectedDepts = getSelectedVerificationDepartments();
+            if (selectedDepts.length === 0) {
+                alert('Please select at least one department');
+                return;
+            }
+
             const ratingBtns = document.querySelectorAll('.verify-btn');
             let selectedRating = null;
 
@@ -1510,7 +1545,8 @@
                     body: JSON.stringify({
                         questionId: currentQuestionId,
                         rating: selectedRating,
-                        comment: comment
+                        comment: comment,
+                        departments: selectedDepts
                     })
                 });
 

@@ -1570,6 +1570,12 @@ body[data-theme="light"] .comment-item.verification-comment {
     border-color: #333;
 }
 
+[data-theme="dark"] .detail-pending-info {
+    background-color: #3d3020;
+    border-left-color: #ffc847;
+    color: #ffc847;
+}
+
 .attachments-header {
     font-weight: 600;
     font-size: 14px;
@@ -1668,3 +1674,58 @@ body[data-theme="light"] .comment-item.verification-comment {
     font-size: 12px;
 }
 
+/* Verification Department Selection Box */
+.verification-dept-section {
+    margin-bottom: 15px;
+}
+
+.verification-label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.verification-dept-box {
+    border: 2px solid #017374;
+    border-radius: 6px;
+    padding: 12px;
+    background: white;
+    max-height: 150px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+[data-theme="dark"] .verification-dept-box {
+    background: #1e1e1e;
+    border-color: #017374;
+}
+
+.verification-dept-checkbox {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    cursor: pointer;
+}
+
+.verification-dept-checkbox input[type="checkbox"] {
+    margin-right: 10px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #017374;
+}
+
+.verification-dept-checkbox label {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.verification-dept-checkbox input[type="checkbox"]:hover {
+    transform: scale(1.1);
+}

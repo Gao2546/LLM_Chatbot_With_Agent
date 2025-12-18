@@ -134,39 +134,47 @@
                         <label class="form-label">
                             Verification type<span style="color: red;">*</span>
                         </label>
-                        <p class="form-hint">Choose how you want this answer to be verified.</p>
                         
-                        <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px;">
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin-top: 15px; background: #fafafa;">
                             <!-- Option 1: Self Verify -->
-                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 15px; border: 1px solid #ddd; border-radius: 4px; transition: all 0.2s;">
+                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; margin-bottom: 15px;">
                                 <input type="radio" name="verificationType" value="self" checked style="margin-top: 3px; cursor: pointer;">
-                                <div>
+                                <div style="flex: 1; width: 100%;">
                                     <div style="font-weight: 600; margin-bottom: 4px;">Verify this answer "by my department"</div>
-                                    <div style="font-size: 13px; color: #666;">Submit answer that's verified by your department</div>
+                                    <div style="font-size: 13px; color: #666; margin-bottom: 12px;">Submit answer that's verified by your department</div>
+                                    
+                                    <!-- Departments Box for Self Verification (shown when self is selected) -->
+                                    <div id="selfDepartmentsContainer" style="display: block;">
+                                        <label class="form-label" style="margin-bottom: 8px; font-size: 14px;">
+                                            Select Department <span style="color: red;">*</span>
+                                        </label>
+                                        <p class="form-hint" style="margin-bottom: 12px; font-size: 12px;">Choose which department verifies this answer</p>
+                                        <div id="selfDepartmentsBox" style="border: 2px solid #017374; border-radius: 4px; padding: 15px; background: white; min-height: 60px; max-height: 200px; overflow-y: auto;">
+                                            <!-- Will be populated by JavaScript -->
+                                        </div>
+                                    </div>
                                 </div>
                             </label>
 
                             <!-- Option 2: Request Verification -->
-                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 15px; border: 1px solid #ddd; border-radius: 4px; transition: all 0.2s;">
+                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
                                 <input type="radio" name="verificationType" value="request" style="margin-top: 3px; cursor: pointer;">
-                                <div>
+                                <div style="flex: 1; width: 100%;">
                                     <div style="font-weight: 600; margin-bottom: 4px;">Request verification from other department(s)</div>
-                                    <div style="font-size: 13px; color: #666;">Request verification from specific departments with optional due date</div>
+                                    <div style="font-size: 13px; color: #666; margin-bottom: 12px;">Request verification from specific departments with optional due date</div>
+                                    
+                                    <!-- Departments Box (shown when request is selected) -->
+                                    <div id="departmentsSelectContainer" style="display: none;">
+                                        <label class="form-label" style="margin-bottom: 8px; font-size: 14px;">
+                                            Select Departments <span style="color: red;">*</span>
+                                        </label>
+                                        <p class="form-hint" style="margin-bottom: 12px; font-size: 12px;">Choose which departments should verify this answer. (Hold Ctrl/Cmd to select multiple)</p>
+                                        <div id="departmentsBox" style="border: 2px solid #017374; border-radius: 4px; padding: 15px; background: white; min-height: 100px; max-height: 250px; overflow-y: auto;">
+                                            <!-- Will be populated by JavaScript -->
+                                        </div>
+                                    </div>
                                 </div>
                             </label>
-                        </div>
-                    </div>
-
-                    <!-- Departments Selection (shown only when Request Verification is selected) -->
-                    <div id="departmentsSection">
-                        <div class="form-section">
-                            <label class="form-label">
-                                Select Departments <span style="color: red;">*</span>
-                            </label>
-                            <p class="form-hint">Choose which departments should verify this answer.</p>
-                            <div id="departmentsCheckboxGroup">
-                                <!-- Will be populated by JavaScript -->
-                            </div>
                         </div>
                     </div>
 
@@ -185,20 +193,18 @@
                         <div class="box-title">Community Stats</div>
                         <div class="stat-row">
                             <span>Total Questions</span>
-                            <span class="stat-value" id="totalQuestions">4</span>
+                            <span class="stat-value" id="totalQuestions">-</span>
                         </div>
                         <div class="stat-row">
                             <span>Verified Answers</span>
-                            <span class="stat-value" id="verifiedCount">0</span>
+                            <span class="stat-value" id="verifiedCount">-</span>
                         </div>
                     </div>
 
                     <div class="info-box">
                         <div class="box-title">Hot Questions</div>
-                        <div class="mini-list">
-                            <a href="#" class="mini-link">How to optimize database queries?</a>
-                            <a href="#" class="mini-link">Best practices for API design</a>
-                            <a href="#" class="mini-link">JavaScript async/await patterns</a>
+                        <div class="mini-list" id="sidebarHotQuestions">
+                            <div style="color: #999; padding: 10px; text-align: center;">Loading...</div>
                         </div>
                     </div>
                 </aside>
@@ -249,6 +255,49 @@
             outline: none;
             border-color: #017374;
             box-shadow: 0 0 0 3px rgba(1, 115, 116, 0.1);
+        }
+
+        #departmentsBox {
+            border: 2px solid #017374;
+            border-radius: 4px;
+            padding: 15px;
+            background: white;
+            color: #333;
+            min-height: 100px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        [data-theme="dark"] #departmentsBox {
+            background: #2d2d2d;
+            border-color: #017374;
+            color: #e0e0e0;
+        }
+
+        #departmentsBox label {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+            margin-bottom: 4px;
+        }
+
+        #departmentsBox label:hover {
+            background: rgba(1, 115, 116, 0.1);
+        }
+
+        [data-theme="dark"] #departmentsBox label:hover {
+            background: rgba(1, 115, 116, 0.2);
+        }
+
+        #departmentsBox input[type="checkbox"] {
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+            accent-color: #017374;
         }
 
         .form-textarea {
@@ -578,11 +627,11 @@
         }
 
         #departmentsSection {
-            padding: 20px;
-            background: #f9f9f9;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin-bottom: 30px;
+            display: block;
+            padding: 0;
+            background: transparent;
+            border: none;
+            margin-bottom: 0;
         }
 
         #departmentsSection.hidden {
@@ -590,8 +639,8 @@
         }
 
         [data-theme="dark"] #departmentsSection {
-            background: #2d2d2d;
-            border-color: #444;
+            background: transparent;
+            border: none;
         }
 
         #departmentsCheckboxGroup {
@@ -770,6 +819,84 @@
         #previewContent a:hover {
             text-decoration: underline;
         }
+
+        /* Departments Dropdown Styles */
+        #departmentsDropdown {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            font-family: inherit;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            margin-top: 8px;
+            min-height: 120px;
+        }
+
+        #departmentsDropdown:hover {
+            border-color: #0a95ff;
+            box-shadow: 0 0 0 2px rgba(10, 149, 255, 0.1);
+        }
+
+        #departmentsDropdown:focus {
+            outline: none;
+            border-color: #0a95ff;
+            box-shadow: 0 0 0 3px rgba(10, 149, 255, 0.2);
+        }
+
+        [data-theme="dark"] #departmentsDropdown {
+            background: #1e1e1e;
+            border-color: #444;
+            color: #fff;
+        }
+
+        [data-theme="dark"] #departmentsDropdown:hover {
+            border-color: #0a95ff;
+            box-shadow: 0 0 0 2px rgba(10, 149, 255, 0.2);
+        }
+
+        [data-theme="dark"] #departmentsDropdown:focus {
+            border-color: #0a95ff;
+            box-shadow: 0 0 0 3px rgba(10, 149, 255, 0.3);
+        }
+
+        #departmentsDropdown option {
+            padding: 8px;
+            background: white;
+            color: #333;
+            font-size: 14px;
+        }
+
+        [data-theme="dark"] #departmentsDropdown option {
+            background: #1e1e1e;
+            color: #fff;
+        }
+
+        #departmentsDropdown option:checked {
+            background: #0a95ff;
+            color: white;
+            font-weight: 600;
+        }
+
+        #departmentsSection {
+            display: block;
+            padding: 0;
+            background: transparent;
+            border: none;
+            margin-bottom: 0;
+        }
+
+        #departmentsSection.hidden {
+            display: none;
+        }
+
+        [data-theme="dark"] #departmentsSection {
+            background: transparent;
+            border: none;
+        }
     </style>
 
     <script>
@@ -800,7 +927,90 @@
             initializeDepartmentsDropdown();
             initializeTinyMCE();
             setupFileUpload();
+            loadCommunityStats();
         });
+
+        // Load Community Stats and Hot Questions
+        async function loadCommunityStats() {
+            try {
+                const res = await fetch('/api/get-all-verified-answers');
+                const data = await res.json();
+                const allQuestions = (data.results || data.answers || []).map((q, idx) => ({
+                    ...q,
+                    id: q.id || idx,
+                    views: q.views || 0,
+                    score: q.score || 0
+                }));
+
+                // Update stats
+                document.getElementById('totalQuestions').textContent = allQuestions.length;
+
+                // Count verified questions using same logic as community.html
+                const verifiedCount = allQuestions.filter(q => {
+                    // For request type: all requested departments must have verified
+                    if (q.verification_type === 'request' && q.requested_departments) {
+                        const requestedDepts = Array.isArray(q.requested_departments) 
+                            ? q.requested_departments 
+                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                        const deptCount = requestedDepts.length;
+                        return deptCount > 0;
+                    }
+                    // For self type: include all
+                    return q.verification_type === 'self';
+                }).length;
+
+                document.getElementById('verifiedCount').textContent = verifiedCount;
+
+                // Update Hot Questions
+                updateHotQuestions(allQuestions);
+            } catch (e) {
+                console.error('Error loading community stats:', e);
+                document.getElementById('totalQuestions').textContent = '0';
+                document.getElementById('verifiedCount').textContent = '0';
+            }
+        }
+
+        function updateHotQuestions(allQuestions) {
+            if (allQuestions.length === 0) {
+                const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
+                if (hotQuestionsDiv) {
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                }
+                return;
+            }
+
+            // Sort by score (descending) and get top 3
+            const topQuestions = [...allQuestions]
+                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .slice(0, 3);
+
+            // Update Hot Questions list
+            const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
+            if (hotQuestionsDiv) {
+                hotQuestionsDiv.innerHTML = topQuestions.map(q => {
+                    const scoreDisplay = q.score || 0;
+                    const title = escapeHtml(q.question || q.question_title || 'Untitled');
+                    return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" title="Score: ${scoreDisplay}">${title}</a>`;
+                }).join('');
+
+                // If no questions, show placeholder
+                if (topQuestions.length === 0) {
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                }
+            }
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
 
         async function getCurrentUser() {
             try {
@@ -858,20 +1068,26 @@
         // Setup verification type selection
         function setupVerificationType() {
             const radios = document.querySelectorAll('input[name="verificationType"]');
-            const departmentsSection = document.getElementById('departmentsSection');
+            const requestDepartmentsContainer = document.getElementById('departmentsSelectContainer');
+            const selfDepartmentsContainer = document.getElementById('selfDepartmentsContainer');
 
             radios.forEach(radio => {
                 radio.addEventListener('change', (e) => {
                     if (e.target.value === 'request') {
-                        departmentsSection.classList.remove('hidden');
+                        // Show request departments, hide self departments
+                        requestDepartmentsContainer.style.display = 'block';
+                        selfDepartmentsContainer.style.display = 'none';
                     } else {
-                        departmentsSection.classList.add('hidden');
+                        // Show self departments, hide request departments
+                        selfDepartmentsContainer.style.display = 'block';
+                        requestDepartmentsContainer.style.display = 'none';
                     }
                 });
             });
             
-            // Initialize: hide by default since "self" is checked first
-            departmentsSection.classList.add('hidden');
+            // Initialize: show self by default since "self" is checked first
+            requestDepartmentsContainer.style.display = 'none';
+            selfDepartmentsContainer.style.display = 'block';
         }
 
         // Setup file upload functionality
@@ -981,11 +1197,24 @@
 
         // Initialize departments checkbox group
         function initializeDepartmentsDropdown() {
-            const checkboxGroup = document.getElementById('departmentsCheckboxGroup');
-            if (checkboxGroup) {
-                checkboxGroup.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                    <label style="display: flex; align-items: center; padding: 8px 0; cursor: pointer;">
-                        <input type="checkbox" class="dept-checkbox" value="${dept}" style="margin-right: 12px; cursor: pointer; width: 18px; height: 18px;">
+            const departmentsBox = document.getElementById('departmentsBox');
+            const selfDepartmentsBox = document.getElementById('selfDepartmentsBox');
+            
+            // Populate request departments (multiple select)
+            if (departmentsBox) {
+                departmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+                    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background 0.2s; margin-bottom: 4px;">
+                        <input type="checkbox" class="dept-checkbox" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
+                        <span style="font-size: 14px; color: var(--text-primary);">${dept}</span>
+                    </label>
+                `).join('');
+            }
+            
+            // Populate self departments (single or multiple select)
+            if (selfDepartmentsBox) {
+                selfDepartmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+                    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background 0.2s; margin-bottom: 4px;">
+                        <input type="checkbox" class="self-dept-checkbox" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
                         <span style="font-size: 14px; color: var(--text-primary);">${dept}</span>
                     </label>
                 `).join('');
@@ -1008,7 +1237,6 @@
                 alert('Please enter a body');
                 return;
             }
-
             const tagArray = tags ? tags.split(/[\s,]+/).filter(t => t) : [];
 
             try {
@@ -1031,16 +1259,28 @@
                     comment: ''
                 };
 
-                // If requesting verification, add departments
+                // Get departments based on verification type
+                let selectedDepts = [];
                 if (verificationType === 'request') {
-                    const selectedDepts = Array.from(document.querySelectorAll('#departmentsCheckboxGroup .dept-checkbox:checked'))
+                    selectedDepts = Array.from(document.querySelectorAll('#departmentsBox .dept-checkbox:checked'))
                         .map(cb => cb.value);
 
                     if (selectedDepts.length === 0) {
                         alert('Please select at least one department');
                         return;
                     }
+                } else if (verificationType === 'self') {
+                    selectedDepts = Array.from(document.querySelectorAll('#selfDepartmentsBox .self-dept-checkbox:checked'))
+                        .map(cb => cb.value);
 
+                    if (selectedDepts.length === 0) {
+                        alert('Please select your department');
+                        return;
+                    }
+                }
+
+                // Add selected departments to payload
+                if (selectedDepts.length > 0) {
                     payload.requestedDepartments = selectedDepts;
                 }
 

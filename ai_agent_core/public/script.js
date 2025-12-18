@@ -2722,53 +2722,6 @@ window.filterItemsForChange = filterItemsForChange;
 window.selectDirectoryForChange = selectDirectoryForChange;
 
 // === Verified Answers Functions ===
-async function rateAnswer(answerText, rating) {
-    const lastUserMessage = window.lastUserMessage || 'Unknown question';
-    
-    console.log(`Rating: ${rating}, Answer: ${answerText.substring(0, 50)}...`);
-    
-    try {
-        // Fetch current session data
-        const sessionResponse = await fetch('/auth/session');
-        if (!sessionResponse.ok) {
-            alert('ข้อผิดพลาด: ไม่สามารถดึงข้อมูลการเข้าสู่ระบบได้');
-            return;
-        }
-        const sessionData = await sessionResponse.json();
-        const userName = sessionData?.username || 'Anonymous';
-        const userId = sessionData?.userId;  // Get userId from session
-        
-        const response = await fetch('/api/rate-answer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: lastUserMessage,
-                answer: answerText,
-                rating: rating,
-                userId: userId,
-                username: userName
-            })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            alert('เกิดข้อผิดพลาด: ' + (errorData.error || `Server error (${response.status})`));
-            return;
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            alert('ขอบคุณสำหรับการให้คะแนน!');
-        } else {
-            alert('เกิดข้อผิดพลาด: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        console.error('Error rating answer:', error);
-        alert('ข้อผิดพลาดในการส่ง: ' + error.message);
-    }
-}
-
 async function verifyAnswer(answerText, verifyBtn) {
     // Try to get user question from the message element's stored data, fallback to window.lastUserMessage
     let lastUserMessage = 'Unknown question';
@@ -2939,25 +2892,6 @@ async function showVerifyModal(question, answer, verifyBtn) {
         }
     });
     
-    // Rating buttons handler
-    const ratingBtns = document.querySelectorAll('.rating-btn');
-    ratingBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const rating = btn.dataset.rating;
-            document.getElementById('verifyScore').value = rating;
-            
-            // Update visual state
-            ratingBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        });
-    });
-    
-    // Set default rating to 0 (Neutral)
-    const defaultBtn = document.querySelector('[data-rating="0"]');
-    if (defaultBtn) {
-        defaultBtn.click();
-    }
-    
     // Department checkboxes are now handled via querySelectorAll on submit
     
     // Close modal function
@@ -2990,7 +2924,6 @@ async function showVerifyModal(question, answer, verifyBtn) {
             ? Array.from(document.querySelectorAll('input[name="myDept"]:checked')).map(cb => cb.value)
             : Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
         const notifyMe = document.getElementById('notifyCheckbox').checked;
-        const score = parseInt(document.getElementById('verifyScore').value) || 0;
         
         // Disable button while processing
         submitBtn.disabled = true;
@@ -3016,7 +2949,6 @@ async function showVerifyModal(question, answer, verifyBtn) {
                     answer: answer,
                     comment: comment || '',
                     userName: userName,
-                    rating: score,
                     tags: selectedTags,
                     verificationType: verificationType,
                     requestedDepartments: selectedDepts,
