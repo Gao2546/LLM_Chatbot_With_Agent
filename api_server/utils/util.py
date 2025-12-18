@@ -1404,8 +1404,10 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
             json={
                 "model": model_name,
                 "messages": messages,
-                'temperature': 0.0,
-                'top_p': 1.0,
+                'temperature': 0.1,
+                'top_p': 0.95,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0,
             }
         )
         response.raise_for_status()
@@ -1580,6 +1582,8 @@ Write a single, concise sentence that simulates a direct excerpt from a document
 Include likely keywords and factual phrasing.
 
 User Query: {text}
+Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
+Prompt Language: English
 
 Output only the simulated excerpt.
 """ #*****************
@@ -3378,7 +3382,7 @@ def process_pages_with_vlm(search_results: List[Dict[str, Any]], original_query:
         # 2. Extract the specific page as an image
         # Page number is 1-indexed in DB, convert to 0-indexed for fitz
         page_num_0_idx = page_num_1_idx - 1 
-        image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
+        image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=100)
         
         if image_bytes:
             image_bytes_list.append(image_bytes)
@@ -3616,7 +3620,7 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 *   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
 
 ### Relevance Filter
-If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
+If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
 """) #**********************************************
     
 #     system_prompt = (
@@ -3642,10 +3646,9 @@ Please extract data to markdown (keep all original data ignore not match content
 "{original_query}"
 *** Do not answer the question. ***
 *** Extract all content from the document. ***
-*** If the provided content does not contain the answer, do not Extract that content. ***
 
 ### Relevance Filter
-If a specific user question is provided and this page contains no relevant information to answer it, do not extract content. Instead, return only: "no related data"
+*** If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section. ***
 
 Provide your response in Markdown format, following the tagging guidelines provided in the system prompt.
 """
@@ -3656,12 +3659,12 @@ Provide your response in Markdown format, following the tagging guidelines provi
         #                  "If the image contains text, extract and summarize it...")
         # # Prompt for OpenRouter VLM
         # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-        # vlm_response = OpenRouterInference(
-        vlm_response = DeepInfraInference(
+        vlm_response = OpenRouterInference(
+        # vlm_response = DeepInfraInference(
             prompt=prompt,
             system_prompt=system_prompt,
             image_bytes_list=image_bytes_list,
-            model_name= 'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
         )
         print("DeepInfra VLM response received.")
         print(vlm_response)

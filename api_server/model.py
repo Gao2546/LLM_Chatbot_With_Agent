@@ -589,8 +589,8 @@ def Search_By_DuckDuckGo():
 # ==============================================================================
 
 def convert_page_worker(args):
-                    file_bytes, page_num_0_idx = args
-                    img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
+                    file_bytes, page_num_0_idx, dpi = args
+                    img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi)
                     page_num_1_idx = page_num_0_idx + 1
                     return (page_num_1_idx, img_bytes)
 
@@ -747,9 +747,9 @@ def process():
                 #         "img_bytes": img_bytes
                 #     })
 
-
+                start_process = time.time()
                 with multiprocessing.Pool(processes=10) as pool:  # Adjust processes as needed
-                    tasks = [(file_bytes, page_num_0_idx) for page_num_0_idx in range(num_pages)]
+                    tasks = [(file_bytes, page_num_0_idx, 100) for page_num_0_idx in range(num_pages)]
                     results = pool.map(convert_page_worker, tasks)
 
                 for page_num_1_idx, img_bytes in results:
@@ -802,6 +802,7 @@ def process():
 
         else:
             print(f"Skipped file: Unknown processing_mode '{processing_mode}'")
+    print(f"Process time: {time.time() - start_process} sec")
 
     clear_gpu()
     return jsonify({
@@ -875,6 +876,7 @@ def process_document_api():
 
     # --- SCENARIO B: File Processing ---
     for file in files:
+        start_process = time.time()
         filename = file.filename
         file.seek(0)
         file_bytes = file.read()
@@ -909,14 +911,30 @@ def process_document_api():
                     num_pages = pdf_doc.page_count
                     
                     # Convert pages to images
-                    for page_num_0_idx in range(num_pages):
-                        img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
-                        if img_bytes:
-                            pages_to_embed.append({
-                                "page_num_1_idx": page_num_0_idx + 1,
-                                "img_bytes": img_bytes
-                            })
+                    # for page_num_0_idx in range(num_pages):
+                    #     img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx)
+                    #     if img_bytes:
+                    #         pages_to_embed.append({
+                    #             "page_num_1_idx": page_num_0_idx + 1,
+                    #             "img_bytes": img_bytes
+                    #         })
+                    # pdf_doc.close()
+                    cvt_time = time.time()
+                    with multiprocessing.Pool(processes=10) as pool:  # Adjust processes as needed
+                        tasks = [(file_bytes, page_num_0_idx, 50) for page_num_0_idx in range(num_pages)]
+                        results = pool.map(convert_page_worker, tasks)
+
+                    for page_num_1_idx, img_bytes in results:
+                        if not img_bytes:
+                            print(f" - FAILED to render image for page {page_num_1_idx}. Skipping this page.")
+                            continue
+                        # Add to our list to process in a batch
+                        pages_to_embed.append({
+                            "page_num_1_idx": page_num_1_idx,
+                            "img_bytes": img_bytes
+                        })
                     pdf_doc.close()
+                    print(f"convertPDFIMG_time : {time.time() - cvt_time} sec")
                 
                 # B. Handle Images
                 elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
@@ -1004,6 +1022,7 @@ def process_document_api():
 
             except Exception as e:
                 print(f"Error in text processing for {filename}: {e}")
+        print(f"Process time: {time.time() - start_process} sec")
 
     clear_gpu()
     return jsonify({
@@ -1080,14 +1099,16 @@ def search_similar_api_unified():
     page_search_results = []
 
     create_search_prompt = f"""
-Act as a document search engine. 
+Act as a document search engine (PDF document search by vector similarity). 
 Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
 Include likely keywords and factual phrasing.
 
 User Query: {queryT}
+Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
+Prompt Language: English
 
 Output only the simulated excerpt.
-"""
+""" #*****************
     if not LOCAL:
             search_text = DeepInfraInference(
                 prompt=create_search_prompt,
