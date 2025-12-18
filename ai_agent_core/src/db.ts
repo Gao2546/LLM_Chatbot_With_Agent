@@ -1260,6 +1260,133 @@ async function getAnswerVerifications(answerId: number) {
 }
 
 /**
+ * ④ Filter Questions by type
+ * - all: ทั้งหมด
+ * - my-questions: สร้างโดยผู้ใช้เอง
+ * - my-answers: ผู้ใช้ไปเม้น/comment
+ * - pending-review: รีวิวยังไม่เสร็จ (verification_count > 0 && verification_count < requested_departments count)
+ * - unverified: ยังไม่มีการตรวจสอบเลย (verification_count = 0)
+ */
+async function filterQuestionsByType(
+  filterType: string,
+  username?: string,
+  sortBy: string = 'newest',
+  limit: number = 100
+) {
+  try {
+    let query = `
+      SELECT 
+        va.id,
+        va.question,
+        va.answer,
+        va.created_at,
+        va.created_by,
+        COALESCE(va.views, 0) as views,
+        va.requested_departments as requested_departments_list,
+        va.verification_type,
+        va.tags,
+        (SELECT COUNT(*) FROM answer_verifications 
+         WHERE verified_answer_id = va.id 
+         AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) as verification_count,
+        ARRAY_LENGTH(va.requested_departments, 1) as total_requested_depts,
+        COALESCE((SELECT SUM(vote) FROM question_votes WHERE question_id = va.id), 0) as vote_score
+      FROM verified_answers va
+    `;
+
+    const params: any[] = [];
+
+    // Apply filter logic
+    switch (filterType) {
+      case 'my-questions':
+        if (username) {
+          query += ` WHERE va.created_by = $1`;
+          params.push(username);
+        }
+        break;
+
+      case 'my-answers':
+        if (username) {
+          query += ` WHERE EXISTS (
+            SELECT 1 FROM comments 
+            WHERE question_id = va.id AND username = $1
+          )`;
+          params.push(username);
+        }
+        break;
+
+      case 'pending-review':
+        // verification_type = 'request' AND verification_count > 0 (has started review but not complete)
+        query += ` WHERE va.verification_type = 'request'
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id) > 0`;
+        break;
+
+      case 'unverified':
+        // No verification at all AND not self-verified
+        query += ` WHERE (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id) = 0
+                   AND va.verification_type != 'self'`;
+        break;
+
+      case 'verified':
+        // Self-verified (verification_type = 'self') OR fully verified (verification_count >= total_requested_depts when it's a request)
+        query += ` WHERE va.verification_type = 'self'
+                   OR (va.verification_type = 'request' 
+                       AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                       AND (SELECT COUNT(*) FROM answer_verifications 
+                        WHERE verified_answer_id = va.id) >= ARRAY_LENGTH(va.requested_departments, 1))`;
+        break;
+
+      case 'all':
+      default:
+        // Show all (no WHERE clause needed)
+        break;
+    }
+
+    // Apply sort
+    switch (sortBy) {
+      case 'score':
+        query += ` ORDER BY verification_count DESC, va.created_at DESC`;
+        break;
+      case 'views':
+        query += ` ORDER BY views DESC, va.created_at DESC`;
+        break;
+      case 'verified':
+        query += ` ORDER BY verification_count DESC, va.created_at DESC`;
+        break;
+      case 'newest':
+      default:
+        query += ` ORDER BY va.created_at DESC`;
+    }
+
+    const limitIndex = params.length + 1;
+    query += ` LIMIT $${limitIndex}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map(row => ({
+      id: row.id,
+      question: row.question,
+      answer: row.answer,
+      created_at: row.created_at,
+      created_by: row.created_by,
+      views: parseInt(row.views) || 0,
+      verification_type: row.verification_type,
+      requested_departments: row.requested_departments_list || [],
+      tags: row.tags || [],
+      verification_count: parseInt(row.verification_count) || 0,
+      total_requested_depts: parseInt(row.total_requested_depts) || 0,
+      vote_score: parseInt(row.vote_score) || 0,
+      user_has_answered: parseInt(row.user_comment_count) > 0
+    }));
+  } catch (error) {
+    console.error('Error filtering questions:', error);
+    throw error;
+  }
+}
+
+/**
  * Iterates through ALL guest users and deletes them.
  */
 async function deleteAllGuestUsersAndChats() {
@@ -1540,6 +1667,7 @@ export {
   saveVerifiedAnswer,
   searchVerifiedAnswers,
   getAnswerVerifications,
+  filterQuestionsByType,
 
   // Question Attachments Functions
   saveQuestionAttachment,

@@ -379,7 +379,7 @@
                         <button class="vote-btn vote-up" data-vote="1" title="This question is useful">
                             <i class="fas fa-caret-up"></i>
                         </button>
-                        <div class="vote-count" id="questionVoteCount">${q.score || 0}</div>
+                        <div class="vote-count" id="questionVoteCount" style="min-height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 4px; padding: 4px 8px;" data-vote="0" title="Click to remove your vote">0</div>
                         <button class="vote-btn vote-down" data-vote="-1" title="This question is not useful">
                             <i class="fas fa-caret-down"></i>
                         </button>
@@ -398,9 +398,6 @@
                         </div>
                         <div class="detail-meta-item">
                             <i class="fas fa-eye"></i> ${q.views || 0} views
-                        </div>
-                        <div class="detail-meta-item">
-                            <i class="fas fa-star"></i> Score: ${q.score || 0}
                         </div>
                     </div>
 
@@ -466,6 +463,15 @@
                     await voteQuestion(vote);
                 });
             });
+            
+            // Add click handler for vote count (0 button)
+            const voteCountEl = document.getElementById('questionVoteCount');
+            if (voteCountEl) {
+                voteCountEl.addEventListener('click', async function() {
+                    const vote = parseInt(this.getAttribute('data-vote'));
+                    await voteQuestion(vote);
+                });
+            }
         }
         // Load and display attachments
         async function loadAttachments(questionId) {
@@ -598,10 +604,11 @@
                     const data = await res.json();
                     const voteCountEl = document.getElementById('questionVoteCount');
                     if (voteCountEl) {
-                        voteCountEl.textContent = data.score || 0;
+                        // Show user's own vote (-1, 0, or 1), not the total score
+                        voteCountEl.textContent = data.userVote || 0;
                         voteCountEl.className = 'vote-count';
-                        if (data.score > 0) voteCountEl.classList.add('positive');
-                        if (data.score < 0) voteCountEl.classList.add('negative');
+                        if (data.userVote > 0) voteCountEl.classList.add('positive');
+                        if (data.userVote < 0) voteCountEl.classList.add('negative');
                     }
 
                     // Update button states
@@ -932,8 +939,15 @@
                 const dept = comment.requested_departments && comment.requested_departments.length > 0 
                     ? comment.requested_departments[0] 
                     : (comment.department || 'N/A');
-                const statusIcon = '✓';
-                const statusClass = 'correct';
+                
+                // Determine if this is a self verification or a request
+                const isSelfVerified = comment.verification_type === 'self';
+                const statusIcon = isSelfVerified ? '✓' : '';
+                const statusClass = isSelfVerified ? 'correct' : 'pending';
+                const statusText = isSelfVerified 
+                    ? `Verified by ${comment.username}`
+                    : `Requested from ${comment.username} - ${dept}`;
+                
                 const formattedDate = new Date(comment.createdAt).toLocaleDateString('en-GB', {
                     day: '2-digit',
                     month: 'short'
@@ -944,8 +958,8 @@
                     <div class="comment-item verification-comment">
                         <div class="verification-header">
                             <span class="verification-info">
-                                <span class="dept-name">${dept}:</span>
-                                <span class="verification-status ${statusClass}">${statusIcon} Verified by ${comment.username} (${formattedDate})</span>
+                                <span class="dept-name">${isSelfVerified ? dept : 'Request'}:</span>
+                                <span class="verification-status ${statusClass}">${statusIcon} ${statusText} (${formattedDate})</span>
                             </span>
                         </div>
                         ${comment.text ? `<div class="comment-text">${safeText}</div>` : ''}

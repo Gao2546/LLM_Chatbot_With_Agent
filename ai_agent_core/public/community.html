@@ -140,6 +140,7 @@
         let currentSort = 'newest';
         let selectedTags = [];
         let currentUserId = null;
+        let currentUsername = null;
 
         document.addEventListener('DOMContentLoaded', async () => {
             await getCurrentUser();
@@ -178,6 +179,7 @@
                 
                 if (data.loggedIn) {
                     currentUserId = data.userId || null;
+                    currentUsername = data.username || null;
                     
                     if (loginBtn) {
                         loginBtn.textContent = data.isGuest ? 'Login' : 'Logout';
@@ -192,6 +194,7 @@
                     }
                 } else {
                     currentUserId = null;
+                    currentUsername = null;
                     if (loginBtn) {
                         loginBtn.textContent = 'Login';
                         loginBtn.href = '/auth/login';
@@ -203,6 +206,7 @@
             } catch (e) {
                 console.log('User not logged in:', e);
                 currentUserId = null;
+                currentUsername = null;
             }
         }
 
@@ -255,24 +259,46 @@
             renderQuestions();
         }
 
-        function applyFilter(filter) {
+        async function applyFilter(filter) {
             currentFilter = filter;
-            renderQuestions();
+            await loadQuestionsByFilter(filter);
+        }
+
+        async function loadQuestionsByFilter(filter) {
+            try {
+                let url = '/api/filter-questions?type=' + filter;
+                
+                // Add username if user is logged in
+                if (currentUsername) {
+                    url += '&username=' + encodeURIComponent(currentUsername);
+                }
+                
+                // Add sort parameter
+                const sortParam = currentSort || 'newest';
+                url += '&sortBy=' + sortParam;
+                
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                allQuestions = (data.results || []).map((q, idx) => ({
+                    ...q,
+                    id: q.id || idx,
+                    views: q.views || 0,
+                    score: q.verification_count || 0
+                }));
+                
+                console.log(`Loaded ${allQuestions.length} questions with filter: ${filter}`);
+                updateStats();
+                renderQuestions();
+            } catch (e) {
+                console.error('Error loading filtered questions:', e);
+                showEmpty();
+            }
         }
 
         async function loadAllQuestions() {
             try {
-                const res = await fetch('/api/get-all-verified-answers');
-                const data = await res.json();
-                allQuestions = (data.results || data.answers || []).map((q, idx) => ({
-                    ...q,
-                    id: q.id || idx,
-                    views: q.views || 0,
-                    score: q.score || 0
-                }));
-                console.log('Loaded questions:', allQuestions.length);
-                updateStats();
-                renderQuestions();
+                await loadQuestionsByFilter('all');
             } catch (e) {
                 console.error('Error:', e);
                 showEmpty();
@@ -311,11 +337,12 @@
         }
 
         function filterByTab(tab, event) {
-            // Map 'all' to 'newest' for sorting
+            // Map tab to sort parameter
             currentSort = (tab === 'all') ? 'newest' : tab;
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
-            renderQuestions();
+            // Reload questions with new sort
+            loadQuestionsByFilter(currentFilter);
         }
 
         function updateSort() {
@@ -372,43 +399,12 @@
         function renderQuestions() {
             let filtered = [...allQuestions];
 
-            // Apply tag filter first
+            // Apply tag filter only (type filter is already handled by API)
             if (selectedTags.length > 0) {
                 filtered = filtered.filter(q => {
                     const qTags = q.tags || [];
                     return selectedTags.some(tag => qTags.includes(tag));
                 });
-            }
-
-            // Apply sidebar filter first (My Questions, Pending review, Unverified)
-            if (currentFilter === 'my-questions') {
-                // Filter by current user's questions (created by this user)
-                if (currentUserId) {
-                    filtered = filtered.filter(q => q.user_id === currentUserId);
-                } else {
-                    filtered = []; // No user logged in, show nothing
-                }
-            } else if (currentFilter === 'my-answers') {
-                // Filter by questions the current user has verified/answered
-                if (currentUserId) {
-                    filtered = filtered.filter(q => q.answered_by_user === true);
-                } else {
-                    filtered = []; // No user logged in, show nothing
-                }
-            } else if (currentFilter === 'pending') {
-                // Questions that are requesting verification from other departments but not all have verified yet
-                filtered = filtered.filter(q => {
-                    if (q.verification_type === 'request' && q.requested_departments && q.requested_departments.length > 0) {
-                        const requestedDepts = Array.isArray(q.requested_departments) 
-                            ? q.requested_departments 
-                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                        return requestedDepts.length > 0;
-                    }
-                    return false;
-                });
-            } else if (currentFilter === 'unverified') {
-                // Filter for unverified questions
-                filtered = filtered.filter(q => q.verification_type !== 'request');
             }
 
             // Apply tab sort (Newest, Score, Views, Verified)
@@ -471,7 +467,7 @@
                 return `
                 <div class="question-item" onclick="goToDetail(${q.id})">
                     <div class="vote-section">
-                        <div class="vote-count">${q.score || 0}</div>
+                        <div class="vote-count">${q.vote_score || 0}</div>
                         <div>${badgeHtml}</div>
                     </div>
                     <div class="question-content">

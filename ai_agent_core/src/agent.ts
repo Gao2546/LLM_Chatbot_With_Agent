@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType } from './db.js';
 
 dotenv.config();
 
@@ -2401,7 +2401,7 @@ router.post('/increment-view', async (req: Request, res: Response) => {
 // GET /api/get-all-verified-answers - Get all verified answers
 router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
   try {
-    // Get all verified answers with verification count
+    // Get all verified answers with verification count and vote score
     const result = await pool.query(`
       SELECT 
         va.id,
@@ -2413,8 +2413,10 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
         va.requested_departments as requested_departments_list,
         va.verification_type,
         va.tags,
-        (SELECT COUNT(DISTINCT commenter_name) FROM answer_verifications 
-         WHERE verified_answer_id = va.id AND commenter_name IS NOT NULL) as verification_count
+        (SELECT COUNT(*) FROM answer_verifications 
+         WHERE verified_answer_id = va.id 
+         AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) as verification_count,
+        COALESCE((SELECT SUM(vote) FROM question_votes WHERE question_id = va.id), 0) as vote_score
       FROM verified_answers va
       ORDER BY va.created_at DESC
       LIMIT 100
@@ -2433,7 +2435,8 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
         verification_type: row.verification_type,
         requested_departments: row.requested_departments_list || [],
         requested_departments_list: row.requested_departments_list || [],
-        verification_count: parseInt(row.verification_count) || 0
+        verification_count: parseInt(row.verification_count) || 0,
+        vote_score: parseInt(row.vote_score) || 0
       };
     });
 
@@ -2565,6 +2568,30 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
   }
 });
 
+// GET /api/filter-questions - Filter questions by type
+router.get('/filter-questions', async (req: Request, res: Response) => {
+  try {
+    const { type = 'all', username, sortBy = 'newest', limit = 100 } = req.query;
+
+    if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified'].includes(type as string)) {
+      return res.status(400).json({ success: false, error: 'Invalid filter type' });
+    }
+
+    const results = await filterQuestionsByType(
+      type as string,
+      username as string,
+      sortBy as string,
+      parseInt(limit as string) || 100
+    );
+
+    console.log(`✅ Filtered ${results.length} questions by type: ${type}`);
+    res.json({ success: true, results, count: results.length });
+  } catch (error) {
+    console.error('❌ Error filtering questions:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
 // GET /api/get-comments/:questionId - Get comments for a question
 router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
   try {
@@ -2671,29 +2698,31 @@ router.post('/vote-question/:questionId', async (req: Request, res: Response) =>
 
     let userVote = vote;
 
-    if (existingVote.rows.length > 0) {
-      const oldVote = existingVote.rows[0].vote;
-      
-      // If clicking the same vote, remove it (toggle off)
-      if (oldVote === vote) {
+    if (vote === 0) {
+      // Remove vote (only delete if exists)
+      if (existingVote.rows.length > 0) {
         await pool.query(
           `DELETE FROM question_votes WHERE question_id = $1 AND user_id = $2`,
           [questionId, userId]
         );
-        userVote = 0;
-      } else {
-        // Update to new vote
+      }
+      userVote = 0;
+    } else {
+      // vote is 1 or -1
+      if (existingVote.rows.length > 0) {
+        // Update existing vote (regardless of whether it's the same or different)
         await pool.query(
           `UPDATE question_votes SET vote = $1, voted_at = NOW() WHERE question_id = $2 AND user_id = $3`,
           [vote, questionId, userId]
         );
+      } else {
+        // Insert new vote
+        await pool.query(
+          `INSERT INTO question_votes (question_id, user_id, vote, voted_at) VALUES ($1, $2, $3, NOW())`,
+          [questionId, userId, vote]
+        );
       }
-    } else {
-      // Insert new vote
-      await pool.query(
-        `INSERT INTO question_votes (question_id, user_id, vote, voted_at) VALUES ($1, $2, $3, NOW())`,
-        [questionId, userId, vote]
-      );
+      userVote = vote;
     }
 
     // Calculate total score from votes

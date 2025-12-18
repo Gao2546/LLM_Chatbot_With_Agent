@@ -961,6 +961,11 @@
     color: #ffc107;
 }
 
+.verification-status.pending {
+    color: #ff9800;
+    font-weight: 500;
+}
+
 .empty-comments {
     text-align: center;
     padding: 40px 20px;
