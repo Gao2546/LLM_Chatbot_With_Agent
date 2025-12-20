@@ -87,9 +87,14 @@ let setting_prompts : string = await readFile("./build/setting.txt") as string;
 
 console.log("Setting Prompt Loaded: ", setting_prompts.substring(0, 100), "...");
 
+// interface ToolData {
+//   toolName: string;
+//   arguments: {[key: string]: string[]};
+// }
+
 interface ToolData {
   toolName: string;
-  arguments: {[key: string]: string[]};
+  arguments: Record<string, any>;
 }
 
 interface OllamaResponse {
@@ -137,7 +142,17 @@ const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
   };
 
   for (const key in content) {
-    toolData.arguments[key] = content[key];
+    let value = content[key];
+
+    // Check if the tool is CreateFile or EditFile and if the value is a string
+    if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
+      // Replace html entities globally
+      console.log("Before replace: ", value.substring(0, 100), "...");
+      value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      console.log("After replace: ", value.substring(0, 100), "...");
+    }
+
+    toolData.arguments[key] = value;
   }
 
   return toolData;
@@ -1197,12 +1212,12 @@ router.post('/message', async (req : Request, res : Response) => {
       const regex = /<use_tool>([\s\S]*?)<\/use_tool>/g;
       rrs = [...responsetext.matchAll(regex)].map(m => m[1].trim());
           
-      if (rrs.length > 0) {
-        rrs = rrs.map(xml =>
-          xml.replace(/<text>([\s\S]*?)<\/text>/g, (match, p1) => `<text><![CDATA[\n${p1}\n]]></text>`)
-             .replace(/<result>([\s\S]*?)<\/result>/g, (match, p1) => `<result><![CDATA[\n${p1}\n]]></result>`)
-        );
-      }
+      // if (rrs.length > 0) {
+      //   rrs = rrs.map(xml =>
+      //     xml.replace(/<text>([\s\S]*?)<\/text>/g, (match, p1) => `<text><![CDATA[\n${p1}\n]]></text>`)
+      //        .replace(/<result>([\s\S]*?)<\/result>/g, (match, p1) => `<result><![CDATA[\n${p1}\n]]></result>`)
+      //   );
+      // }
       
       console.log(rrs);
       
