@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import { Readable } from 'stream';
 import FormData from 'form-data';
 import * as fs from 'fs';
-import { saveVerifiedAnswer, searchVerifiedAnswers, updateAnswerRating, getAnswerVerifications } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications } from './db.js';
 
 
 dotenv.config();
@@ -958,7 +958,6 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
         toolParameters.question_embedding,
         toolParameters.answer_embedding,
         toolParameters.user_id,
-        toolParameters.rating,
         toolParameters.commenter_name
       );
 
@@ -978,8 +977,6 @@ async function SearchVerifiedAnswers(questionEmbedding: number[], threshold: num
         id: r.id,
         question: r.question,
         answer: r.answer,
-        rating: r.avg_rating,
-        verified_count: r.verified_count,
         similarity: r.similarity
       }))
     };
@@ -994,12 +991,10 @@ async function SaveVerifiedAnswer(
   questionEmbedding: number[],
   answerEmbedding?: number[],
   userId?: number,
-  rating: number = 1,
   commenterName: string = 'Anonymous'
 ) {
   try {
-    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, rating, commenterName);
-    await updateAnswerRating(result.answerId);
+    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, commenterName);
     return { success: true, answerId: result.answerId };
   } catch (error) {
     return { success: false, error: String(error) };

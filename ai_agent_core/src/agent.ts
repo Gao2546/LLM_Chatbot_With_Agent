@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, updateAnswerRating, getAnswerVerifications } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags } from './db.js';
 
 dotenv.config();
 
@@ -164,66 +164,6 @@ export default async function agentRouters(ios: SocketIOServer) {
   io = ios;
 
   // === Verified Answers Endpoints ===
-
-  // ① Rate Answer
-  router.post('/rate-answer', async (req, res) => {
-    try {
-      const { question, answer, rating, userName } = req.body;
-      
-      if (!question || !answer || rating === undefined) {
-        return res.status(400).json({ error: 'Missing required fields' });
-      }
-
-      // สร้าง embedding สำหรับ question และ answer จาก Python API server (ต้อง 1024 dimensions)
-      let questionEmbedding: number[] = [];
-      let answerEmbedding: number[] = [];
-
-      try {
-        const questionEmbeddingRes = await axios.post(
-          `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
-          { 
-            text: question,
-            dimensions: 1024
-          }
-        );
-        questionEmbedding = questionEmbeddingRes.data.embedding;
-
-        // ตรวจสอบ dimensions สำหรับ question
-        if (questionEmbedding.length !== 1024) {
-          throw new Error(`Invalid question embedding dimensions: expected 1024, got ${questionEmbedding.length}`);
-        }
-      } catch (e) {
-        console.warn('Could not get question embedding:', e);
-      }
-
-      try {
-        const answerEmbeddingRes = await axios.post(
-          `${process.env.API_SERVER_URL || 'http://localhost:5000'}/encode_embedding`,
-          { 
-            text: answer,
-            dimensions: 1024
-          }
-        );
-        answerEmbedding = answerEmbeddingRes.data.embedding;
-
-        // ตรวจสอบ dimensions สำหรับ answer
-        if (answerEmbedding.length !== 1024) {
-          throw new Error(`Invalid answer embedding dimensions: expected 1024, got ${answerEmbedding.length}`);
-        }
-      } catch (e) {
-        console.warn('Could not get answer embedding:', e);
-      }
-
-      // บันทึกคะแนน พร้อมทั้ง question และ answer embeddings
-      const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, undefined, rating, userName);
-      await updateAnswerRating(result.answerId);
-
-      res.json({ success: true, answerId: result.answerId });
-    } catch (error) {
-      console.error('Error rating answer:', error);
-      res.status(500).json({ error: String(error) });
-    }
-  });
 
   // ③ Search Verified Answers
   router.post('/search-verified-answers', async (req, res) => {
@@ -2245,79 +2185,6 @@ router.post("/save_img", upload.single("file"), async (req: Request, res: Respon
   }
 });
 
-// =================================================================================
-// NEW: RATING AND VERIFICATION ENDPOINTS
-// =================================================================================
-
-// POST /api/rate-answer - Save answer rating to PostgreSQL
-router.post('/rate-answer', async (req: Request, res: Response) => {
-  try {
-    const { question, answer, rating, userName } = req.body;
-    const userId = req.session.user?.id;
-
-    if (!question || !answer || rating === undefined) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
-    }
-
-    // Get embeddings from Python API
-    let questionEmbedding: number[] = [];
-    let answerEmbedding: number[] = [];
-    try {
-      const apiUrl = process.env.API_SERVER_URL;
-      if (apiUrl) {
-        // Get question embedding
-        const questionEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: question, dimensions: 1024 })
-        });
-        if (questionEmbedRes.ok) {
-          const embedData: any = await questionEmbedRes.json();
-          questionEmbedding = embedData.embedding || [];
-        }
-
-        // Get answer embedding
-        const answerEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: answer, dimensions: 1024 })
-        });
-        if (answerEmbedRes.ok) {
-          const embedData: any = await answerEmbedRes.json();
-          answerEmbedding = embedData.embedding || [];
-        }
-      }
-    } catch (e) {
-      console.warn('Could not get embeddings:', e);
-      // Continue without embeddings
-    }
-
-    // Save to database using verifiedAnswers function
-    let result;
-    try {
-      result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, rating, userName);
-    } catch (dbError) {
-      console.error('Database error in saveVerifiedAnswer:', dbError);
-      return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
-    }
-    
-    if (result && result.answerId) {
-      // Update rating statistics
-      try {
-        await updateAnswerRating(result.answerId);
-      } catch (e) {
-        console.warn('Error updating rating (non-fatal):', e);
-      }
-    }
-
-    res.json({ success: true, message: 'Rating saved successfully' });
-
-  } catch (error) {
-    console.error('Error rating answer:', error);
-    res.status(500).json({ success: false, error: String(error) });
-  }
-});
-
 // Configure multer for file uploads
 const uploadFiles = multer({
   storage: multer.memoryStorage(), // Store files in memory for direct DB insertion
@@ -2348,7 +2215,7 @@ const uploadFiles = multer({
 router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Request, res: Response) => {
   try {
     // Handle both FormData (with files) and JSON
-    let question, answer, comment, userName, rating, verificationType, requestedDepartments, notifyMe, tags;
+    let question, answer, comment, userName, verificationType, requestedDepartments, notifyMe, tags;
     let files: Express.Multer.File[] = [];
 
     // Check if request has multipart form data
@@ -2359,28 +2226,19 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       answer = req.body.answer;
       comment = req.body.comment || '';
       userName = req.body.userName || 'Anonymous';
-      rating = req.body.rating ?? 1;
       verificationType = req.body.verificationType || 'self';
       requestedDepartments = req.body.requestedDepartments ? JSON.parse(req.body.requestedDepartments) : [];
       notifyMe = req.body.notifyMe === 'true' || req.body.notifyMe === true;
       tags = req.body.tags ? JSON.parse(req.body.tags) : [];
     } else {
       // JSON case (no files)
-      ({ question, answer, comment, userName, rating = 1, verificationType = 'self', requestedDepartments = [], notifyMe = false, tags = [] } = req.body);
+      ({ question, answer, comment, userName, verificationType = 'self', requestedDepartments = [], notifyMe = false, tags = [] } = req.body);
     }
 
     const userId = req.session.user?.id;
 
     if (!question || !answer) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
-    }
-
-    // Validate rating value
-    const validRatings = [-1, 0, 1];
-    const validatedRating = validRatings.includes(parseInt(rating)) ? parseInt(rating) : 1;
-
-    if (!validRatings.includes(validatedRating)) {
-      return res.status(400).json({ success: false, error: 'Invalid rating value. Must be -1, 0, or 1' });
     }
 
     // Get embeddings from Python API
@@ -2425,13 +2283,13 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
         questionEmbedding,
         answerEmbedding,
         userId, 
-        validatedRating, 
         userName || 'Anonymous', 
         comment || '',
         verificationType,
         requestedDepartments,
         notifyMe,
-        tags
+        tags,
+        userName || 'Anonymous'
       );
     } catch (dbError) {
       console.error('Database error in saveVerifiedAnswer:', dbError);
@@ -2458,13 +2316,6 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
           // Don't fail the entire request, just log the warning
           console.warn('File attachments could not be saved, but question was created successfully');
         }
-      }
-      
-      // Update rating statistics
-      try {
-        await updateAnswerRating(result.answerId);
-      } catch (e) {
-        console.warn('Error updating rating (non-fatal):', e);
       }
       
       if (comment) {
@@ -2562,105 +2413,47 @@ router.post('/increment-view', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/get-all-verified-answers - Get all verified answers with calculated scores
+// GET /api/get-all-verified-answers - Get all verified answers
 router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
   try {
-    const currentUserId = req.session.user?.id || null;
-    
-    // Use a single query with CTEs to get all data efficiently
+    // Get all verified answers with verification count and vote score
     const result = await pool.query(`
-      WITH verification_stats AS (
-        SELECT 
-          verified_answer_id,
-          COALESCE(SUM(CAST(rating AS FLOAT)), 0) as verification_score,
-          COUNT(*) as rating_count,
-          COALESCE(AVG(CAST(rating AS FLOAT)), 0) as avg_rating,
-          ARRAY_AGG(DISTINCT verification_type) FILTER (WHERE verification_type IS NOT NULL) as verification_types,
-          (ARRAY_AGG(commenter_name ORDER BY created_at ASC))[1] as first_user_name,
-          (ARRAY_AGG(user_id ORDER BY created_at ASC))[1] as creator_user_id
-        FROM answer_verifications
-        GROUP BY verified_answer_id
-      ),
-      vote_stats AS (
-        SELECT 
-          question_id,
-          COALESCE(SUM(vote), 0) as vote_score
-        FROM question_votes
-        GROUP BY question_id
-      )
       SELECT 
         va.id,
         va.question,
         va.answer,
         va.created_at,
+        va.created_by,
         COALESCE(va.views, 0) as views,
-        COALESCE(vs.verification_score, 0) as verification_score,
-        COALESCE(vts.vote_score, 0) as vote_score,
-        COALESCE(vs.rating_count, 0) as rating_count,
-        COALESCE(vs.avg_rating, 0) as avg_rating,
-        COALESCE(vs.first_user_name, 'Anonymous') as user_name,
-        vs.creator_user_id,
-        COALESCE(vs.verification_types, ARRAY[]::VARCHAR[]) as verification_types,
         va.requested_departments as requested_departments_list,
         va.verification_type,
         va.tags,
-        va.department
+        (SELECT COUNT(*) FROM answer_verifications 
+         WHERE verified_answer_id = va.id 
+         AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) as verification_count,
+        COALESCE((SELECT SUM(vote) FROM question_votes WHERE question_id = va.id), 0) as vote_score
       FROM verified_answers va
-      LEFT JOIN verification_stats vs ON va.id = vs.verified_answer_id
-      LEFT JOIN vote_stats vts ON va.id = vts.question_id
-      ORDER BY (COALESCE(vs.verification_score, 0) + COALESCE(vts.vote_score, 0)) DESC, va.created_at DESC
+      ORDER BY va.created_at DESC
       LIMIT 100
     `);
 
     console.log('✅ Query result rows:', result.rows.length);
-    if (result.rows.length > 0) {
-      console.log('📊 First row:', JSON.stringify(result.rows[0], null, 2));
-    }
 
     const answers = result.rows.map(row => {
-      // Calculate combined score
-      const score = (parseFloat(row.verification_score) || 0) + (parseFloat(row.vote_score) || 0);
-      
-      // Determine if this is pending (request type with no positive rating)
-      const verificationTypes = row.verification_types || [];
-      const ratingCount = parseInt(row.rating_count) || 0;
-      const requiredReviewers = (row.requested_departments_list || []).length > 0 ? 2 : 1;
-      const isPending = verificationTypes.includes('request') && ratingCount < requiredReviewers;
-      const isVerified = (parseInt(row.rating_count) || 0) > 0 && score > 0;
-      
       return {
         id: row.id,
         question: row.question,
         answer: row.answer,
-        score: score,
-        rating_count: parseInt(row.rating_count) || 0,
-        avg_rating: parseFloat(row.avg_rating) || 0,
         views: parseInt(row.views) || 0,
-        user_name: row.user_name || 'Anonymous',
-        user_id: row.creator_user_id,
         created_at: row.created_at,
+        created_by: row.created_by,
         verification_type: row.verification_type,
         requested_departments: row.requested_departments_list || [],
-        verification_types: verificationTypes,
         requested_departments_list: row.requested_departments_list || [],
-        status: isPending ? '⏳ Pending' : (isVerified ? '✓ Verified' : 'Unverified'),
-        is_pending: isPending,
-        is_verified: isVerified,
-        answered_by_user: false // Will be filled below if needed
+        verification_count: parseInt(row.verification_count) || 0,
+        vote_score: parseInt(row.vote_score) || 0
       };
     });
-
-    // If user is logged in, get their verifications
-    if (currentUserId) {
-      const userVerifications = await pool.query(
-        `SELECT DISTINCT verified_answer_id FROM answer_verifications WHERE user_id = $1`,
-        [currentUserId]
-      );
-      const userVerifiedIds = new Set(userVerifications.rows.map(r => r.verified_answer_id));
-      answers.forEach(answer => {
-        answer.answered_by_user = userVerifiedIds.has(answer.id);
-      });
-    }
 
     res.json({ success: true, results: answers, answers });
   } catch (error) {
@@ -2695,14 +2488,9 @@ router.post('/search-verified-answers', async (req: Request, res: Response) => {
         SELECT 
           va.id,
           va.question,
-          va.answer,
-          COALESCE(SUM(av.rating), 0) as score,
-          COUNT(av.id) as rating_count,
-          COALESCE(AVG(CAST(av.rating AS FLOAT)), 0) as avg_rating
+          va.answer
         FROM verified_answers va
-        LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
-        GROUP BY va.id
-        ORDER BY score DESC
+        ORDER BY va.created_at DESC
         LIMIT $1
       `, [limit]);
 
@@ -2711,9 +2499,7 @@ router.post('/search-verified-answers', async (req: Request, res: Response) => {
         results: result.rows.map(row => ({
           id: row.id,
           question: row.question,
-          answer: row.answer,
-          score: row.score || 0,
-          avg_rating: row.avg_rating || 0
+          answer: row.answer
         }))
       });
     }
@@ -2721,14 +2507,7 @@ router.post('/search-verified-answers', async (req: Request, res: Response) => {
     // Search similar verified answers
     const results = await searchVerifiedAnswers(questionEmbedding, threshold, limit);
 
-    // Enrich with score calculations
-    const enrichedResults = results.map((r: any) => ({
-      ...r,
-      score: r.score || 0,
-      avg_rating: r.avg_rating || 0
-    }));
-
-    res.json({ success: true, results: enrichedResults });
+    res.json({ success: true, results });
   } catch (error) {
     console.error('Error searching verified answers:', error);
     res.status(500).json({ success: false, error: String(error) });
@@ -2770,18 +2549,17 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/get-verifications/:questionId - Get all verifications/ratings for a question
+// GET /api/get-verifications/:questionId - Get all verifications for a question
 router.get('/get-verifications/:questionId', async (req: Request, res: Response) => {
   try {
     const { questionId } = req.params;
     
     const result = await pool.query(
-      `SELECT av.id, av.user_id, av.commenter_name as username, av.rating, 
+      `SELECT av.id, av.user_id, av.commenter_name as username, 
               av.comment, av.verification_type, av.requested_departments,
               av.created_at as "createdAt",
-              va.due_date as "dueDate"
+              av.due_date as "dueDate"
        FROM answer_verifications av
-       LEFT JOIN verified_answers va ON av.verified_answer_id = va.id
        WHERE av.verified_answer_id = $1
        ORDER BY av.created_at DESC`,
       [questionId]
@@ -2791,7 +2569,6 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
       id: row.id,
       userId: row.user_id,
       username: row.username || 'Anonymous',
-      rating: row.rating,
       comment: row.comment,
       verificationType: row.verification_type,
       requestedDepartments: row.requested_departments || [],
@@ -2806,90 +2583,38 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
   }
 });
 
-// POST /api/rate-answer - Rate an answer (quick rating without full verification)
-router.post('/rate-answer', async (req: Request, res: Response) => {
+// GET /api/hot-tags - Get hot tags
+router.get('/hot-tags', async (req: Request, res: Response) => {
   try {
-    const { questionId, question, answer, rating, userId, username } = req.body;
-    
-    // Either questionId or (question + answer) must be provided
-    let answerId = questionId;
-    
-    if (!answerId && question && answer) {
-      // Find verified_answer by question + answer
-      const result = await pool.query(
-        `SELECT id FROM verified_answers WHERE question = $1 AND answer = $2 LIMIT 1`,
-        [question, answer]
-      );
-      if (result.rows.length === 0) {
-        return res.status(400).json({ success: false, error: 'Answer not found' });
-      }
-      answerId = result.rows[0].id;
-    }
-    
-    if (!answerId || rating === undefined) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
-    }
-    
-    // Validate userId - must be present for UPDATE logic to work
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'User must be logged in to rate answers' });
-    }
-    
-    // Convert userId to integer to match database type
-    const userIdInt = parseInt(userId, 10);
-    if (isNaN(userIdInt)) {
-      return res.status(400).json({ success: false, error: 'Invalid userId' });
-    }
-    
-    console.log(`Rating answer ${answerId}: userId=${userIdInt}, rating=${rating}`);
-    
-    // Check if user already rated (use IS NULL for safety)
-    const existingRating = await pool.query(
-      `SELECT id FROM answer_verifications WHERE verified_answer_id = $1 AND user_id = $2`,
-      [answerId, userIdInt]
-    );
-    
-    console.log(`Found existing rating: ${existingRating.rows.length > 0 ? 'YES' : 'NO'}`);
-    
-    if (existingRating.rows.length > 0) {
-      // Update existing rating
-      console.log(`Updating rating for user ${userIdInt} on answer ${answerId}`);
-      const updateResult = await pool.query(
-        `UPDATE answer_verifications SET rating = $1, created_at = NOW() WHERE id = $2`,
-        [rating, existingRating.rows[0].id]
-      );
-      console.log(`Update result: ${updateResult.rowCount} rows affected`);
-    } else {
-      // Insert new rating
-      console.log(`Inserting new rating for user ${userIdInt} on answer ${answerId}`);
-      await pool.query(
-        `INSERT INTO answer_verifications (verified_answer_id, user_id, commenter_name, rating, verification_type, created_at)
-         VALUES ($1, $2, $3, $4, 'rating', NOW())`,
-        [answerId, userIdInt, username || 'Anonymous', rating]
-      );
-    }
-    
-    // Update avg_rating in verified_answers (using SUM for score calculation)
-    const scoreResult = await pool.query(
-      `SELECT COALESCE(SUM(rating), 0) as avg_rating, COUNT(*) as rating_count 
-       FROM answer_verifications WHERE verified_answer_id = $1`,
-      [answerId]
-    );
-    
-    console.log(`New avg_rating: ${scoreResult.rows[0].avg_rating}, rating_count: ${scoreResult.rows[0].rating_count}`);
-    
-    await pool.query(
-      `UPDATE verified_answers SET avg_rating = $1, rating_count = $2 WHERE id = $3`,
-      [scoreResult.rows[0].avg_rating, scoreResult.rows[0].rating_count, answerId]
-    );
-    
-    res.json({ 
-      success: true, 
-      newScore: scoreResult.rows[0].avg_rating,
-      ratingCount: scoreResult.rows[0].rating_count 
-    });
+    const { limit = 8 } = req.query;
+    const hotTags = await getHotTags(parseInt(limit as string) || 8);
+    res.json({ success: true, tags: hotTags });
   } catch (error) {
-    console.error('Error rating answer:', error);
+    console.error('❌ Error getting hot tags:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/filter-questions - Filter questions by type
+router.get('/filter-questions', async (req: Request, res: Response) => {
+  try {
+    const { type = 'all', username, sortBy = 'newest', limit = 100 } = req.query;
+
+    if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified', 'verified'].includes(type as string)) {
+      return res.status(400).json({ success: false, error: 'Invalid filter type' });
+    }
+
+    const results = await filterQuestionsByType(
+      type as string,
+      username as string,
+      sortBy as string,
+      parseInt(limit as string) || 100
+    );
+
+    console.log(`✅ Filtered ${results.length} questions by type: ${type}`);
+    res.json({ success: true, results, count: results.length });
+  } catch (error) {
+    console.error('❌ Error filtering questions:', error);
     res.status(500).json({ success: false, error: String(error) });
   }
 });
@@ -2902,7 +2627,7 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     
     // Fetch comments from comments table
     const commentsResult = await pool.query(
-      `SELECT id, question_id, user_id, username, comment_text as text, department, attachments, created_at as "createdAt", 'comment' as source
+      `SELECT id, question_id, user_id, username, comment_text as text, attachments, created_at as "createdAt", 'comment' as source
        FROM comments 
        WHERE question_id = $1
        ORDER BY created_at DESC`,
@@ -2915,9 +2640,9 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     // Include all verifications (with or without comment text)
     const verificationsResult = await pool.query(
       `SELECT id, verified_answer_id as question_id, user_id, commenter_name as username, 
-              comment as text, created_at as "createdAt", rating, verification_type, requested_departments, 'verification' as source
+              comment as text, created_at as "createdAt", verification_type, requested_departments, 'verification' as source
        FROM answer_verifications 
-       WHERE verified_answer_id = $1 AND rating = 1`,
+       WHERE verified_answer_id = $1`,
       [questionId]
     );
     
@@ -3000,29 +2725,31 @@ router.post('/vote-question/:questionId', async (req: Request, res: Response) =>
 
     let userVote = vote;
 
-    if (existingVote.rows.length > 0) {
-      const oldVote = existingVote.rows[0].vote;
-      
-      // If clicking the same vote, remove it (toggle off)
-      if (oldVote === vote) {
+    if (vote === 0) {
+      // Remove vote (only delete if exists)
+      if (existingVote.rows.length > 0) {
         await pool.query(
           `DELETE FROM question_votes WHERE question_id = $1 AND user_id = $2`,
           [questionId, userId]
         );
-        userVote = 0;
-      } else {
-        // Update to new vote
+      }
+      userVote = 0;
+    } else {
+      // vote is 1 or -1
+      if (existingVote.rows.length > 0) {
+        // Update existing vote (regardless of whether it's the same or different)
         await pool.query(
           `UPDATE question_votes SET vote = $1, voted_at = NOW() WHERE question_id = $2 AND user_id = $3`,
           [vote, questionId, userId]
         );
+      } else {
+        // Insert new vote
+        await pool.query(
+          `INSERT INTO question_votes (question_id, user_id, vote, voted_at) VALUES ($1, $2, $3, NOW())`,
+          [questionId, userId, vote]
+        );
       }
-    } else {
-      // Insert new vote
-      await pool.query(
-        `INSERT INTO question_votes (question_id, user_id, vote, voted_at) VALUES ($1, $2, $3, NOW())`,
-        [questionId, userId, vote]
-      );
+      userVote = vote;
     }
 
     // Calculate total score from votes
@@ -3032,9 +2759,6 @@ router.post('/vote-question/:questionId', async (req: Request, res: Response) =>
     );
 
     const newScore = parseInt(scoreResult.rows[0].total_votes);
-
-    // Note: verified_answers uses avg_rating for answer verifications
-    // Vote score is calculated on the fly when displaying questions
 
     res.json({ success: true, score: newScore, userVote });
   } catch (error) {
@@ -3134,21 +2858,19 @@ router.get('/get-verification-status/:questionId', async (req: Request, res: Res
         status: 'waiting', // waiting, verified, rejected
         verifiedBy: null,
         verifiedDate: null,
-        dueDate: null,
-        rating: null
+        dueDate: null
       };
     });
 
     // Update with actual verification data
     verifications.forEach(v => {
-      if (v.requested_departments && v.rating !== null) {
+      if (v.requested_departments) {
         v.requested_departments.forEach((dept: string) => {
           if (statusByDept[dept]) {
-            statusByDept[dept].status = v.rating > 0 ? 'verified' : (v.rating < 0 ? 'rejected' : 'waiting');
+            statusByDept[dept].status = 'verified'; // Mark as verified if verification exists
             statusByDept[dept].verifiedBy = v.commenter_name;
             statusByDept[dept].verifiedDate = v.created_at;
             statusByDept[dept].dueDate = v.due_date;
-            statusByDept[dept].rating = v.rating;
           }
         });
       }

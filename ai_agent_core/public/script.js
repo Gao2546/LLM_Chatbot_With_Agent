@@ -2754,53 +2754,6 @@ window.filterItemsForChange = filterItemsForChange;
 window.selectDirectoryForChange = selectDirectoryForChange;
 
 // === Verified Answers Functions ===
-async function rateAnswer(answerText, rating) {
-    const lastUserMessage = window.lastUserMessage || 'Unknown question';
-    
-    console.log(`Rating: ${rating}, Answer: ${answerText.substring(0, 50)}...`);
-    
-    try {
-        // Fetch current session data
-        const sessionResponse = await fetch('/auth/session');
-        if (!sessionResponse.ok) {
-            alert('ข้อผิดพลาด: ไม่สามารถดึงข้อมูลการเข้าสู่ระบบได้');
-            return;
-        }
-        const sessionData = await sessionResponse.json();
-        const userName = sessionData?.username || 'Anonymous';
-        const userId = sessionData?.userId;  // Get userId from session
-        
-        const response = await fetch('/api/rate-answer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: lastUserMessage,
-                answer: answerText,
-                rating: rating,
-                userId: userId,
-                username: userName
-            })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            alert('เกิดข้อผิดพลาด: ' + (errorData.error || `Server error (${response.status})`));
-            return;
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            alert('ขอบคุณสำหรับการให้คะแนน!');
-        } else {
-            alert('เกิดข้อผิดพลาด: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        console.error('Error rating answer:', error);
-        alert('ข้อผิดพลาดในการส่ง: ' + error.message);
-    }
-}
-
 async function verifyAnswer(answerText, verifyBtn) {
     // Try to get user question from the message element's stored data, fallback to window.lastUserMessage
     let lastUserMessage = 'Unknown question';
@@ -2842,8 +2795,17 @@ async function showVerifyModal(question, answer, verifyBtn) {
     const existingModal = document.getElementById('verifyModal');
     if (existingModal) existingModal.remove();
     
-    // Available tags
-    const availableTags = ['PRVX 4', 'D1', 'Handler', 'V9300', 'Prober', 'Tester', 'AI', 'Sensor'];
+    // Fetch hot tags from API
+    let availableTags = ['PRVX 4', 'D1', 'Handler', 'V9300']; // fallback
+    try {
+        const tagsResponse = await fetch('/api/hot-tags?limit=4');
+        const tagsData = await tagsResponse.json();
+        if (tagsData.success && tagsData.tags.length > 0) {
+            availableTags = tagsData.tags.map(t => t.tag);
+        }
+    } catch (e) {
+        console.error('Error fetching hot tags:', e);
+    }
     
     // Available departments
     const departments = ['WT', 'FT', 'PE', 'QA', 'IT', 'MFG', 'ENG', 'RnD'];
@@ -2883,7 +2845,6 @@ async function showVerifyModal(question, answer, verifyBtn) {
     const closeBtn = document.getElementById('verifyModalClose');
     const cancelBtn = document.getElementById('verifyBtnCancel');
     const submitBtn = document.getElementById('verifyBtnSubmit');
-    const tagsGrid = document.getElementById('verifyTagsGrid');
     const myDeptSelectWrapper = document.getElementById('myDeptSelectWrapper');
     const requestDeptSelectWrapper = document.getElementById('requestDeptSelectWrapper');
     const myDeptDropdownHeader = document.getElementById('myDeptDropdownHeader');
@@ -2955,39 +2916,118 @@ async function showVerifyModal(question, answer, verifyBtn) {
     
     // Selected tags array
     let selectedTags = [];
+    let customTags = [];
     
-    // Tag selection handler
-    tagsGrid.addEventListener('click', (e) => {
-        const tagItem = e.target.closest('.verify-tag-item');
-        if (tagItem) {
-            const tag = tagItem.dataset.tag;
-            if (tagItem.classList.contains('selected')) {
-                tagItem.classList.remove('selected');
-                selectedTags = selectedTags.filter(t => t !== tag);
-            } else {
-                tagItem.classList.add('selected');
-                selectedTags.push(tag);
+    // Tag selection handler (only if tagsGrid exists)
+    const tagsGrid = document.getElementById('verifyTagsGrid');
+    if (tagsGrid) {
+        tagsGrid.addEventListener('click', (e) => {
+            const tagItem = e.target.closest('.verify-tag-item');
+            if (tagItem) {
+                const tag = tagItem.dataset.tag;
+                if (tagItem.classList.contains('selected')) {
+                    tagItem.classList.remove('selected');
+                    selectedTags = selectedTags.filter(t => t !== tag);
+                } else {
+                    tagItem.classList.add('selected');
+                    selectedTags.push(tag);
+                }
+            }
+        });
+    }
+    
+    // Custom tag input handler
+    const customTagInput = document.getElementById('customTagInput');
+    const customTagsContainer = document.getElementById('customTagsContainer');
+    const addCustomTagBtn = document.getElementById('addCustomTagBtn');
+    
+    if (!customTagInput || !customTagsContainer || !addCustomTagBtn) {
+        console.error('Custom tag elements not found', {
+            input: !!customTagInput,
+            container: !!customTagsContainer,
+            btn: !!addCustomTagBtn
+        });
+    } else {
+        console.log('✅ Custom tag elements found successfully');
+        
+        function addCustomTag() {
+            console.log('addCustomTag called, value:', customTagInput.value);
+            const tagValue = customTagInput.value.trim();
+            console.log('Trimmed value:', tagValue, 'Length:', tagValue.length);
+            
+            if (tagValue && !customTags.includes(tagValue) && tagValue.length <= 20) {
+                console.log('Adding tag:', tagValue);
+                customTags.push(tagValue);
+                
+                // Create tag badge with remove button
+                const tagBadge = document.createElement('span');
+                tagBadge.className = 'custom-tag-badge';
+                tagBadge.innerHTML = `
+                    <span style="margin-right: 6px;">${tagValue}</span>
+                    <i class="fas fa-times-circle" style="cursor: pointer; opacity: 0.7; transition: opacity 0.2s;"></i>
+                `;
+                tagBadge.style.cssText = 'display: inline-flex; align-items: center; padding: 8px 12px; background: linear-gradient(135deg, #0a8276 0%, #0a6b61 100%); color: white; border-radius: 20px; font-size: 12px; font-weight: 500; box-shadow: 0 2px 4px rgba(10, 130, 118, 0.3); transition: transform 0.2s;';
+                
+                // Hover effect
+                tagBadge.addEventListener('mouseenter', () => {
+                    tagBadge.style.transform = 'scale(1.05)';
+                    tagBadge.querySelector('i').style.opacity = '1';
+                });
+                tagBadge.addEventListener('mouseleave', () => {
+                    tagBadge.style.transform = 'scale(1)';
+                    tagBadge.querySelector('i').style.opacity = '0.7';
+                });
+                
+                // Remove tag on click X
+                tagBadge.querySelector('i').addEventListener('click', () => {
+                    customTags = customTags.filter(t => t !== tagValue);
+                    tagBadge.style.transform = 'scale(0)';
+                    setTimeout(() => tagBadge.remove(), 200);
+                });
+                
+                customTagsContainer.appendChild(tagBadge);
+                customTagInput.value = '';
+                customTagInput.focus();
+            } else if (tagValue.length > 20) {
+                alert('Tag name must be 20 characters or less');
             }
         }
-    });
-    
-    // Rating buttons handler
-    const ratingBtns = document.querySelectorAll('.rating-btn');
-    ratingBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const rating = btn.dataset.rating;
-            document.getElementById('verifyScore').value = rating;
-            
-            // Update visual state
-            ratingBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+        
+        customTagInput.addEventListener('keypress', (e) => {
+            console.log('Keypress event:', e.key);
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                console.log('Enter pressed, calling addCustomTag');
+                addCustomTag();
+            }
         });
-    });
-    
-    // Set default rating to 0 (Neutral)
-    const defaultBtn = document.querySelector('[data-rating="0"]');
-    if (defaultBtn) {
-        defaultBtn.click();
+        
+        addCustomTagBtn.addEventListener('click', (e) => {
+            console.log('Add button clicked');
+            e.preventDefault();
+            e.stopPropagation();
+            addCustomTag();
+        });
+        
+        // Input focus effect
+        customTagInput.addEventListener('focus', () => {
+            customTagInput.style.borderColor = '#0a8276';
+            customTagInput.style.background = 'rgba(10, 130, 118, 0.12)';
+            customTagInput.style.boxShadow = '0 0 0 3px rgba(10, 130, 118, 0.1)';
+        });
+        customTagInput.addEventListener('blur', () => {
+            customTagInput.style.borderColor = '#3a3a3a';
+            customTagInput.style.background = 'rgba(10, 130, 118, 0.08)';
+            customTagInput.style.boxShadow = 'none';
+        });
+        
+        // Button hover effect
+        addCustomTagBtn.addEventListener('mouseenter', () => {
+            addCustomTagBtn.style.background = '#0d9d8e';
+        });
+        addCustomTagBtn.addEventListener('mouseleave', () => {
+            addCustomTagBtn.style.background = '#0a8276';
+        });
     }
     
     // Department checkboxes are now handled via querySelectorAll on submit
@@ -3022,7 +3062,6 @@ async function showVerifyModal(question, answer, verifyBtn) {
             ? Array.from(document.querySelectorAll('input[name="myDept"]:checked')).map(cb => cb.value)
             : Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
         const notifyMe = document.getElementById('notifyCheckbox').checked;
-        const score = parseInt(document.getElementById('verifyScore').value) || 0;
         
         // Disable button while processing
         submitBtn.disabled = true;
@@ -3048,8 +3087,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
                     answer: answer,
                     comment: comment || '',
                     userName: userName,
-                    rating: score,
-                    tags: selectedTags,
+                    tags: [...selectedTags, ...customTags],
                     verificationType: verificationType,
                     requestedDepartments: selectedDepts,
                     notifyMe: notifyMe

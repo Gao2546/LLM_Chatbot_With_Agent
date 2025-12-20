@@ -38,7 +38,7 @@
                 <a href="#" class="sidebar-link active" data-filter="all">All questions</a>
                 <a href="#" class="sidebar-link" data-filter="my-questions">My Questions</a>
                 <a href="#" class="sidebar-link" data-filter="my-answers">My Answers</a>
-                <a href="#" class="sidebar-link" data-filter="pending">Pending review</a>
+                <a href="#" class="sidebar-link" data-filter="pending-review">Pending review</a>
                 <a href="#" class="sidebar-link" data-filter="unverified">Unverified</a>
             </div>
 
@@ -82,7 +82,7 @@
                         <div class="header-top">
                             <h2>Questions</h2>
                             <div class="header-search">
-                                <input type="text" id="headerSearch" placeholder="Search questions...">
+                                <input type="text" id="headerSearch" placeholder="Search questions or #tags...">
                             </div>
                             <button class="btn-ask-large" onclick="window.location.href='/create_question.html'">Create Question</button>
                         </div>
@@ -140,6 +140,8 @@
         let currentSort = 'newest';
         let selectedTags = [];
         let currentUserId = null;
+        let currentUsername = null;
+        let totalQuestionCount = 0; // Store total count from 'all' filter
 
         document.addEventListener('DOMContentLoaded', async () => {
             await getCurrentUser();
@@ -178,6 +180,7 @@
                 
                 if (data.loggedIn) {
                     currentUserId = data.userId || null;
+                    currentUsername = data.username || null;
                     
                     if (loginBtn) {
                         loginBtn.textContent = data.isGuest ? 'Login' : 'Logout';
@@ -192,6 +195,7 @@
                     }
                 } else {
                     currentUserId = null;
+                    currentUsername = null;
                     if (loginBtn) {
                         loginBtn.textContent = 'Login';
                         loginBtn.href = '/auth/login';
@@ -203,6 +207,7 @@
             } catch (e) {
                 console.log('User not logged in:', e);
                 currentUserId = null;
+                currentUsername = null;
             }
         }
 
@@ -255,26 +260,76 @@
             renderQuestions();
         }
 
-        function applyFilter(filter) {
+        async function applyFilter(filter) {
             currentFilter = filter;
-            renderQuestions();
+            await loadQuestionsByFilter(filter);
+        }
+
+        async function loadQuestionsByFilter(filter) {
+            try {
+                let url = '/api/filter-questions?type=' + filter;
+                
+                // Add username if user is logged in
+                if (currentUsername) {
+                    url += '&username=' + encodeURIComponent(currentUsername);
+                }
+                
+                // Add sort parameter
+                const sortParam = currentSort || 'newest';
+                url += '&sortBy=' + sortParam;
+                
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                allQuestions = (data.results || []).map((q, idx) => ({
+                    ...q,
+                    id: q.id || idx,
+                    views: q.views || 0,
+                    score: q.verification_count || 0
+                }));
+                
+                console.log(`Loaded ${allQuestions.length} questions with filter: ${filter}`);
+                
+                // Update total count only when loading 'all' questions
+                if (filter === 'all') {
+                    totalQuestionCount = allQuestions.length;
+                }
+                
+                updateStats();
+                renderQuestions();
+                await loadHotTags();
+            } catch (e) {
+                console.error('Error loading filtered questions:', e);
+                showEmpty();
+            }
+        }
+
+        async function loadHotTags() {
+            try {
+                const res = await fetch('/api/hot-tags?limit=8');
+                const data = await res.json();
+                if (data.success && data.tags.length > 0) {
+                    const tagsListDiv = document.getElementById('tagsList');
+                    tagsListDiv.innerHTML = data.tags.map(t => 
+                        `<span class="sidebar-tag-item" data-tag="${t.tag}">${t.tag}</span>`
+                    ).join('');
+                    
+                    // Re-attach click handlers
+                    document.querySelectorAll('.sidebar-tag-item').forEach(tag => {
+                        tag.addEventListener('click', () => {
+                            tag.classList.toggle('active');
+                            filterByTags();
+                        });
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading hot tags:', e);
+            }
         }
 
         async function loadAllQuestions() {
             try {
-                const res = await fetch('/api/get-all-verified-answers');
-                const data = await res.json();
-                allQuestions = (data.results || data.answers || []).map((q, idx) => ({
-                    ...q,
-                    id: q.id || idx,
-                    views: q.views || 0,
-                    score: q.score || 0,
-                    rating_count: q.rating_count || 0,
-                    is_verified: (q.rating_count || 0) > 0
-                }));
-                console.log('Loaded questions:', allQuestions.length, 'Verified:', allQuestions.filter(q => (q.rating_count || 0) > 0).length);
-                updateStats();
-                renderQuestions();
+                await loadQuestionsByFilter('all');
             } catch (e) {
                 console.error('Error:', e);
                 showEmpty();
@@ -294,19 +349,34 @@
                 return;
             }
             try {
-                const res = await fetch('/api/search-verified-answers', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: query, threshold: 0.7, limit: 20 })
-                });
-                const data = await res.json();
-                allQuestions = (data.results || []).map((q, idx) => ({
-                    ...q,
-                    id: q.id || idx,
-                    views: Math.floor(Math.random() * 500),
-                    votes: Math.floor((q.avg_rating || 0) * 20)
-                }));
-                renderQuestions();
+                // Check if searching by tag (starts with #)
+                if (query.trim().startsWith('#')) {
+                    const tagName = query.trim().substring(1).toLowerCase();
+                    await loadAllQuestions();
+                    // Filter questions by tag
+                    allQuestions = allQuestions.filter(q => {
+                        const questionTags = q.tags || [];
+                        const tagsArray = Array.isArray(questionTags) 
+                            ? questionTags 
+                            : (typeof questionTags === 'string' ? questionTags.split(',').map(t => t.trim()) : []);
+                        return tagsArray.some(tag => tag.toLowerCase().includes(tagName));
+                    });
+                    renderQuestions();
+                } else {
+                    // Normal text search
+                    const res = await fetch('/api/search-verified-answers', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question: query, threshold: 0.7, limit: 20 })
+                    });
+                    const data = await res.json();
+                    allQuestions = (data.results || []).map((q, idx) => ({
+                        ...q,
+                        id: q.id || idx,
+                        views: Math.floor(Math.random() * 500)
+                    }));
+                    renderQuestions();
+                }
             } catch (e) {
                 console.error('Search error:', e);
                 showEmpty();
@@ -314,11 +384,26 @@
         }
 
         function filterByTab(tab, event) {
-            // Map 'all' to 'newest' for sorting
-            currentSort = (tab === 'all') ? 'newest' : tab;
+            // Update active tab
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
-            renderQuestions();
+            
+            // Map tab to filter or sort
+            if (tab === 'verified') {
+                // "Verified" tab should filter by verified items
+                currentFilter = 'verified';
+                currentSort = 'newest';
+            } else {
+                // Other tabs are sorting options (newest, score, views)
+                currentSort = (tab === 'all') ? 'newest' : tab;
+                // Keep current filter or reset to 'all'
+                if (currentFilter === 'verified') {
+                    currentFilter = 'all';
+                }
+            }
+            
+            // Reload questions with new filter/sort
+            loadQuestionsByFilter(currentFilter);
         }
 
         function updateSort() {
@@ -327,21 +412,22 @@
         }
 
         function updateStats() {
-            document.getElementById('totalQuestions').textContent = allQuestions.length;
+            // Always show total from 'all' filter, not current filtered count
+            document.getElementById('totalQuestions').textContent = totalQuestionCount;
             
-            // Count verified questions using same logic as "Verified" tab
+            // Count verified questions: self-verified OR fully verified requests
             const verifiedCount = allQuestions.filter(q => {
-                // For request type: all requested departments must have verified
-                if (q.verification_type === 'request' && q.requested_departments) {
-                    const requestedDepts = Array.isArray(q.requested_departments) 
-                        ? q.requested_departments 
-                        : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                    const deptCount = requestedDepts.length;
-                    const verificationCount = q.rating_count || 0;
-                    return verificationCount >= deptCount && deptCount > 0;
+                // Self-verified
+                if (q.verification_type === 'self') {
+                    return true;
                 }
-                // For self type: must have at least one verification
-                return q.verification_type === 'self' && (q.rating_count || 0) > 0;
+                // Request type: must have verification_count == total_requested_depts AND > 0
+                if (q.verification_type === 'request') {
+                    const verificationCount = q.verification_count || 0;
+                    const totalRequestedDepts = q.total_requested_depts || 0;
+                    return totalRequestedDepts > 0 && verificationCount === totalRequestedDepts;
+                }
+                return false;
             }).length;
             
             document.getElementById('verifiedCount').textContent = verifiedCount;
@@ -352,9 +438,13 @@
         function updateHotQuestions() {
             if (allQuestions.length === 0) return;
             
-            // Sort by score (descending) and get top 3
+            // Sort by vote_score (descending) and get top 3
             const topQuestions = [...allQuestions]
-                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .sort((a, b) => {
+                    const scoreA = a.vote_score || a.score || 0;
+                    const scoreB = b.vote_score || b.score || 0;
+                    return scoreB - scoreA;
+                })
                 .slice(0, 3);
             
             // Update Hot Questions list
@@ -376,7 +466,7 @@
         function renderQuestions() {
             let filtered = [...allQuestions];
 
-            // Apply tag filter first
+            // Apply tag filter only (type filter is already handled by API)
             if (selectedTags.length > 0) {
                 filtered = filtered.filter(q => {
                     const qTags = q.tags || [];
@@ -384,59 +474,27 @@
                 });
             }
 
-            // Apply sidebar filter first (My Questions, Pending review, Unverified)
-            if (currentFilter === 'my-questions') {
-                // Filter by current user's questions (created by this user)
-                if (currentUserId) {
-                    filtered = filtered.filter(q => q.user_id === currentUserId);
-                } else {
-                    filtered = []; // No user logged in, show nothing
-                }
-            } else if (currentFilter === 'my-answers') {
-                // Filter by questions the current user has verified/answered
-                if (currentUserId) {
-                    filtered = filtered.filter(q => q.answered_by_user === true);
-                } else {
-                    filtered = []; // No user logged in, show nothing
-                }
-            } else if (currentFilter === 'pending') {
-                // Questions that are requesting verification from other departments but not all have verified yet
-                filtered = filtered.filter(q => {
-                    if (q.verification_type === 'request' && q.requested_departments && q.requested_departments.length > 0) {
-                        const requestedDepts = Array.isArray(q.requested_departments) 
-                            ? q.requested_departments 
-                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                        const deptCount = requestedDepts.length;
-                        const verifiedCount = q.rating_count || 0;
-                        // Show only if NOT all departments have verified yet
-                        return verifiedCount < deptCount;
-                    }
-                    return false;
-                });
-            } else if (currentFilter === 'unverified') {
-                // Questions that have no verifications yet
-                filtered = filtered.filter(q => (q.rating_count || 0) === 0);
-            }
-
             // Apply tab sort (Newest, Score, Views, Verified)
             if (currentSort === 'verified') {
-                // Show only verified questions (completely verified, not pending)
+                // Show verified questions
                 filtered = filtered.filter(q => {
-                    // For request type: all requested departments must have verified
+                    // For request type: show if requested departments are set
                     if (q.verification_type === 'request' && q.requested_departments) {
                         const requestedDepts = Array.isArray(q.requested_departments) 
                             ? q.requested_departments 
                             : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                        const deptCount = requestedDepts.length;
-                        const verifiedCount = q.rating_count || 0;
-                        return verifiedCount >= deptCount && deptCount > 0;
+                        return requestedDepts.length > 0;
                     }
-                    // For self type: must have at least one verification
-                    return q.verification_type === 'self' && (q.rating_count || 0) > 0;
+                    // For self type: include all
+                    return q.verification_type === 'self';
                 });
             } else if (currentSort === 'score') {
-                // Sort by score descending
-                filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+                // Sort by vote_score descending
+                filtered.sort((a, b) => {
+                    const scoreA = a.vote_score || a.score || 0;
+                    const scoreB = b.vote_score || b.score || 0;
+                    return scoreB - scoreA;
+                });
             } else if (currentSort === 'views') {
                 // Sort by views descending
                 filtered.sort((a, b) => (b.views || 0) - (a.views || 0));
@@ -461,25 +519,26 @@
                         : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
                     
                     const deptCount = requestedDepts.length;
-                    const verifiedCount = q.rating_count || 0;
+                    const verifiedCount = q.verification_count || 0;
                     
-                    if (verifiedCount >= deptCount && deptCount > 0) {
-                        // All departments have verified
-                        badgeHtml = '<span class="vote-badge verified-badge">✓ Verified</span>';
-                    } else {
-                        // Still waiting for verification from some departments
-                        badgeHtml = `<span class="vote-badge pending-badge">⏳ Pending (${verifiedCount}/${deptCount})</span>`;
+                    if (deptCount > 0) {
+                        // Has departments to verify from
+                        if (verifiedCount >= deptCount) {
+                            // All verified - show green badge
+                            badgeHtml = `<span class="vote-badge verified-badge">✓ Verified (${verifiedCount}/${deptCount})</span>`;
+                        } else {
+                            // Pending verification - show yellow badge
+                            badgeHtml = `<span class="vote-badge pending-badge">⏳ ${verifiedCount}/${deptCount} Pending</span>`;
+                        }
                     }
-                } else if (q.verification_type === 'self' && q.rating_count > 0) {
-                    badgeHtml = '<span class="vote-badge verified-badge">✓ Verified</span>';
-                } else if (q.verification_type === 'self' && (!q.rating_count || q.rating_count === 0)) {
-                    badgeHtml = '<span class="vote-badge pending-badge">⏳ Pending</span>';
+                } else if (q.verification_type === 'self') {
+                    badgeHtml = '<span class="vote-badge verified-badge">✓ Self Verified</span>';
                 }
                 
                 return `
                 <div class="question-item" onclick="goToDetail(${q.id})">
                     <div class="vote-section">
-                        <div class="vote-count">${q.score || 0}</div>
+                        <div class="vote-count">${q.vote_score || 0}</div>
                         <div>${badgeHtml}</div>
                     </div>
                     <div class="question-content">
@@ -490,9 +549,9 @@
                     <div class="question-meta">
                         <span>${q.views || 0} views</span>
                         <div class="user-info">
-                            <div class="avatar">${(q.user_name || 'U')[0].toUpperCase()}</div>
+                            <div class="avatar">${(q.created_by || q.user_name || 'U')[0].toUpperCase()}</div>
                             <div class="user-text">
-                                <span class="username">${esc(q.user_name || 'Anonymous')}</span>
+                                <span class="username">${esc(q.created_by || q.user_name || 'Anonymous')}</span>
                                 <span class="time">${formatDate(q.created_at)}</span>
                             </div>
                         </div>

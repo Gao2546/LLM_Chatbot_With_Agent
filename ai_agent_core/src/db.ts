@@ -170,18 +170,13 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     tags TEXT[],
-    department VARCHAR(255),
     verification_type VARCHAR(50) DEFAULT 'staging',
     question_embedding VECTOR(1024),
     answer_embedding VECTOR(1024),
-    avg_rating FLOAT DEFAULT 0,
-    verified_count INT DEFAULT 0,
-    rating_count INT DEFAULT 0,
     views INT DEFAULT 0,
     requested_departments TEXT[],
-    due_date TIMESTAMP,
-    created_by VARCHAR(255),
     notify_me BOOLEAN DEFAULT FALSE,
+    created_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     last_updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -200,7 +195,6 @@ CREATE TABLE IF NOT EXISTS answer_verifications (
     id SERIAL PRIMARY KEY,
     verified_answer_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
     user_id INT,
-    rating INT CHECK (rating IN (-1, 0, 1)),
     comment TEXT,
     commenter_name VARCHAR(255),
     verification_type VARCHAR(50) DEFAULT 'self',
@@ -452,29 +446,6 @@ async function initializeDatabase() {
     await pool.query(createVerifiedAnswersIndexQuery);
     console.log('DB: Verified answers index created or already exists');
 
-    // Drop old constraint if exists and add new one
-    try {
-      await pool.query(`
-        ALTER TABLE answer_verifications 
-        DROP CONSTRAINT IF EXISTS answer_verifications_rating_check;
-      `);
-      console.log('DB: Dropped old rating constraint');
-    } catch (e: any) {
-      console.log('DB: Could not drop old constraint (may not exist):', e.message);
-    }
-
-    // Add new constraint for rating (-1, 0, 1)
-    try {
-      await pool.query(`
-        ALTER TABLE answer_verifications 
-        ADD CONSTRAINT answer_verifications_rating_check 
-        CHECK (rating IN (-1, 0, 1));
-      `);
-      console.log('DB: Added new rating constraint for answer_verifications');
-    } catch (e: any) {
-      console.log('DB: Constraint already exists or error:', e.message);
-    }
-
     await pool.query(createAnswerVerificationsTableQuery);
     console.log('DB: Answer verifications table created or already exists');
 
@@ -527,6 +498,58 @@ async function initializeDatabase() {
       $$;
     `);
     console.log('DB: verification_type, requested_departments, and due_date columns added');
+
+    // DROP rating column if exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='rating'
+        ) THEN
+          ALTER TABLE answer_verifications DROP COLUMN rating;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: rating column removed from answer_verifications table');
+
+    // DROP department, due_date columns if exists from verified_answers
+    // But keep created_by column if it exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='department'
+        ) THEN
+          ALTER TABLE verified_answers DROP COLUMN department;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='due_date'
+        ) THEN
+          ALTER TABLE verified_answers DROP COLUMN due_date;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: department, due_date columns removed from verified_answers table');
+
+    // Add created_by column if not exists
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='created_by'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN created_by VARCHAR(255);
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: created_by column added to verified_answers table');
 
     // Add views column if not exists
     await pool.query(`
@@ -1090,7 +1113,7 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
 
 /**
  * ① บันทึกคำตอบที่ verified
- * Saves a verified answer with question embedding and rating verification
+ * Saves a verified answer with question embedding
  */
 async function saveVerifiedAnswer(
   question: string,
@@ -1098,13 +1121,13 @@ async function saveVerifiedAnswer(
   questionEmbedding: number[],
   answerEmbedding?: number[],
   userId?: number,
-  rating?: number,
   commenterName?: string,
   comment?: string,
   verificationType?: string,
   requestedDepartments?: string[],
   notifyMe?: boolean,
-  tags?: string[]
+  tags?: string[],
+  createdBy?: string
 ) {
   try {
     // First, check if this answer already exists (by question + answer)
@@ -1142,64 +1165,30 @@ async function saveVerifiedAnswer(
         answerEmbeddingStr = `[${answerEmbedding.join(',')}]`;
       }
       const result = await pool.query(
-        `INSERT INTO verified_answers (question, answer, question_embedding, answer_embedding, avg_rating, verified_count, rating_count, verification_type, requested_departments, notify_me, tags)
-         VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7, $8, $9)
+        `INSERT INTO verified_answers (question, answer, question_embedding, answer_embedding, verification_type, requested_departments, notify_me, tags, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
-        [question, answer, questionEmbeddingStr, answerEmbeddingStr, 0, verificationType || 'self', requestedDepartments || [], notifyMe || false, tags || []]
+        [question, answer, questionEmbeddingStr, answerEmbeddingStr, verificationType || 'self', requestedDepartments || [], notifyMe || false, tags || [], createdBy || commenterName || 'Anonymous']
       );
       answerId = result.rows[0].id;
     }
 
-    // Determine actual rating based on verification type
-    // If requesting verification from others, set rating to 0 (pending)
-    const actualRating = verificationType === 'request' ? 0 : (rating ?? 1);
-
-    // Convert userId to integer to match database type
-    const userIdInt = userId ? parseInt(String(userId), 10) : null;
-    if (userId && isNaN(userIdInt!)) {
-      console.warn(`DB: Invalid userId=${userId}, cannot convert to integer`);
-    }
-
-    console.log(`DB: Attempting to save rating - userId=${userIdInt}, rating=${rating}, actualRating=${actualRating}, answerId=${answerId}`);
-
-    // Check if this user already rated this answer
-    if (userIdInt && rating !== undefined) {
-      console.log(`DB: Checking existing rating for answerId=${answerId}, userId=${userIdInt}`);
-      const userRating = await pool.query(
-        `SELECT id FROM answer_verifications 
-         WHERE verified_answer_id = $1 AND user_id = $2 
-         LIMIT 1`,
-        [answerId, userIdInt]
-      );
-
-      if (userRating.rows.length > 0) {
-        // User already rated this answer - update instead of insert
-        console.log(`DB: Updating existing rating for answerId=${answerId}, userId=${userIdInt}, newRating=${actualRating}`);
-        const updateResult = await pool.query(
-          `UPDATE answer_verifications 
-           SET rating = $1, commenter_name = $2, comment = $3, verification_type = $4, requested_departments = $5
-           WHERE verified_answer_id = $6 AND user_id = $7`,
-          [actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || [], answerId, userIdInt]
-        );
-        console.log(`DB: UPDATE result - ${updateResult.rowCount} row(s) updated`);
-        console.log(`DB: Updated ${updateResult.rowCount} rows`);
-      } else {
-        // New rating from this user
-        console.log(`DB: Inserting new rating for answerId=${answerId}, userId=${userIdInt}`);
+    // Save verification record to answer_verifications table
+    if (userId || comment || verificationType) {
+      try {
         await pool.query(
-          `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [answerId, userIdInt, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
+          `INSERT INTO answer_verifications (verified_answer_id, user_id, comment, commenter_name, verification_type, requested_departments, due_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (verified_answer_id, user_id) DO UPDATE SET 
+             comment = COALESCE(EXCLUDED.comment, answer_verifications.comment),
+             verification_type = COALESCE(EXCLUDED.verification_type, answer_verifications.verification_type),
+             requested_departments = COALESCE(EXCLUDED.requested_departments, answer_verifications.requested_departments)`,
+          [answerId, userId || null, comment || null, commenterName || 'Anonymous', verificationType || 'self', requestedDepartments || [], null]
         );
+      } catch (verifyError) {
+        console.error('Error saving answer verification record:', verifyError);
+        // Continue even if verification record fails to save
       }
-    } else if (rating !== undefined) {
-      // Anonymous user - always allow new rating
-      console.log(`DB: Inserting anonymous rating for answerId=${answerId}`);
-      await pool.query(
-        `INSERT INTO answer_verifications (verified_answer_id, user_id, rating, commenter_name, comment, verification_type, requested_departments)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [answerId, null, actualRating, commenterName || 'Anonymous', comment || '', verificationType || 'self', requestedDepartments || []]
-      );
     }
 
     return { success: true, answerId };
@@ -1233,13 +1222,11 @@ async function searchVerifiedAnswers(
         id,
         question,
         answer,
-        avg_rating,
-        verified_count,
-        rating_count,
+        created_by,
         1 - (question_embedding <-> $1) as similarity
        FROM verified_answers
        WHERE 1 - (question_embedding <-> $1) > $2
-       ORDER BY similarity DESC, avg_rating DESC
+       ORDER BY similarity DESC
        LIMIT $3`,
       [embeddingStr, threshold, limit]
     );
@@ -1273,32 +1260,155 @@ async function getAnswerVerifications(answerId: number) {
 }
 
 /**
- * ④ อัปเดตคะแนนเฉลี่ย
- * Updates the average rating and statistics for a verified answer
+ * ④ Filter Questions by type
+ * - all: ทั้งหมด
+ * - my-questions: สร้างโดยผู้ใช้เอง
+ * - my-answers: ผู้ใช้ไปเม้น/comment
+ * - pending-review: รีวิวยังไม่เสร็จ (verification_count > 0 && verification_count < requested_departments count)
+ * - unverified: ยังไม่มีการตรวจสอบเลย (verification_count = 0)
  */
-async function updateAnswerRating(answerId: number) {
+async function filterQuestionsByType(
+  filterType: string,
+  username?: string,
+  sortBy: string = 'newest',
+  limit: number = 100
+) {
   try {
-    const result = await pool.query(
-      `UPDATE verified_answers
-       SET avg_rating = (
-         SELECT COALESCE(SUM(rating), 0) FROM answer_verifications WHERE verified_answer_id = $1
-       ),
-       verified_count = (
-         SELECT COUNT(DISTINCT user_id) FROM answer_verifications WHERE verified_answer_id = $1 AND rating > 0
-       ),
-       rating_count = (
-         SELECT COUNT(*) FROM answer_verifications WHERE verified_answer_id = $1
-       ),
-       last_updated_at = NOW()
-       WHERE id = $1
-       RETURNING avg_rating, verified_count, rating_count`,
-      [answerId]
-    );
+    let query = `
+      SELECT 
+        va.id,
+        va.question,
+        va.answer,
+        va.created_at,
+        va.created_by,
+        COALESCE(va.views, 0) as views,
+        va.requested_departments as requested_departments_list,
+        va.verification_type,
+        va.tags,
+        (SELECT COUNT(*) FROM answer_verifications 
+         WHERE verified_answer_id = va.id 
+         AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) as verification_count,
+        ARRAY_LENGTH(va.requested_departments, 1) as total_requested_depts,
+        COALESCE((SELECT SUM(vote) FROM question_votes WHERE question_id = va.id), 0) as vote_score
+      FROM verified_answers va
+    `;
 
-    return result.rows[0];
+    const params: any[] = [];
+
+    // Apply filter logic
+    switch (filterType) {
+      case 'my-questions':
+        if (username) {
+          query += ` WHERE va.created_by = $1`;
+          params.push(username);
+        }
+        break;
+
+      case 'my-answers':
+        if (username) {
+          query += ` WHERE EXISTS (
+            SELECT 1 FROM comments 
+            WHERE question_id = va.id AND username = $1
+          )`;
+          params.push(username);
+        }
+        break;
+
+      case 'pending-review':
+        // verification_type = 'request' AND has actual verified count > 0 but < total_requested_depts
+        query += ` WHERE va.verification_type = 'request'
+                   AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) > 0
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) < ARRAY_LENGTH(va.requested_departments, 1)`;
+        break;
+
+      case 'unverified':
+        // verification_type = 'request' AND verification_count = 0 (no actual verifications yet)
+        query += ` WHERE va.verification_type = 'request'
+                   AND (SELECT COUNT(*) FROM answer_verifications 
+                    WHERE verified_answer_id = va.id 
+                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) = 0`;
+        break;
+
+      case 'verified':
+        // Self-verified OR fully verified request (count match AND > 0)
+        query += ` WHERE (va.verification_type = 'self')`;
+        break;
+
+      case 'all':
+      default:
+        // Show all (no WHERE clause needed)
+        break;
+    }
+
+    // Apply sort
+    switch (sortBy) {
+      case 'score':
+        query += ` ORDER BY verification_count DESC, va.created_at DESC`;
+        break;
+      case 'views':
+        query += ` ORDER BY views DESC, va.created_at DESC`;
+        break;
+      case 'verified':
+        query += ` ORDER BY verification_count DESC, va.created_at DESC`;
+        break;
+      case 'newest':
+      default:
+        query += ` ORDER BY va.created_at DESC`;
+    }
+
+    const limitIndex = params.length + 1;
+    query += ` LIMIT $${limitIndex}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map(row => ({
+      id: row.id,
+      question: row.question,
+      answer: row.answer,
+      created_at: row.created_at,
+      created_by: row.created_by,
+      views: parseInt(row.views) || 0,
+      verification_type: row.verification_type,
+      requested_departments: row.requested_departments_list || [],
+      tags: row.tags || [],
+      verification_count: parseInt(row.verification_count) || 0,
+      total_requested_depts: parseInt(row.total_requested_depts) || 0,
+      vote_score: parseInt(row.vote_score) || 0,
+      user_has_answered: parseInt(row.user_comment_count) > 0
+    }));
   } catch (error) {
-    console.error('Error updating rating:', error);
+    console.error('Error filtering questions:', error);
     throw error;
+  }
+}
+
+/**
+ * Get Hot Tags - Most used tags from all questions
+ */
+async function getHotTags(limit: number = 8) {
+  try {
+    const result = await pool.query(`
+      SELECT tag, COUNT(*) as count
+      FROM verified_answers, UNNEST(tags) AS tag
+      WHERE tags IS NOT NULL AND ARRAY_LENGTH(tags, 1) > 0
+      GROUP BY tag
+      ORDER BY count DESC
+      LIMIT $1
+    `, [limit]);
+
+    return result.rows.map(row => ({
+      tag: row.tag,
+      count: parseInt(row.count) || 0
+    }));
+  } catch (error) {
+    console.error('Error getting hot tags:', error);
+    return [];
   }
 }
 
@@ -1583,13 +1693,16 @@ export {
   saveVerifiedAnswer,
   searchVerifiedAnswers,
   getAnswerVerifications,
-  updateAnswerRating,
+  filterQuestionsByType,
 
   // Question Attachments Functions
   saveQuestionAttachment,
   getQuestionAttachments,
   getQuestionAttachmentData,
   deleteQuestionAttachment,
+
+  // Hot Tags Function
+  getHotTags,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

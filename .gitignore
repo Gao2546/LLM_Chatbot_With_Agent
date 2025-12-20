@@ -61,3 +61,5 @@ sum_doc/
 final2.md
 package-lock.json
 PROJECT_OVERVIEW.md
+database_migration_drop_rating_column.sql
+database_migration_remove_ratings.sql
