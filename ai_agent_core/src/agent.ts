@@ -148,7 +148,7 @@ const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
     if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
       // Replace html entities globally
       console.log("Before replace: ", value.substring(0, 100), "...");
-      value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&#x2F;/g, '/').replace(/&#x60;/g, '`').replace(/&#x3D;/g, '=').replace(/&#10;/g, '\n').replace(/&#13;/g, '\r').replace(/&#9;/g, '\t').replace(/&#x0;/g, '').replace(/&nbsp;/g, ' ').replace(/&#xA0;/g, ' ');
       console.log("After replace: ", value.substring(0, 100), "...");
     }
 
