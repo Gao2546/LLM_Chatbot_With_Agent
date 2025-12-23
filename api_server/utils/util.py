@@ -2960,7 +2960,7 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
             ORDER BY distance
             LIMIT %s
         """
-        cur.execute(query, (query_vector, user_id, query_vector, 2, top_k))
+        cur.execute(query, (query_vector, user_id, query_vector, threshold_text, top_k))
         results = cur.fetchall()
         cur.close()
 
