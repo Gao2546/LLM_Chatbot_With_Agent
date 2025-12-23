@@ -1602,7 +1602,7 @@ Output only the simulated excerpt.
 # Output only the search string.
 # """
     
-    if text:
+    if text or search_text:
         print("Requesting Jina v4 embedding (Type: Text)...")
         if search_text == None:
             if not LOCAL:
@@ -1809,7 +1809,7 @@ def get_image_embedding_jinna_api_local(
         # model = _JINA_MODEL_INSTANCE
 
         # 3. Handle Text Input (Retrieval Query)
-        if text:
+        if text or search_text:
             print("Generating Jina v4 embedding (Type: Text)...")
             
             # --- START: Query Expansion / HyDE Logic (Preserved) ---
