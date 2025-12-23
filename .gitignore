@@ -63,3 +63,9 @@ package-lock.json
 PROJECT_OVERVIEW.md
 database_migration_drop_rating_column.sql
 database_migration_remove_ratings.sql
+doc
+
+clean_comments_data.sql
+database_migration_add_user_table.sql
+database_migration_create_initial_tables.sql
+database_migration_update_schema.sql

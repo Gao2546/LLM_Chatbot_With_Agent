@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS answer_verifications (
     commenter_name VARCHAR(255),
     verification_type VARCHAR(50) DEFAULT 'self',
     requested_departments TEXT[],
+    attachments JSONB DEFAULT '[]'::jsonb,
     due_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(verified_answer_id, user_id)
@@ -494,10 +495,24 @@ async function initializeDatabase() {
         ) THEN
           ALTER TABLE answer_verifications ADD COLUMN due_date TIMESTAMP;
         END IF;
+        
+        -- Drop attachment_paths if exists and add attachments as JSONB
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='attachment_paths'
+        ) THEN
+          ALTER TABLE answer_verifications DROP COLUMN attachment_paths;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='answer_verifications' AND column_name='attachments'
+        ) THEN
+          ALTER TABLE answer_verifications ADD COLUMN attachments JSONB DEFAULT '[]'::jsonb;
+        END IF;
       END
       $$;
     `);
-    console.log('DB: verification_type, requested_departments, and due_date columns added');
+    console.log('DB: verification_type, requested_departments, due_date, and attachments columns added');
 
     // DROP rating column if exists
     await pool.query(`
@@ -1285,10 +1300,20 @@ async function filterQuestionsByType(
         va.requested_departments as requested_departments_list,
         va.verification_type,
         va.tags,
-        (SELECT COUNT(*) FROM answer_verifications 
-         WHERE verified_answer_id = va.id 
-         AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) as verification_count,
-        ARRAY_LENGTH(va.requested_departments, 1) as total_requested_depts,
+        (SELECT COUNT(DISTINCT dept) 
+         FROM (
+           SELECT UNNEST(av.requested_departments) AS dept
+           FROM answer_verifications av
+           WHERE av.verified_answer_id = va.id 
+           AND av.verification_type = 'verification'
+           AND av.commenter_name IS NOT NULL 
+           AND av.commenter_name != ''
+           AND av.requested_departments IS NOT NULL
+           AND ARRAY_LENGTH(av.requested_departments, 1) > 0
+         ) AS verified_depts
+         WHERE dept = ANY(va.requested_departments)
+        ) as verification_count,
+        COALESCE(ARRAY_LENGTH(va.requested_departments, 1), 0) as total_requested_depts,
         COALESCE((SELECT SUM(vote) FROM question_votes WHERE question_id = va.id), 0) as vote_score
       FROM verified_answers va
     `;
@@ -1318,25 +1343,43 @@ async function filterQuestionsByType(
         // verification_type = 'request' AND has actual verified count > 0 but < total_requested_depts
         query += ` WHERE va.verification_type = 'request'
                    AND ARRAY_LENGTH(va.requested_departments, 1) > 0
-                   AND (SELECT COUNT(*) FROM answer_verifications 
-                    WHERE verified_answer_id = va.id 
-                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) > 0
-                   AND (SELECT COUNT(*) FROM answer_verifications 
-                    WHERE verified_answer_id = va.id 
-                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) < ARRAY_LENGTH(va.requested_departments, 1)`;
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') > 0
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') < ARRAY_LENGTH(va.requested_departments, 1)`;
         break;
 
       case 'unverified':
         // verification_type = 'request' AND verification_count = 0 (no actual verifications yet)
         query += ` WHERE va.verification_type = 'request'
-                   AND (SELECT COUNT(*) FROM answer_verifications 
-                    WHERE verified_answer_id = va.id 
-                    AND (verification_type = 'self' OR (verification_type = 'request' AND commenter_name IS NOT NULL AND commenter_name != va.created_by))) = 0`;
+                   AND COALESCE((SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != ''), 0) = 0`;
         break;
 
       case 'verified':
-        // Self-verified OR fully verified request (count match AND > 0)
-        query += ` WHERE (va.verification_type = 'self')`;
+        // Self-verified OR fully verified request (verification_count >= total_requested_depts)
+        query += ` WHERE (va.verification_type = 'self')
+                   OR (va.verification_type = 'request' 
+                       AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                       AND (SELECT COUNT(DISTINCT dept) 
+                        FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                        WHERE av.verified_answer_id = va.id 
+                        AND av.verification_type = 'verification'
+                        AND av.commenter_name IS NOT NULL 
+                        AND av.commenter_name != ''
+                        AND dept = ANY(va.requested_departments)) >= ARRAY_LENGTH(va.requested_departments, 1))`;
         break;
 
       case 'all':
@@ -1628,6 +1671,71 @@ async function deleteQuestionAttachment(attachmentId: number): Promise<void> {
 }
 
 /**
+ * Saves verification attachment paths to MinIO
+ * @param verificationId The ID of the verification record
+ * @param attachmentPaths Array of MinIO object paths
+ */
+async function saveVerificationAttachments(
+  verificationId: number,
+  attachmentPaths: string[]
+): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE answer_verifications 
+       SET attachment_paths = $1
+       WHERE id = $2`,
+      [attachmentPaths, verificationId]
+    );
+    console.log(`DB: Verification ${verificationId} attachments saved`);
+  } catch (error) {
+    console.error('Error saving verification attachments:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets attachments for a verification
+ * @param verificationId The ID of the verification
+ * @returns Array of attachment paths from MinIO
+ */
+async function getVerificationAttachments(verificationId: number): Promise<string[]> {
+  try {
+    const result = await pool.query(
+      `SELECT attachment_paths FROM answer_verifications WHERE id = $1`,
+      [verificationId]
+    );
+    if (result.rows.length === 0) {
+      return [];
+    }
+    return result.rows[0].attachment_paths || [];
+  } catch (error) {
+    console.error('Error getting verification attachments:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets all attachments for all verifications of an answer
+ * @param answerId The ID of the verified answer
+ * @returns Array of verification records with their attachments
+ */
+async function getAnswerVerificationAttachments(answerId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT id, commenter_name, comment, attachment_paths, created_at
+       FROM answer_verifications
+       WHERE verified_answer_id = $1 AND attachment_paths IS NOT NULL AND array_length(attachment_paths, 1) > 0
+       ORDER BY created_at DESC`,
+      [answerId]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting answer verification attachments:', error);
+    throw error;
+  }
+}
+
+/**
  * Updates the file_process_status for a specific uploaded file.
  * @param fileId The ID of the file
  * @param status The new status string (e.g., 'process', 'done', 'error')
@@ -1700,6 +1808,9 @@ export {
   getQuestionAttachments,
   getQuestionAttachmentData,
   deleteQuestionAttachment,
+  saveVerificationAttachments,
+  getVerificationAttachments,
+  getAnswerVerificationAttachments,
 
   // Hot Tags Function
   getHotTags,

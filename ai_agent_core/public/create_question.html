@@ -120,14 +120,12 @@
                     <!-- Tags Field -->
                     <div class="form-section">
                         <div style="margin-top: 0;">
-                            <label style="font-size: 13px; color: #666; margin-bottom: 8px; display: block; font-weight: 600;">
+                            <label class="form-label-tags">
                                 <i class="fas fa-tags" style="margin-right: 6px;"></i>Add Tags
                             </label>
                             <div style="display: flex; gap: 8px; align-items: center;">
-                                <input type="text" id="questionTags" placeholder="Type tag name and press Enter or click +" 
-                                    style="flex: 1; padding: 10px 14px; border: 2px solid #3a3a3a; border-radius: 8px; background: rgba(10, 130, 118, 0.08); color: #2a2a2a; font-size: 13px; transition: all 0.2s;">
-                                <button type="button" id="addTagBtn" 
-                                    style="padding: 10px 16px; background: #0a8276; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; display: flex; align-items: center; gap: 6px;">
+                                <input type="text" id="questionTags" class="form-input-tags" placeholder="Type tag name and press Enter or click +">
+                                <button type="button" id="addTagBtn" class="form-add-tag-btn">
                                     <i class="fas fa-plus"></i>
                                     <span>Add</span>
                                 </button>
@@ -142,21 +140,17 @@
                             Verification type<span style="color: red;">*</span>
                         </label>
                         
-                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin-top: 15px; background: #fafafa;">
+                        <div class="verification-box">
                             <!-- Option 1: Self Verify -->
-                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; margin-bottom: 15px;">
+                            <label class="verification-label">
                                 <input type="radio" name="verificationType" value="self" checked style="margin-top: 3px; cursor: pointer;">
                                 <div style="flex: 1; width: 100%;">
                                     <div style="font-weight: 600; margin-bottom: 4px;">Verify this answer "by my department"</div>
-                                    <div style="font-size: 13px; color: #666; margin-bottom: 12px;">Submit answer that's verified by your department</div>
+                                    <div class="verification-description">Submit answer that's verified by your department</div>
                                     
                                     <!-- Departments Box for Self Verification (shown when self is selected) -->
                                     <div id="selfDepartmentsContainer" style="display: block;">
-                                        <label class="form-label" style="margin-bottom: 8px; font-size: 14px;">
-                                            Select Department <span style="color: red;">*</span>
-                                        </label>
-                                        <p class="form-hint" style="margin-bottom: 12px; font-size: 12px;">Choose which department verifies this answer</p>
-                                        <div id="selfDepartmentsBox" style="border: 2px solid #017374; border-radius: 4px; padding: 15px; background: white; min-height: 60px; max-height: 200px; overflow-y: auto;">
+                                        <div id="selfDepartmentsBox" class="departments-box departments-box-self" style="border: 2px solid #0a8276; margin-top: 12px;">
                                             <!-- Will be populated by JavaScript -->
                                         </div>
                                     </div>
@@ -164,25 +158,32 @@
                             </label>
 
                             <!-- Option 2: Request Verification -->
-                            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                            <label class="verification-label">
                                 <input type="radio" name="verificationType" value="request" style="margin-top: 3px; cursor: pointer;">
                                 <div style="flex: 1; width: 100%;">
                                     <div style="font-weight: 600; margin-bottom: 4px;">Request verification from other department(s)</div>
-                                    <div style="font-size: 13px; color: #666; margin-bottom: 12px;">Request verification from specific departments with optional due date</div>
+                                    <div class="verification-description">Request verification from specific departments with optional due date</div>
                                     
                                     <!-- Departments Box (shown when request is selected) -->
                                     <div id="departmentsSelectContainer" style="display: none;">
-                                        <label class="form-label" style="margin-bottom: 8px; font-size: 14px;">
-                                            Select Departments <span style="color: red;">*</span>
-                                        </label>
-                                        <p class="form-hint" style="margin-bottom: 12px; font-size: 12px;">Choose which departments should verify this answer. (Hold Ctrl/Cmd to select multiple)</p>
-                                        <div id="departmentsBox" style="border: 2px solid #017374; border-radius: 4px; padding: 15px; background: white; min-height: 100px; max-height: 250px; overflow-y: auto;">
+                                        <div id="departmentsBox" class="departments-box">
                                             <!-- Will be populated by JavaScript -->
                                         </div>
                                     </div>
                                 </div>
                             </label>
                         </div>
+                    </div>
+
+                    <!-- Notify Me Checkbox -->
+                    <div class="form-section">
+                        <label class="verify-checkbox-item-themed">
+                            <input type="checkbox" id="notifyCheckbox" style="width: 18px; height: 18px; cursor: pointer; accent-color: #017374;">
+                            <span class="verify-checkbox-text-themed">
+                                <i class="fas fa-bell" style="margin-right: 6px; color: #017374;"></i>
+                                Notify me when the answer is verified
+                            </span>
+                        </label>
                     </div>
 
                     <!-- Action Buttons -->
@@ -211,7 +212,7 @@
                     <div class="info-box">
                         <div class="box-title">Hot Questions</div>
                         <div class="mini-list" id="sidebarHotQuestions">
-                            <div style="color: #999; padding: 10px; text-align: center;">Loading...</div>
+                            <div class="sidebar-loading-text">Loading...</div>
                         </div>
                     </div>
                 </aside>
@@ -229,7 +230,7 @@
             font-size: 16px;
             font-weight: 600;
             margin-bottom: 5px;
-            color: var(--text-primary);
+            color: var(--text-color);
         }
 
         .form-hint {
@@ -263,6 +264,205 @@
             border-color: #017374;
             box-shadow: 0 0 0 3px rgba(1, 115, 116, 0.1);
         }
+
+        /* Tags Label & Input Styles */
+        .form-label-tags {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: block;
+            font-weight: 600;
+        }
+
+        .form-input-tags {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        [data-theme="dark"] .form-input-tags {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        [data-theme="light"] .form-input-tags {
+            border: 1px solid #cccccc;
+            background: #fafafa;
+        }
+
+        .form-input-tags:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(10, 130, 118, 0.15);
+        }
+
+        .form-input-tags::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-add-tag-btn {
+            padding: 10px 16px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .form-add-tag-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        /* TinyMCE Dark Theme Overrides */
+        [data-theme="dark"] .tox-tinymce {
+            background-color: #2d2d2d !important;
+            border-color: #444 !important;
+        }
+
+        [data-theme="dark"] .tox-toolbar {
+            background-color: #2d2d2d !important;
+            border-color: #444 !important;
+        }
+
+        [data-theme="dark"] .tox-editor-container {
+            background-color: #2d2d2d !important;
+        }
+
+        [data-theme="dark"] .tox-tbtn {
+            color: #e0e0e0 !important;
+        }
+
+        [data-theme="dark"] .tox-tbtn:hover {
+            background-color: #1a1a1a !important;
+        }
+
+        [data-theme="dark"] .tox-edit-area {
+            background-color: #1e1e1e !important;
+        }
+
+        /* TinyMCE Light Theme Overrides */
+        [data-theme="light"] .tox-tinymce {
+            background-color: #ffffff !important;
+            border-color: #ccc !important;
+        }
+
+        [data-theme="light"] .tox-toolbar {
+            background-color: #f5f5f5 !important;
+            border-color: #ddd !important;
+        }
+
+        /* Verification Box Styles */
+        .verification-box {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            background: var(--input-bg);
+        }
+
+        [data-theme="light"] .verification-box {
+            background: #fafafa;
+            border-color: #ddd;
+        }
+
+        .verification-label {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            cursor: pointer;
+            margin-bottom: 15px;
+        }
+
+        .verification-label:last-child {
+            margin-bottom: 0;
+        }
+
+        .verification-description {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .departments-box {
+            border: 2px solid var(--accent-color);
+            border-radius: 4px;
+            padding: 15px;
+            background: var(--input-bg);
+            min-height: 60px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .departments-box-self {
+            margin-top: 12px;
+        }
+
+        [data-theme="light"] .departments-box {
+            background: #ffffff;
+        }
+
+        /* Notify Checkbox Themed Styles */
+        .verify-checkbox-item-themed {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: rgba(1, 115, 116, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(1, 115, 116, 0.2);
+            transition: all 0.2s;
+        }
+
+        [data-theme="light"] .verify-checkbox-item-themed {
+            background: rgba(1, 115, 116, 0.08);
+            border-color: rgba(1, 115, 116, 0.3);
+        }
+
+        .verify-checkbox-text-themed {
+            font-size: 14px;
+            color: var(--text-color);
+            font-weight: 500;
+        }
+
+        .sidebar-loading-text {
+            color: var(--text-muted);
+            padding: 10px;
+            text-align: center;
+        }
+
+        /* Department Label Styles */
+        .dept-label {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+            margin-bottom: 4px;
+        }
+
+        .dept-label:hover {
+            background: var(--border-color);
+        }
+
+        .dept-label-text {
+            font-size: 14px;
+            color: var(--text-color);
+        }
+
+
 
         #departmentsBox {
             border: 2px solid #017374;
@@ -323,6 +523,11 @@
             background: #2d2d2d;
             color: #e0e0e0;
             border-color: #444;
+        }
+
+        [data-theme="dark"] .form-textarea::placeholder {
+            color: #ffffff;
+            opacity: 1;
         }
 
         .editor-toolbar {
@@ -604,6 +809,26 @@
             background: #2d2d2d;
             color: #e0e0e0;
             border-color: #444;
+        }
+
+        /* Notify Checkbox Styles */
+        .verify-checkbox-item:hover {
+            background: rgba(1, 115, 116, 0.1) !important;
+            border-color: rgba(1, 115, 116, 0.4) !important;
+        }
+
+        [data-theme="dark"] .verify-checkbox-item {
+            background: rgba(1, 115, 116, 0.1) !important;
+            border-color: rgba(1, 115, 116, 0.3) !important;
+        }
+
+        [data-theme="dark"] .verify-checkbox-item:hover {
+            background: rgba(1, 115, 116, 0.15) !important;
+            border-color: rgba(1, 115, 116, 0.5) !important;
+        }
+
+        [data-theme="dark"] .verify-checkbox-text {
+            color: #e0e0e0 !important;
         }
 
         .dept-checkbox-label {
@@ -935,7 +1160,42 @@
             initializeTinyMCE();
             setupFileUpload();
             loadCommunityStats();
+            await loadHotTags(); // Load hot tags from API
         });
+
+        // Load Hot Tags from API
+        async function loadHotTags() {
+            try {
+                const res = await fetch('/api/hot-tags?limit=8');
+                const data = await res.json();
+                if (data.success && data.tags.length > 0) {
+                    const tagsListDiv = document.getElementById('tagsList');
+                    tagsListDiv.innerHTML = data.tags.map(t => 
+                        `<span class="sidebar-tag-item" data-tag="${t.tag}" onclick="addTagFromSidebar('${t.tag}')" style="cursor: pointer;">${t.tag}</span>`
+                    ).join('');
+                }
+            } catch (e) {
+                console.error('Error loading hot tags:', e);
+            }
+        }
+
+        // Add tag from sidebar click
+        function addTagFromSidebar(tagName) {
+            if (!tagName) return;
+            
+            if (customTags.length >= 5) {
+                alert('Maximum 5 tags allowed');
+                return;
+            }
+            
+            if (customTags.includes(tagName)) {
+                alert('This tag already added');
+                return;
+            }
+            
+            customTags.push(tagName);
+            renderCustomTags();
+        }
 
         // Load Community Stats and Hot Questions
         async function loadCommunityStats() {
@@ -1213,19 +1473,19 @@
             // Populate request departments (multiple select)
             if (departmentsBox) {
                 departmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background 0.2s; margin-bottom: 4px;">
+                    <label class="dept-label">
                         <input type="checkbox" class="dept-checkbox" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
-                        <span style="font-size: 14px; color: var(--text-primary);">${dept}</span>
+                        <span class="dept-label-text">${dept}</span>
                     </label>
                 `).join('');
             }
             
-            // Populate self departments (single or multiple select)
+            // Populate self departments (single select - radio buttons)
             if (selfDepartmentsBox) {
                 selfDepartmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background 0.2s; margin-bottom: 4px;">
-                        <input type="checkbox" class="self-dept-checkbox" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
-                        <span style="font-size: 14px; color: var(--text-primary);">${dept}</span>
+                    <label class="dept-label">
+                        <input type="radio" name="selfDepartment" class="self-dept-radio" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
+                        <span class="dept-label-text">${dept}</span>
                     </label>
                 `).join('');
             }
@@ -1236,6 +1496,7 @@
             const title = document.getElementById('questionTitle').value.trim();
             const body = tinymce.get('questionBody') ? tinymce.get('questionBody').getContent() : document.getElementById('questionBody').value;
             const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
+            const notifyMe = document.getElementById('notifyCheckbox').checked; // Get notify_me value
 
             if (!title) {
                 alert('Please enter a title');
@@ -1265,7 +1526,8 @@
                     verificationType: verificationType,
                     userName: userName,
                     rating: 1,
-                    comment: ''
+                    comment: '',
+                    notify_me: notifyMe  // Add notify_me to payload
                 };
 
                 // Get departments based on verification type
@@ -1279,7 +1541,7 @@
                         return;
                     }
                 } else if (verificationType === 'self') {
-                    selectedDepts = Array.from(document.querySelectorAll('#selfDepartmentsBox .self-dept-checkbox:checked'))
+                    selectedDepts = Array.from(document.querySelectorAll('#selfDepartmentsBox .self-dept-radio:checked'))
                         .map(cb => cb.value);
 
                     if (selectedDepts.length === 0) {
@@ -1303,6 +1565,7 @@
                     formData.append('userName', payload.userName);
                     formData.append('rating', payload.rating);
                     formData.append('comment', payload.comment);
+                    formData.append('notify_me', payload.notify_me);  // Add notify_me to FormData
                     if (payload.requestedDepartments) {
                         formData.append('requestedDepartments', JSON.stringify(payload.requestedDepartments));
                     }
@@ -1415,6 +1678,11 @@
 
         // Initialize TinyMCE editor (WYSIWYG - What You See Is What You Get)
         function initializeTinyMCE() {
+            const currentTheme = localStorage.getItem('theme') || 'dark';
+            const contentStyle = currentTheme === 'dark' 
+                ? 'body { background-color: #2d2d2d !important; color: #e0e0e0 !important; } p { color: #e0e0e0 !important; }'
+                : 'body { background-color: #ffffff !important; color: #333 !important; } p { color: #333 !important; }';
+            
             tinymce.init({
                 selector: '#questionBody',
                 plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste help wordcount',
@@ -1423,16 +1691,41 @@
                 height: 400,
                 branding: false,
                 promotion: false,
-                content_css: 'default',
-                skin: localStorage.getItem('theme') === 'dark' ? 'oxide-dark' : 'oxide',
-                content_css: localStorage.getItem('theme') === 'dark' ? 'dark' : 'default',
+                skin: currentTheme === 'dark' ? 'oxide-dark' : 'oxide',
+                content_css: currentTheme === 'dark' ? 'dark' : 'default',
+                content_style: contentStyle,
                 init_instance_callback: function(editor) {
                     console.log('TinyMCE initialized');
                 }
             });
         }
 
-        // Theme Toggle
+        // Reinitialize TinyMCE when theme changes
+        function reinitializeTinyMCE() {
+            const currentTheme = localStorage.getItem('theme') || 'dark';
+            const contentStyle = currentTheme === 'dark' 
+                ? 'body { background-color: #2d2d2d !important; color: #e0e0e0 !important; } p { color: #e0e0e0 !important; }'
+                : 'body { background-color: #ffffff !important; color: #333 !important; } p { color: #333 !important; }';
+
+            tinymce.remove();
+            setTimeout(() => {
+                tinymce.init({
+                    selector: '#questionBody',
+                    plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste help wordcount',
+                    toolbar: 'undo redo | formatselect | bold italic backcolor | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | help',
+                    menubar: 'file edit view insert format table tools help',
+                    height: 400,
+                    branding: false,
+                    promotion: false,
+                    skin: currentTheme === 'dark' ? 'oxide-dark' : 'oxide',
+                    content_css: currentTheme === 'dark' ? 'dark' : 'default',
+                    content_style: contentStyle,
+                    init_instance_callback: function(editor) {
+                        console.log('TinyMCE reinitialized with new theme');
+                    }
+                });
+            }, 100);
+        }
         let currentTheme = localStorage.getItem('theme') || 'dark';
 
         function initTheme() {
@@ -1446,6 +1739,7 @@
             document.body.setAttribute('data-theme', currentTheme);
             localStorage.setItem('theme', currentTheme);
             updateThemeLabel();
+            reinitializeTinyMCE(); // Update TinyMCE theme
         }
 
         function updateThemeLabel() {

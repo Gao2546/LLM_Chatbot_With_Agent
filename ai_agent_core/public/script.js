@@ -3079,6 +3079,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
             const sessionData = await sessionResponse.json();
             const userName = sessionData?.username || 'Anonymous';
             
+            // Use JSON for submission (no files)
             const response = await fetch('/api/verify-answer', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3090,9 +3091,11 @@ async function showVerifyModal(question, answer, verifyBtn) {
                     tags: [...selectedTags, ...customTags],
                     verificationType: verificationType,
                     requestedDepartments: selectedDepts,
-                    notifyMe: notifyMe
+                    notify_me: notifyMe
                 })
             });
+            
+            console.log('📥 Response status:', response.status);
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));

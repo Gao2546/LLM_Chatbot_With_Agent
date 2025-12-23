@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments } from './db.js';
 
 dotenv.config();
 
@@ -243,29 +243,67 @@ function wrapUseToolWithXml(responsetext: string): string {
 // ⭐ NEW API ENDPOINT TO SERVE FILES FROM STORAGE ⭐
 // =================================================================================
 router.get('/storage/*', async (req: Request, res: Response) => {
-    // The '*' captures the entire path after /storage/, including slashes
-    const objectName = req.params[0];
+    // Support both formats:
+    // 1. /api/storage/comments/userid/filename (path param)
+    // 2. /api/storage?path=comments/userid/filename (query param, URL encoded)
+    let objectName = req.params[0];
+    
+    // If query param provided, use that instead
+    if (req.query.path) {
+        objectName = req.query.path as string;
+    }
 
     if (!objectName) {
         return res.status(400).send('File path is required.');
     }
 
     try {
-        // 1. Get file metadata (like MIME type) from the database
-        const fileInfo = await getFileInfoByObjectName(objectName);
-
-        if (!fileInfo) {
-            return res.status(404).send('File not found in database records.');
+        // 1. Try to get file metadata from database (for uploaded_files table)
+        // Note: Comment files are NOT in uploaded_files, they're in comments JSON
+        // So we skip strict DB requirement and go directly to MinIO
+        let fileInfo = null;
+        try {
+            fileInfo = await getFileInfoByObjectName(objectName);
+        } catch (dbError) {
+            // File not in uploaded_files table - this is OK for comment files
+            // Continue to retrieve from MinIO (no error log needed)
         }
 
         // 2. Get the file stream from MinIO
-        const fileStream = await getFileByObjectName(objectName);
+        let fileStream: any;
+        try {
+            fileStream = await getFileByObjectName(objectName);
+        } catch (minioError: any) {
+            console.error(`File '${objectName}' not found in MinIO:`, minioError);
+            return res.status(404).send('File not found in storage.');
+        }
         
-        // 3. Set headers to tell the browser how to handle the file
-        // 'Content-Type' lets the browser know if it's an image, pdf, etc.
-        res.setHeader('Content-Type', fileInfo.mime_type || 'application/octet-stream');
-        // 'Content-Disposition' suggests the original filename
-        res.setHeader('Content-Disposition', `inline; filename="${fileInfo.file_name}"`);
+        // 3. Set response headers
+        let mimeType = fileInfo?.mime_type || 'application/octet-stream';
+        let fileName = fileInfo?.file_name || objectName.split('/').pop() || 'download';
+        
+        // If no DB record, try to infer MIME type from extension
+        if (!fileInfo) {
+            const ext = fileName.split('.').pop()?.toLowerCase();
+            const mimeTypeMap: {[key: string]: string} = {
+                'pdf': 'application/pdf',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'txt': 'text/plain',
+                'csv': 'text/csv',
+                'zip': 'application/zip'
+            };
+            if (ext && ext in mimeTypeMap) {
+                mimeType = mimeTypeMap[ext];
+            }
+        }
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
         
         // 4. Pipe the stream from MinIO directly to the response
         fileStream.pipe(res);
@@ -2213,11 +2251,11 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       userName = req.body.userName || 'Anonymous';
       verificationType = req.body.verificationType || 'self';
       requestedDepartments = req.body.requestedDepartments ? JSON.parse(req.body.requestedDepartments) : [];
-      notifyMe = req.body.notifyMe === 'true' || req.body.notifyMe === true;
+      notifyMe = req.body.notify_me === 'true' || req.body.notify_me === true;
       tags = req.body.tags ? JSON.parse(req.body.tags) : [];
     } else {
       // JSON case (no files)
-      ({ question, answer, comment, userName, verificationType = 'self', requestedDepartments = [], notifyMe = false, tags = [] } = req.body);
+      ({ question, answer, comment, userName, verificationType = 'self', requestedDepartments = [], notify_me: notifyMe = false, tags = [] } = req.body);
     }
 
     const userId = req.session.user?.id;
@@ -2282,19 +2320,46 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
     }
     
     if (result && result.answerId) {
-      // Handle file attachments
+      // Handle file attachments - Upload to MinIO and save paths
+      const attachmentPaths: string[] = [];
       if (files && files.length > 0) {
         try {
           for (const file of files) {
-            await saveQuestionAttachment(
-              result.answerId,
-              file.originalname,
+            // Generate unique filename for MinIO
+            const timestamp = Date.now();
+            const randomString = Math.random().toString(36).substring(7);
+            const fileExtension = file.originalname.split('.').pop();
+            const uniqueFilename = `verify_${timestamp}_${randomString}.${fileExtension}`;
+            const objectName = `verifications/${result.answerId}/${uniqueFilename}`;
+
+            // Upload to MinIO
+            await minioClient.putObject(
+              minioBucketName,
+              objectName,
               file.buffer,
-              file.mimetype,
               file.size,
-              userName || 'Anonymous'
+              { 'Content-Type': file.mimetype }
             );
-            console.log(`Attachment saved: ${file.originalname} for question ${result.answerId}`);
+
+            console.log(`✅ Verification attachment uploaded to MinIO: ${objectName}`);
+            attachmentPaths.push(objectName);
+          }
+
+          // Save attachment paths to database if user is logged in
+          if (userId && attachmentPaths.length > 0) {
+            // Get the verification record ID first
+            const verificationResult = await pool.query(
+              `SELECT id FROM answer_verifications 
+               WHERE verified_answer_id = $1 AND user_id = $2
+               ORDER BY created_at DESC LIMIT 1`,
+              [result.answerId, userId]
+            );
+            
+            if (verificationResult.rows.length > 0) {
+              const verificationId = verificationResult.rows[0].id;
+              await saveVerificationAttachments(verificationId, attachmentPaths);
+              console.log(`✅ Verification attachments saved: ${attachmentPaths.length} files`);
+            }
           }
         } catch (fileError) {
           console.error('Error saving file attachments:', fileError);
@@ -2374,6 +2439,84 @@ router.get('/attachment-preview/:attachmentId', async (req: Request, res: Respon
   } catch (error) {
     console.error('Error previewing attachment:', error);
     res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/verification-attachments/:answerId - Get all verification attachments for an answer
+router.get('/verification-attachments/:answerId', async (req: Request, res: Response) => {
+  try {
+    const { answerId } = req.params;
+    const verifications = await getAnswerVerificationAttachments(parseInt(answerId));
+    
+    // Transform the result to include file metadata
+    const attachmentsWithMetadata = verifications.map(v => ({
+      id: v.id,
+      commenter_name: v.commenter_name,
+      comment: v.comment,
+      created_at: v.created_at,
+      attachments: (v.attachment_paths || []).map((path: string) => {
+        const filename = path.split('/').pop() || 'file';
+        return {
+          path: path,
+          name: filename,
+          url: `/api/storage/${path}`
+        };
+      })
+    }));
+
+    res.json({ success: true, verifications: attachmentsWithMetadata });
+  } catch (error) {
+    console.error('Error fetching verification attachments:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/storage/:path* - Serve files from MinIO
+router.get('/storage/*', async (req: Request, res: Response) => {
+  try {
+    // Extract the full path after '/api/storage/'
+    const objectPath = req.params[0] + (req.params.path || '');
+    
+    console.log(`📥 Fetching file from MinIO: ${objectPath}`);
+
+    // Get file from MinIO
+    const stream = await minioClient.getObject(minioBucketName, objectPath);
+    
+    // Try to determine content type from file extension
+    const ext = objectPath.split('.').pop()?.toLowerCase();
+    const mimeTypes: { [key: string]: string } = {
+      'pdf': 'application/pdf',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'xls': 'application/vnd.ms-excel',
+      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'txt': 'text/plain'
+    };
+    
+    const contentType = mimeTypes[ext || ''] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+    
+    // Pipe the stream to response
+    stream.pipe(res);
+    
+    stream.on('error', (err) => {
+      console.error('Error streaming file:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Error streaming file' });
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error serving file from storage:', error);
+    if (!res.headersSent) {
+      res.status(404).json({ success: false, error: 'File not found' });
+    }
   }
 });
 
@@ -2555,7 +2698,7 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
       userId: row.user_id,
       username: row.username || 'Anonymous',
       comment: row.comment,
-      verificationType: row.verification_type,
+      verification_type: row.verification_type,
       requestedDepartments: row.requested_departments || [],
       createdAt: row.createdAt,
       dueDate: row.dueDate
@@ -2612,7 +2755,7 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     
     // Fetch comments from comments table
     const commentsResult = await pool.query(
-      `SELECT id, question_id, user_id, username, comment_text as text, attachments, created_at as "createdAt", 'comment' as source
+      `SELECT id, question_id, user_id, username, text, attachments, created_at as "createdAt", 'comment' as source
        FROM comments 
        WHERE question_id = $1
        ORDER BY created_at DESC`,
@@ -2625,7 +2768,8 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     // Include all verifications (with or without comment text)
     const verificationsResult = await pool.query(
       `SELECT id, verified_answer_id as question_id, user_id, commenter_name as username, 
-              comment as text, created_at as "createdAt", verification_type, requested_departments, 'verification' as source
+              comment as text, created_at as "createdAt", verification_type, requested_departments, 
+              attachments, 'verification' as source
        FROM answer_verifications 
        WHERE verified_answer_id = $1`,
       [questionId]
@@ -2633,11 +2777,16 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     
     console.log(`Found ${verificationsResult.rows.length} verification comments`);
     
+    // Debug: Check attachments from database
+    verificationsResult.rows.forEach((row, idx) => {
+      console.log(`Verification ${idx}: attachments type=${typeof row.attachments}, value=`, row.attachments);
+    });
+    
     // Format verification comments to match comment structure
     const formattedVerifications = verificationsResult.rows.map(v => ({
       ...v,
       department: v.requested_departments && v.requested_departments.length > 0 ? v.requested_departments[0] : null,
-      attachments: []
+      attachments: v.attachments || []
     }));
 
     // Combine both sources and sort by date
@@ -2672,9 +2821,9 @@ router.post('/add-comment', async (req: Request, res: Response) => {
 
     // Save comment to database with department and attachments
     const result = await pool.query(
-      `INSERT INTO comments (question_id, user_id, username, comment_text, department, attachments, created_at)
+      `INSERT INTO comments (question_id, user_id, username, text, department, attachments, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       RETURNING id, question_id, user_id, username, comment_text as text, department, attachments, created_at as "createdAt", 'comment' as source`,
+       RETURNING id, question_id, user_id, username, text, department, attachments, created_at as "createdAt", 'comment' as source`,
       [questionId, userId || null, username || 'Anonymous', text, department || null, JSON.stringify(attachments)]
     );
 
@@ -2809,7 +2958,6 @@ router.get('/get-verification-status/:questionId', async (req: Request, res: Res
         commenter_name,
         verification_type,
         requested_departments,
-        rating,
         comment,
         created_at,
         COALESCE(due_date, NULL) as due_date
@@ -2938,8 +3086,8 @@ router.post('/upload-comment-files', upload.array('files'), async (req: Request,
       const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(7);
       const fileExtension = file.originalname.split('.').pop();
-      const uniqueFilename = `comment_${timestamp}_${randomString}.${fileExtension}`;
-      const objectName = `comments/${userId}/${uniqueFilename}`;
+      const uniqueFilename = `verification_${timestamp}_${randomString}.${fileExtension}`;
+      const objectName = `verify-comment/${userId}/${uniqueFilename}`;
 
       // Upload to MinIO
       await minioClient.putObject(
@@ -2950,7 +3098,7 @@ router.post('/upload-comment-files', upload.array('files'), async (req: Request,
         { 'Content-Type': file.mimetype }
       );
 
-      console.log(`Uploaded comment file: ${objectName}`);
+      console.log(`Uploaded verification file: ${objectName}`);
 
       // Create accessible URL
       const fileUrl = `/api/storage/${objectName}`;
@@ -3014,17 +3162,17 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
     if (verificationType === 'self' && userId) {
       await pool.query(`
         INSERT INTO answer_verifications 
-        (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
-        VALUES ($1, $2, $3, $4, $5, 'self', $6, NOW());
-      `, [newQuestion.id, userId, username, 1, 'Self-verified by department', [userDept]]);
+        (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, 'self', $5, NOW());
+      `, [newQuestion.id, userId, username, 'Self-verified by department', [userDept]]);
       console.log('✅ Self-verification added');
     } else if (verificationType === 'request') {
       // For request verification, add a record to track the verification request
       await pool.query(`
         INSERT INTO answer_verifications 
-        (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
-        VALUES ($1, $2, $3, $4, $5, 'request', $6, NOW());
-      `, [newQuestion.id, userId || null, username, 0, 'Verification request pending', requestedDepartments || []]);
+        (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, 'request', $5, NOW());
+      `, [newQuestion.id, userId || null, username, 'Verification request pending', requestedDepartments || []]);
       console.log('✅ Request verification added');
     }
 
@@ -3042,35 +3190,88 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
 // POST /api/submit-verification - Submit verification for an answer
 router.post('/submit-verification', async (req: Request, res: Response) => {
   try {
-    const { questionId, rating, comment, department } = req.body;
+    let { questionId, comment, department, attachments } = req.body;
     const userId = req.session.user?.id || 1; // Use guest user ID if not authenticated
     const userDept = department || req.session.user?.department || 'General';
     const commenterName = req.session.user?.username || 'Anonymous';
 
-    if (!questionId || rating === undefined) {
+    if (!questionId) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    if (![1, 0, -1].includes(rating)) {
-      return res.status(400).json({ success: false, error: 'Invalid rating' });
+    console.log('📋 Submitting verification (raw):', { 
+      questionId, 
+      userDept, 
+      department, 
+      userId, 
+      commenterName, 
+      attachments,
+      attachmentsType: typeof attachments 
+    });
+
+    // Parse attachments if it's a JSON string
+    if (typeof attachments === 'string') {
+      try {
+        attachments = JSON.parse(attachments);
+        console.log('Parsed attachments from string:', attachments);
+      } catch (e) {
+        console.error('Failed to parse attachments:', e);
+        attachments = [];
+      }
     }
 
-    console.log('📋 Submitting verification:', { questionId, rating, userDept, department, userId, commenterName });
+    // Convert attachment URLs to MinIO paths if they're provided
+    const attachmentPaths: string[] = [];
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      console.log('Processing attachments:', attachments);
+      for (const att of attachments) {
+        if (typeof att === 'string') {
+          // If it's a direct path string
+          attachmentPaths.push(att);
+          console.log('  - Direct path:', att);
+        } else if (att && att.url) {
+          // If it's an object with url property
+          const path = att.url.replace(/^\/api\/storage\//, '');
+          attachmentPaths.push(path);
+          console.log('  - Extracted path from URL:', path);
+        } else if (att && att.path) {
+          // If it's an object with path property
+          attachmentPaths.push(att.path);
+          console.log('  - Path from object:', att.path);
+        }
+      }
+    }
+
+    console.log('📎 Final attachments array:', attachments, 'Array length:', attachments?.length || 0);
 
     // Insert or update verification
+    const deptArray = [userDept];
+    const attachmentsJson = JSON.stringify(attachments || []);
+    
+    console.log('💾 Executing INSERT query with params:', {
+      questionId,
+      userId,
+      commenterName,
+      comment,
+      departments: deptArray,
+      attachments: attachments,
+      attachmentsJson: attachmentsJson
+    });
+    
     const result = await pool.query(`
       INSERT INTO answer_verifications 
-      (verified_answer_id, user_id, commenter_name, rating, comment, verification_type, requested_departments, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'verification', $6, NOW())
+      (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, attachments, created_at)
+      VALUES ($1, $2, $3, $4, 'verification', $5, $6::jsonb, NOW())
       ON CONFLICT (verified_answer_id, user_id) DO UPDATE SET
-        rating = $4,
-        comment = $5,
-        requested_departments = $6,
+        comment = EXCLUDED.comment,
+        verification_type = EXCLUDED.verification_type,
+        requested_departments = EXCLUDED.requested_departments,
+        attachments = EXCLUDED.attachments,
         created_at = NOW()
       RETURNING *;
-    `, [questionId, userId, commenterName, rating, comment || null, [userDept]]);
+    `, [questionId, userId, commenterName, comment || null, deptArray, attachmentsJson]);
 
-    console.log('✅ Verification saved:', result.rows[0].id);
+    console.log('✅ Verification saved:', result.rows[0].id, 'with', (attachments?.length || 0), 'attachments');
 
     res.json({ 
       success: true, 
@@ -3078,7 +3279,12 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
       verification: result.rows[0]
     });
   } catch (error) {
-    console.error('Error submitting verification:', error);
+    console.error('❌ Error submitting verification:', error);
+    console.error('Error details:', {
+      name: (error as any).name,
+      message: (error as any).message,
+      stack: (error as any).stack
+    });
     res.status(500).json({ success: false, error: String(error) });
   }
 });
@@ -3245,4 +3451,210 @@ router.get('/storage/*', async (req: Request, res: Response) => {
         console.error(`Failed to retrieve file '${objectName}':`, error);
         res.status(500).send('Internal server error while retrieving file.');
     }
+});
+
+// GET /api/related-questions/:questionId - Get related questions using vector similarity (verified only)
+router.get('/related-questions/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    
+    if (!questionId || isNaN(parseInt(questionId))) {
+      return res.status(400).json({ success: false, error: 'Invalid question ID' });
+    }
+
+    const qId = parseInt(questionId);
+
+    // 1. Get current question's embedding
+    const currentResult = await pool.query(
+      `SELECT question_embedding, tags FROM verified_answers WHERE id = $1`,
+      [qId]
+    );
+
+    if (currentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    const { question_embedding } = currentResult.rows[0];
+
+    if (!question_embedding) {
+      // If no embedding, return empty results
+      return res.json({ success: true, results: [] });
+    }
+
+    // 2. Get total count of related questions
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total
+      FROM verified_answers va
+      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+      WHERE va.id != $1
+        AND va.question_embedding IS NOT NULL
+        AND va.verification_type != 'request'
+        AND (
+          (1 - (va.question_embedding <=> $2::vector)) > 0.6
+          OR
+          ((1 - (va.question_embedding <=> $2::vector)) > 0.5 AND va.tags && $3::text[])
+        )
+      GROUP BY va.id
+      HAVING COUNT(av.id) > 0`,
+      [qId, question_embedding, currentResult.rows[0].tags]
+    );
+    
+    const totalRelated = countResult.rows.length;
+
+    // 3. Search for similar questions using vector similarity + tag matching (HYBRID)
+    // Combination of:
+    // - High semantic similarity (embedding > 0.7) OR
+    // - Matching tags (AND high similarity > 0.5)
+    const relatedResult = await pool.query(
+      `SELECT 
+        va.id,
+        va.question,
+        va.created_by,
+        va.views,
+        va.tags,
+        va.verification_type,
+        va.created_at,
+        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
+        COALESCE(ARRAY_LENGTH(
+          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
+          1
+        ), 0) as matching_tags_count,
+        COALESCE(COUNT(av.id), 0) as verification_count
+      FROM verified_answers va
+      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+      WHERE va.id != $2
+        AND va.question_embedding IS NOT NULL
+        AND va.verification_type != 'request'
+        AND (
+          -- Condition 1: Very high semantic similarity (0.6+)
+          (1 - (va.question_embedding <=> $1::vector)) > 0.6
+          OR
+          -- Condition 2: Medium similarity (0.5+) WITH matching tags
+          ((1 - (va.question_embedding <=> $1::vector)) > 0.5 AND va.tags && $3::text[])
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
+      HAVING COUNT(av.id) > 0
+      ORDER BY 
+        -- Prioritize: very high similarity > tag matching > moderate similarity
+        CASE 
+          WHEN (1 - (va.question_embedding <=> $1::vector)) > 0.6 THEN 1
+          ELSE 2
+        END,
+        (1 - (va.question_embedding <=> $1::vector)) DESC,
+        COALESCE(ARRAY_LENGTH(
+          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
+          1
+        ), 0) DESC
+      LIMIT 2`,
+      [question_embedding, qId, currentResult.rows[0].tags || []]
+    );
+
+    const relatedQuestions = relatedResult.rows.map(row => ({
+      id: row.id,
+      question: row.question,
+      created_by: row.created_by,
+      views: parseInt(row.views) || 0,
+      tags: row.tags || [],
+      verification_type: row.verification_type,
+      created_at: row.created_at,
+      similarity: parseFloat(row.similarity_score),
+      verification_count: parseInt(row.verification_count) || 0
+    }));
+
+    console.log(`✅ Found ${relatedQuestions.length} verified related questions for question ${qId} (total: ${totalRelated})`);
+    res.json({ success: true, results: relatedQuestions, total: totalRelated });
+
+  } catch (error) {
+    console.error('Error fetching related questions:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// GET /api/related-questions-all/:questionId - Get ALL related questions (no limit)
+router.get('/related-questions-all/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    
+    if (!questionId || isNaN(parseInt(questionId))) {
+      return res.status(400).json({ success: false, error: 'Invalid question ID' });
+    }
+
+    const qId = parseInt(questionId);
+
+    // 1. Get current question's embedding
+    const currentResult = await pool.query(
+      `SELECT question_embedding, tags FROM verified_answers WHERE id = $1`,
+      [qId]
+    );
+
+    if (currentResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    const { question_embedding } = currentResult.rows[0];
+
+    if (!question_embedding) {
+      return res.json({ success: true, results: [] });
+    }
+
+    // 2. Search for ALL similar questions using vector similarity + tag matching (NO LIMIT)
+    const relatedResult = await pool.query(
+      `SELECT 
+        va.id,
+        va.question,
+        va.created_by,
+        va.views,
+        va.tags,
+        va.verification_type,
+        va.created_at,
+        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
+        COALESCE(ARRAY_LENGTH(
+          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
+          1
+        ), 0) as matching_tags_count,
+        COALESCE(COUNT(av.id), 0) as verification_count
+      FROM verified_answers va
+      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+      WHERE va.id != $2
+        AND va.question_embedding IS NOT NULL
+        AND va.verification_type != 'request'
+        AND (
+          (1 - (va.question_embedding <=> $1::vector)) > 0.6
+          OR
+          ((1 - (va.question_embedding <=> $1::vector)) > 0.5 AND va.tags && $3::text[])
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
+      HAVING COUNT(av.id) > 0
+      ORDER BY 
+        CASE 
+          WHEN (1 - (va.question_embedding <=> $1::vector)) > 0.6 THEN 1
+          ELSE 2
+        END,
+        (1 - (va.question_embedding <=> $1::vector)) DESC,
+        COALESCE(ARRAY_LENGTH(
+          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
+          1
+        ), 0) DESC`,
+      [question_embedding, qId, currentResult.rows[0].tags || []]
+    );
+
+    const relatedQuestions = relatedResult.rows.map(row => ({
+      id: row.id,
+      question: row.question,
+      created_by: row.created_by,
+      views: parseInt(row.views) || 0,
+      tags: row.tags || [],
+      verification_type: row.verification_type,
+      created_at: row.created_at,
+      similarity: parseFloat(row.similarity_score),
+      verification_count: parseInt(row.verification_count) || 0
+    }));
+
+    console.log(`✅ Loaded ALL ${relatedQuestions.length} related questions for question ${qId}`);
+    res.json({ success: true, results: relatedQuestions });
+
+  } catch (error) {
+    console.error('Error fetching all related questions:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
 });

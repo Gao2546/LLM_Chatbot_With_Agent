@@ -98,6 +98,22 @@
                         </div>
                     </div>
 
+                    <!-- Related Questions Section -->
+                    <div style="margin-top: 30px;">
+                        <div class="related-questions-header">
+                            <i class="fas fa-link"></i> Related Questions
+                        </div>
+                        <div id="relatedQuestionsWrapper" class="related-questions-wrapper">
+                            <div id="relatedQuestionsSection" class="related-questions-section">
+                                <div class="loading-state">
+                                    <div class="spinner"></div>
+                                    <p>Loading related questions...</p>
+                                </div>
+                            </div>
+                            <div id="relatedQuestionsLoadMore"></div>
+                        </div>
+                    </div>
+
                     <!-- Comments Section -->
                     <div style="margin-top: 30px;">
                         <div class="comments-header">
@@ -234,6 +250,8 @@
             console.log('👤 getCurrentUser completed');
             await loadQuestionDetail();
             console.log('❓ loadQuestionDetail completed');
+            await loadRelatedQuestions();
+            console.log('🔗 loadRelatedQuestions completed');
             setupSidebarToggle();
             console.log('⚙️ setupSidebarToggle completed');
             setupCommentSubmit();
@@ -242,10 +260,224 @@
             console.log('⭐ setupRatingButtons completed');
             setupVerificationDepartments();
             console.log('🏢 setupVerificationDepartments completed');
+            setupFilterLinks();
+            console.log('🔗 setupFilterLinks completed');
+            await loadHotTags();
+            console.log('🏷️ loadHotTags completed');
             setupTheme();
             console.log('🎨 setupTheme completed');
             console.log('✅ All setup functions completed');
         });
+
+        async function loadHotTags() {
+            try {
+                const res = await fetch('/api/hot-tags?limit=8');
+                const data = await res.json();
+                if (data.success && data.tags.length > 0) {
+                    const tagsListDiv = document.getElementById('tagsList');
+                    tagsListDiv.innerHTML = data.tags.map(t => 
+                        `<span class="sidebar-tag-item" data-tag="${t.tag}">${t.tag}</span>`
+                    ).join('');
+                    
+                    // Re-attach click handlers
+                    setupFilterLinks();
+                }
+            } catch (e) {
+                console.error('Error loading hot tags:', e);
+            }
+        }
+
+        // Load related questions using vector similarity
+        async function loadRelatedQuestions() {
+            try {
+                if (!currentQuestionId) return;
+
+                const container = document.getElementById('relatedQuestionsSection');
+                const sectionWrapper = container?.parentElement; // Get the parent section div
+                if (!container) return;
+
+                // Fetch related questions from API
+                const response = await fetch(`/api/related-questions/${currentQuestionId}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    console.warn('Failed to load related questions:', data.error);
+                    // Hide the entire section if error
+                    if (sectionWrapper) {
+                        sectionWrapper.style.display = 'none';
+                    }
+                    return;
+                }
+
+                const results = data.results || [];
+                const totalRelated = data.total || results.length;
+
+                if (results.length === 0) {
+                    // Hide the entire section if no related questions
+                    if (sectionWrapper) {
+                        sectionWrapper.style.display = 'none';
+                    }
+                    return;
+                }
+
+                // Helper function to escape HTML
+                const escapeHtml = (text) => {
+                    if (!text) return '';
+                    const map = {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#039;'
+                    };
+                    return text.toString().replace(/[&<>"']/g, m => map[m]);
+                };
+
+                // Render related questions
+                const html = results.map(q => `
+                    <a href="comment.html?id=${q.id}" class="related-question-item">
+                        <div class="related-question-title">${escapeHtml(q.question)}</div>
+                        <div class="related-question-meta">
+                            <div class="related-question-tags">
+                                ${(q.tags || []).length > 0 
+                                    ? q.tags.map(tag => `<span class="related-question-tag">${escapeHtml(tag)}</span>`).join('')
+                                    : ''}
+                            </div>
+                            <div class="related-question-views">
+                                <i class="fas fa-eye"></i> ${q.views} views
+                            </div>
+                            <span class="related-question-status ${q.verification_type === 'request' ? 'pending' : 'verified'}">
+                                ${q.verification_type === 'request' ? '⏳ Pending' : '✓ Verified'}
+                            </span>
+                        </div>
+                    </a>
+                `).join('');
+
+                // Add "Load more" button separately
+                const moreCount = totalRelated - results.length;
+                const loadMoreBtn = moreCount > 0 ? `
+                    <button class="load-more-btn" onclick="loadAllRelatedQuestions()">
+                        <i class="fas fa-chevron-down"></i> Load ${moreCount} more related questions
+                    </button>
+                ` : '';
+
+                container.innerHTML = html;
+                const loadMoreContainer = document.getElementById('relatedQuestionsLoadMore');
+                if (loadMoreContainer) {
+                    loadMoreContainer.innerHTML = loadMoreBtn;
+                }
+                
+                // Set grid layout based on result count
+                const wrapper = document.getElementById('relatedQuestionsWrapper');
+                if (wrapper) {
+                    if (results.length === 1) {
+                        wrapper.classList.add('single-item');
+                        wrapper.classList.remove('multi-item');
+                    } else {
+                        wrapper.classList.add('multi-item');
+                        wrapper.classList.remove('single-item');
+                    }
+                    wrapper.style.display = 'block';
+                }
+                console.log(`✅ Loaded ${results.length} related questions (total: ${totalRelated})`);
+
+            } catch (error) {
+                console.error('Error loading related questions:', error);
+                const container = document.getElementById('relatedQuestionsSection');
+                if (container?.parentElement) {
+                    container.parentElement.style.display = 'none';
+                }
+            }
+        }
+
+        // Load all related questions (no limit)
+        async function loadAllRelatedQuestions() {
+            try {
+                if (!currentQuestionId) return;
+
+                const container = document.getElementById('relatedQuestionsSection');
+                const sectionWrapper = container?.parentElement;
+                if (!container) return;
+
+                // Fetch ALL related questions without limit
+                const response = await fetch(`/api/related-questions-all/${currentQuestionId}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    console.warn('Failed to load all related questions:', data.error);
+                    return;
+                }
+
+                const results = data.results || [];
+
+                // Helper function to escape HTML
+                const escapeHtml = (text) => {
+                    if (!text) return '';
+                    const map = {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#039;'
+                    };
+                    return text.toString().replace(/[&<>"']/g, m => map[m]);
+                };
+
+                // Render all related questions
+                const html = results.map(q => `
+                    <a href="comment.html?id=${q.id}" class="related-question-item">
+                        <div class="related-question-title">${escapeHtml(q.question)}</div>
+                        <div class="related-question-meta">
+                            <div class="related-question-tags">
+                                ${(q.tags || []).length > 0 
+                                    ? q.tags.map(tag => `<span class="related-question-tag">${escapeHtml(tag)}</span>`).join('')
+                                    : ''}
+                            </div>
+                            <div class="related-question-views">
+                                <i class="fas fa-eye"></i> ${q.views} views
+                            </div>
+                            <span class="related-question-status ${q.verification_type === 'request' ? 'pending' : 'verified'}">
+                                ${q.verification_type === 'request' ? '⏳ Pending' : '✓ Verified'}
+                            </span>
+                        </div>
+                    </a>
+                `).join('');
+
+                container.innerHTML = html;
+                
+                // Update grid layout
+                if (sectionWrapper) {
+                    if (results.length === 1) {
+                        sectionWrapper.classList.add('single-item');
+                        sectionWrapper.classList.remove('multi-item');
+                    } else {
+                        sectionWrapper.classList.add('multi-item');
+                        sectionWrapper.classList.remove('single-item');
+                    }
+                }
+                console.log(`✅ Loaded all ${results.length} related questions`);
+
+            } catch (error) {
+                console.error('Error loading all related questions:', error);
+            }
+        }
+
+        function setupFilterLinks() {
+            // Setup filter link click handlers if they exist
+            document.querySelectorAll('.sidebar-link[data-filter]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                });
+            });
+
+            // Setup tag click handlers
+            document.querySelectorAll('.sidebar-tag-item').forEach(tag => {
+                tag.addEventListener('click', () => {
+                    tag.classList.toggle('active');
+                    // Tag filter functionality can be customized for detail page if needed
+                });
+            });
+        }
 
         async function getCurrentUser() {
             try {
@@ -413,7 +645,7 @@
 
                     <!-- Quick Verification Section for Departments -->
                     <div id="quickVerificationSection" class="quick-verification-section" style="display: none;">
-                        <div class="verification-title">Your Verification</div>
+                        <div class="verification-title">Verify this answer "by my department"</div>
                         
                         <!-- Department Selection Box -->
                         <div class="verification-dept-section">
@@ -693,10 +925,16 @@
             
             const requestedDepts = currentQuestion.requested_departments_list || [];
             const verificationDepts = verifications
-                .filter(v => v.verification_type === 'department')
+                .filter(v => v.verification_type === 'verification')
                 .map(v => v.requested_departments)
                 .flat();
+            const verifiedDepts = verifications
+                .filter(v => v.verification_type === 'verification')
+                .map(v => v.requested_departments ? v.requested_departments[0] : null)
+                .filter(Boolean);
+            
             console.log('🔍 Step 2: Verification departments:', verificationDepts);
+            console.log('🔍 Verified Departments:', verifiedDepts);
             
             const allDepartmentsVerified = requestedDepts.every(dept => 
                 verificationDepts.includes(dept)
@@ -712,7 +950,7 @@
             const badgeEl = document.getElementById('verificationBadge');
             const pendingInfoEl = document.getElementById('pendingInfo');
             
-            if (badgeEl && currentQuestion.verification_type === 'request') {
+            if (badgeEl && currentQuestion.verification_type === 'verification') {
                 if (allDepartmentsVerified) {
                     // All verified - change to green and show departments
                     badgeEl.className = 'detail-verified-badge verified';
@@ -758,6 +996,9 @@
             }
 
             verListEl.innerHTML = verifications.map(v => {
+                // Debug attachments
+                console.log('🔍 Rendering verification:', v.id, 'attachments:', v.attachments);
+                
                 // Rating display
                 let ratingDisplay = '';
                 let ratingClass = '';
@@ -786,6 +1027,51 @@
                     typeBadge = '<span class="type-badge rating">⭐ Quick Rating</span>';
                 }
 
+                // Attachments display
+                let attachmentsHtml = '';
+                if (v.attachments && Array.isArray(v.attachments) && v.attachments.length > 0) {
+                    attachmentsHtml = `
+                        <div class="comment-attachments-list">
+                            ${v.attachments.map(att => {
+                                const ext = att.name?.split('.').pop().toLowerCase() || '';
+                                const mimeType = att.type || (() => {
+                                    const mimeMap = {
+                                        'pdf': 'application/pdf',
+                                        'png': 'image/png',
+                                        'jpg': 'image/jpeg',
+                                        'jpeg': 'image/jpeg',
+                                        'gif': 'image/gif',
+                                        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                        'txt': 'text/plain'
+                                    };
+                                    return mimeMap[ext] || 'application/octet-stream';
+                                })();
+                                const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
+                                const fileUrl = att.url || '';
+                                return `
+                                <div class="comment-attachment-item">
+                                    <div class="comment-attachment-info">
+                                        <i class="fas ${(() => {
+                                            if (mimeType.startsWith('image/')) return 'fa-image';
+                                            if (mimeType === 'application/pdf') return 'fa-file-pdf';
+                                            if (mimeType.includes('word')) return 'fa-file-word';
+                                            if (mimeType.includes('sheet')) return 'fa-file-excel';
+                                            return 'fa-file';
+                                        })()}"></i>
+                                        <div class="comment-attachment-details">
+                                            <div class="comment-attachment-name">${att.name || 'file'}</div>
+                                            <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
+                                        </div>
+                                    </div>
+                                    <button class="comment-attachment-preview-btn" onclick="window.open('${fileUrl}', '_blank')" title="Preview file">
+                                        <i class="fas fa-eye"></i> Preview
+                                    </button>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    `;
+                }
+
                 return `
                     <div class="verification-item">
                         <div class="verification-header">
@@ -800,6 +1086,7 @@
                         </div>
                         ${typeBadge ? `<div class="verification-type">${typeBadge}</div>` : ''}
                         ${v.comment ? `<div class="verification-comment">${v.comment}</div>` : ''}
+                        ${attachmentsHtml}
                     </div>
                 `;
             }).join('');
@@ -828,8 +1115,8 @@
             if (!deptBox) return;
             
             deptBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                <div class="verification-dept-checkbox">
-                    <input type="checkbox" class="verification-dept-checkbox-input" value="${dept}" />
+                <div class="verification-dept-radio">
+                    <input type="radio" name="verificationDept" class="verification-dept-radio-input" value="${dept}" />
                     <label>${dept}</label>
                 </div>
             `).join('');
@@ -839,8 +1126,8 @@
             const deptBox = document.getElementById('verificationDeptBox');
             if (!deptBox) return [];
             
-            return Array.from(deptBox.querySelectorAll('.verification-dept-checkbox-input:checked'))
-                .map(checkbox => checkbox.value);
+            const selected = deptBox.querySelector('.verification-dept-radio-input:checked');
+            return selected ? [selected.value] : [];
         }
 
         async function rateAnswer(rating) {
@@ -940,13 +1227,18 @@
                     ? comment.requested_departments[0] 
                     : (comment.department || 'N/A');
                 
-                // Determine if this is a self verification or a request
+                // Determine verification type
                 const isSelfVerified = comment.verification_type === 'self';
-                const statusIcon = isSelfVerified ? '✓' : '';
-                const statusClass = isSelfVerified ? 'correct' : 'pending';
+                const isVerificationFromOthers = comment.verification_type === 'verification';
+                const isRequest = comment.verification_type === 'request';
+                
+                const statusIcon = (isSelfVerified || isVerificationFromOthers) ? '✓' : '';
+                const statusClass = (isSelfVerified || isVerificationFromOthers) ? 'correct' : 'pending';
                 const statusText = isSelfVerified 
                     ? `Verified by ${comment.username}`
-                    : `Requested from ${comment.username} - ${dept}`;
+                    : isVerificationFromOthers
+                    ? `Verified from ${comment.username} - ${dept}`
+                    : `Requested from ${comment.username}`;
                 
                 const formattedDate = new Date(comment.createdAt).toLocaleDateString('en-GB', {
                     day: '2-digit',
@@ -954,6 +1246,11 @@
                 });
                 
                 const safeText = (comment.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                
+                // Attachments for verification
+                const attachmentsList = comment.attachments || [];
+                console.log('🔍 Verification comment attachments:', comment.id, attachmentsList);
+                
                 html += `
                     <div class="comment-item verification-comment">
                         <div class="verification-header">
@@ -963,6 +1260,35 @@
                             </span>
                         </div>
                         ${comment.text ? `<div class="comment-text">${safeText}</div>` : ''}
+                        ${attachmentsList.length > 0 ? `
+                            <div class="comment-attachments-list">
+                                ${attachmentsList.map(att => {
+                                    const ext = att.name?.split('.').pop().toLowerCase() || '';
+                                    const mimeType = att.type || 'application/octet-stream';
+                                    const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
+                                    const fileUrl = att.url || '';
+                                    return `
+                                    <div class="comment-attachment-item">
+                                        <div class="comment-attachment-info">
+                                            <i class="fas ${(() => {
+                                                if (mimeType.startsWith('image/')) return 'fa-image';
+                                                if (mimeType === 'application/pdf') return 'fa-file-pdf';
+                                                if (mimeType.includes('word')) return 'fa-file-word';
+                                                if (mimeType.includes('sheet')) return 'fa-file-excel';
+                                                return 'fa-file';
+                                            })()}"></i>
+                                            <div class="comment-attachment-details">
+                                                <div class="comment-attachment-name">${att.name || 'file'}</div>
+                                                <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
+                                            </div>
+                                        </div>
+                                        <button class="comment-attachment-preview-btn" onclick="window.open('${fileUrl}', '_blank')" title="Preview file">
+                                            <i class="fas fa-eye"></i> Preview
+                                        </button>
+                                    </div>
+                                `}).join('')}
+                            </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -993,29 +1319,45 @@
                 html += `
                     <div class="comment-item">
                         <div class="comment-dept-header">
-                            Comment by ${comment.username || 'Anonymous'} (${formattedDate})
+                            Comment by ${comment.username || 'Anonymous'} - (${formattedDate})
                         </div>
                         ${comment.text ? `<div class="comment-content">${safeText}</div>` : ''}
                         ${attachmentsList.length > 0 ? `
                             <div class="comment-attachments-list">
                                 ${attachmentsList.map(att => {
                                     const ext = att.name.split('.').pop().toLowerCase();
-                                    const iconMap = {
-                                        'pdf': '📄',
-                                        'doc': '📝', 'docx': '📝',
-                                        'xls': '📊', 'xlsx': '📊',
-                                        'ppt': '📽️', 'pptx': '📽️',
-                                        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-                                        'zip': '📦', 'rar': '📦', '7z': '📦',
-                                        'txt': '📃', 'csv': '📃'
-                                    };
-                                    const icon = iconMap[ext] || '📎';
+                                    const mimeType = att.type || (() => {
+                                        const mimeMap = {
+                                            'pdf': 'application/pdf',
+                                            'png': 'image/png',
+                                            'jpg': 'image/jpeg',
+                                            'jpeg': 'image/jpeg',
+                                            'gif': 'image/gif',
+                                            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                            'txt': 'text/plain',
+                                            'csv': 'text/csv'
+                                        };
+                                        return mimeMap[ext] || 'application/octet-stream';
+                                    })();
                                     const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
                                     return `
-                                    <div class="attachment-item">
-                                        <a href="${att.url}" target="_blank" class="attachment-link" download="${att.name}">
-                                            ${icon} ${att.name} ${sizeKB > 0 ? `(${sizeKB} KB)` : ''}
-                                        </a>
+                                    <div class="comment-attachment-item">
+                                        <div class="comment-attachment-info">
+                                            <i class="fas ${(() => {
+                                                if (mimeType.startsWith('image/')) return 'fa-image';
+                                                if (mimeType === 'application/pdf') return 'fa-file-pdf';
+                                                if (mimeType.includes('word')) return 'fa-file-word';
+                                                if (mimeType.includes('sheet')) return 'fa-file-excel';
+                                                return 'fa-file';
+                                            })()}"></i>
+                                            <div class="comment-attachment-details">
+                                                <div class="comment-attachment-name">${att.name}</div>
+                                                <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
+                                            </div>
+                                        </div>
+                                        <button class="comment-attachment-preview-btn" onclick="window.open('${att.url}', '_blank')" title="Preview file">
+                                            <i class="fas fa-eye"></i> Preview
+                                        </button>
                                     </div>
                                 `}).join('')}
                             </div>
@@ -1068,9 +1410,11 @@
             
             // Show verify button if:
             // 1. User is logged in
-            // 2. Question has pending verification requests
-            // 3. Selected department is in the requested departments list
+            // 2. Question has PENDING verification requests (verification_type === 'request')
+            // 3. NOT self-verified (verification_type !== 'self')
+            // 4. Selected department is in the requested departments list
             if (currentUserId && currentQuestion && department && 
+                currentQuestion.verification_type === 'request' &&
                 currentQuestion.requested_departments_list && 
                 currentQuestion.requested_departments_list.includes(department)) {
                 verifyBtn.style.display = 'inline-flex';
@@ -1330,6 +1674,9 @@
 
         async function showVerificationStatus() {
             try {
+                // Reload verifications data first
+                await loadVerifications();
+                
                 console.log('🔍 Current Question:', currentQuestion);
                 console.log('🔍 Requested Departments:', currentQuestion?.requested_departments_list);
                 console.log('🔍 All Verifications:', verifications);
@@ -1342,20 +1689,20 @@
                     year: 'numeric'
                 }) : 'N/A';
                 
-                // Build verification status - check which departments have verified (rating === 1)
+                // Build verification status - check which departments have verified (verification_type === 'verification')
                 // Use the department from requestedDepartments field in each verification
                 const verifiedDepartments = {};
                 verifications.forEach(v => {
                     console.log('📋 Processing verification:', {
                         id: v.id,
                         username: v.username,
-                        rating: v.rating,
+                        verification_type: v.verification_type,
                         requestedDepartments: v.requestedDepartments,
                         createdAt: v.createdAt
                     });
                     
-                    // Check if this verification has rating = 1 (verified)
-                    if (v.rating === 1 && v.requestedDepartments && v.requestedDepartments.length > 0) {
+                    // Check if this verification has verification_type = 'verification' (verified by someone)
+                    if (v.verification_type === 'verification' && v.requestedDepartments && v.requestedDepartments.length > 0) {
                         // The requestedDepartments contains the department that verified
                         v.requestedDepartments.forEach(dept => {
                             if (!verifiedDepartments[dept]) {
@@ -1491,6 +1838,36 @@
 
             // Verify with rating = 1 (helpful/verified)
             try {
+                const attachments = [];
+                
+                console.log('📎 Verify - Selected files:', selectedFiles.length);
+                
+                // Upload files if any
+                if (selectedFiles.length > 0) {
+                    console.log('📤 Verify - Uploading files...');
+                    const formData = new FormData();
+                    selectedFiles.forEach(file => {
+                        console.log('Adding file to verify:', file.name, file.size);
+                        formData.append('files', file);
+                    });
+
+                    const uploadRes = await fetch('/api/upload-comment-files', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    console.log('Verify upload response status:', uploadRes.status);
+                    if (uploadRes.ok) {
+                        const uploadData = await uploadRes.json();
+                        console.log('Verify upload result:', uploadData);
+                        attachments.push(...(uploadData.files || []));
+                    } else {
+                        console.error('Verify upload failed:', await uploadRes.text());
+                    }
+                } else {
+                    console.log('⚠️ Verify - No files selected');
+                }
+
                 const res = await fetch('/api/submit-verification', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1498,7 +1875,8 @@
                         questionId: currentQuestionId,
                         rating: 1,
                         comment: text || '',
-                        department: department
+                        department: department,
+                        attachments: attachments
                     })
                 });
 
@@ -1507,6 +1885,8 @@
                     // Clear form
                     commentInput.value = '';
                     deptSelect.value = '';
+                    selectedFiles = []; // Clear selected files
+                    document.getElementById('attachmentPreview').innerHTML = ''; // Clear preview
                     document.getElementById('verifyCommentBtn').style.display = 'none';
                     // Reload everything to refresh verification status
                     await loadComments();

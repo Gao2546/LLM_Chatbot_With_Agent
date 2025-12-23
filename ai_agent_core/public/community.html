@@ -82,7 +82,7 @@
                         <div class="header-top">
                             <h2>Questions</h2>
                             <div class="header-search">
-                                <input type="text" id="headerSearch" placeholder="Search questions or #tags...">
+                                <input type="text" id="headerSearch" placeholder="Search questions or #tag...">
                             </div>
                             <button class="btn-ask-large" onclick="window.location.href='/create_question.html'">Create Question</button>
                         </div>
@@ -257,7 +257,15 @@
 
         function filterByTags() {
             selectedTags = Array.from(document.querySelectorAll('.sidebar-tag-item.active')).map(t => t.dataset.tag);
-            renderQuestions();
+            console.log('Selected tags:', selectedTags);
+            
+            // If no tags selected, reload with current filter
+            if (selectedTags.length === 0) {
+                loadQuestionsByFilter(currentFilter);
+            } else {
+                // Keep current filter and just render with tag filter
+                renderQuestions();
+            }
         }
 
         async function applyFilter(filter) {
@@ -348,22 +356,38 @@
                 await loadAllQuestions();
                 return;
             }
+            
             try {
-                // Check if searching by tag (starts with #)
+                // Check if search query starts with # for tag search
                 if (query.trim().startsWith('#')) {
-                    const tagName = query.trim().substring(1).toLowerCase();
-                    await loadAllQuestions();
-                    // Filter questions by tag
-                    allQuestions = allQuestions.filter(q => {
-                        const questionTags = q.tags || [];
-                        const tagsArray = Array.isArray(questionTags) 
-                            ? questionTags 
-                            : (typeof questionTags === 'string' ? questionTags.split(',').map(t => t.trim()) : []);
-                        return tagsArray.some(tag => tag.toLowerCase().includes(tagName));
+                    // Tag search
+                    const tagQuery = query.trim().substring(1).toLowerCase();
+                    console.log('Searching by tag:', tagQuery);
+                    
+                    // Load all questions if not loaded yet
+                    if (allQuestions.length === 0) {
+                        await loadQuestionsByFilter('all');
+                    }
+                    
+                    // Filter by tag and store in a temporary variable to avoid mutation
+                    const filtered = allQuestions.filter(q => {
+                        const tags = (q.tags || []).map(t => t.toLowerCase());
+                        return tags.some(t => t.includes(tagQuery));
                     });
+                    
+                    // Create a copy and render
+                    const originalQuestions = [...allQuestions];
+                    allQuestions = filtered;
                     renderQuestions();
+                    
+                    // Restore original questions for next search
+                    setTimeout(() => {
+                        if (allQuestions.length === filtered.length) {
+                            allQuestions = originalQuestions;
+                        }
+                    }, 100);
                 } else {
-                    // Normal text search
+                    // Regular semantic search by question text
                     const res = await fetch('/api/search-verified-answers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -373,7 +397,7 @@
                     allQuestions = (data.results || []).map((q, idx) => ({
                         ...q,
                         id: q.id || idx,
-                        views: Math.floor(Math.random() * 500)
+                        views: q.views || 0
                     }));
                     renderQuestions();
                 }
@@ -469,30 +493,35 @@
             // Apply tag filter only (type filter is already handled by API)
             if (selectedTags.length > 0) {
                 filtered = filtered.filter(q => {
-                    const qTags = q.tags || [];
-                    return selectedTags.some(tag => qTags.includes(tag));
+                    const qTags = (q.tags || []).map(t => t.toLowerCase());
+                    // Check if question has at least one tag that matches selected tags
+                    return selectedTags.some(tag => 
+                        qTags.some(qTag => qTag === tag.toLowerCase())
+                    );
                 });
             }
 
             // Apply tab sort (Newest, Score, Views, Verified)
             if (currentSort === 'verified') {
-                // Show verified questions
+                // Show verified questions: both self-verified and fully verified request types
                 filtered = filtered.filter(q => {
-                    // For request type: show if requested departments are set
-                    if (q.verification_type === 'request' && q.requested_departments) {
-                        const requestedDepts = Array.isArray(q.requested_departments) 
-                            ? q.requested_departments 
-                            : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                        return requestedDepts.length > 0;
+                    // Self-verified questions
+                    if (q.verification_type === 'self') {
+                        return true;
                     }
-                    // For self type: include all
-                    return q.verification_type === 'self';
+                    // Request type: show only if fully verified (verification_count >= total_requested_depts)
+                    if (q.verification_type === 'request') {
+                        const totalDepts = q.total_requested_depts || 0;
+                        const verifiedCount = q.verification_count || 0;
+                        return totalDepts > 0 && verifiedCount >= totalDepts;
+                    }
+                    return false;
                 });
             } else if (currentSort === 'score') {
-                // Sort by vote_score descending
+                // Sort by vote_score descending (upvote/downvote only)
                 filtered.sort((a, b) => {
-                    const scoreA = a.vote_score || a.score || 0;
-                    const scoreB = b.vote_score || b.score || 0;
+                    const scoreA = a.vote_score || 0;
+                    const scoreB = b.vote_score || 0;
                     return scoreB - scoreA;
                 });
             } else if (currentSort === 'views') {
@@ -513,12 +542,9 @@
                 let badgeHtml = '';
                 
                 // Check if question is waiting for verification (request type questions)
-                if (q.verification_type === 'request' && q.requested_departments) {
-                    const requestedDepts = Array.isArray(q.requested_departments) 
-                        ? q.requested_departments 
-                        : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
-                    
-                    const deptCount = requestedDepts.length;
+                if (q.verification_type === 'request') {
+                    // Use total_requested_depts from backend query
+                    const deptCount = q.total_requested_depts || 0;
                     const verifiedCount = q.verification_count || 0;
                     
                     if (deptCount > 0) {
@@ -532,7 +558,16 @@
                         }
                     }
                 } else if (q.verification_type === 'self') {
-                    badgeHtml = '<span class="vote-badge verified-badge">✓ Self Verified</span>';
+                    // For self verification, show department names
+                    const deptsList = Array.isArray(q.requested_departments) 
+                        ? q.requested_departments 
+                        : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);
+                    
+                    if (deptsList.length > 0) {
+                        badgeHtml = `<span class="vote-badge verified-badge">✓ Verified ${deptsList.join(', ')}</span>`;
+                    } else {
+                        badgeHtml = '<span class="vote-badge verified-badge">✓ Verified</span>';
+                    }
                 }
                 
                 return `
