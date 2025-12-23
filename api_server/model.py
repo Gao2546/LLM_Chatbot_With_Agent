@@ -9,6 +9,7 @@ import requests
 import io # NEW IMPORT
 import concurrent.futures
 import multiprocessing
+import numpy as np
 
 # Third-party libraries
 import bs4
@@ -1129,41 +1130,50 @@ Output only the simulated excerpt.
     # =========================================================
     if document_search_method == 'searchDoc':
         print(f"  - executing 'searchDoc' strategy for user {user_id}...")
-        
-        # 1. Legacy Text Search
-        legacy_results = search_similar_documents_by_active_user(
-            query_text=search_text,
-            user_id=user_id,
-            top_k=top_k_text,
-            threshold_text=threshold_text
-        )
+        for i in range(0,9,2):
+            print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
+            # 1. Legacy Text Search
+            legacy_results = search_similar_documents_by_active_user(
+                query_text=search_text,
+                user_id=user_id,
+                top_k=top_k_text,
+                threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+            )
 
-        # 2. New Page Image Search
-        page_search_results = search_similar_pages_by_active_user(
-            query_text=queryT,
-            user_id=user_id,
-            top_k=top_k_pages,
-            threshold=threshold_page
-        )
+            # 2. New Page Image Search
+            page_search_results = search_similar_pages_by_active_user(
+                query_text=search_text,
+                user_id=user_id,
+                top_k=top_k_pages,
+                threshold=threshold_page * float(np.log(np.exp(1) + i)),
+            )
+
+            if legacy_results or page_search_results:
+                break
 
     elif document_search_method == 'searchdocAll':
         print(f"  - executing 'searchDocAll' strategy for user {user_id}...")
         
-        # 1. Legacy Text Search
-        legacy_results = search_similar_documents_by_active_user_all(
-            query_text=search_text,
-            user_id=user_id,
-            top_k=top_k_text,
-            threshold_text=threshold_text,
-        )
+        for i in range(0,9,2):
+            print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
+            # 1. Legacy Text Search
+            legacy_results = search_similar_documents_by_active_user_all(
+                query_text=search_text,
+                user_id=user_id,
+                top_k=top_k_text,
+                threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+            )
 
-        # 2. New Page Image Search
-        page_search_results = search_similar_pages_by_active_user_all(
-            query_text=queryT,
-            user_id=user_id,
-            top_k=top_k_pages,
-            threshold=threshold_page,
-        )
+            # 2. New Page Image Search
+            page_search_results = search_similar_pages_by_active_user_all(
+                query_text=search_text,
+                user_id=user_id,
+                top_k=top_k_pages,
+                threshold=threshold_page * float(np.log(np.exp(1) + i)),
+            )
+
+            if legacy_results or page_search_results:
+                break
 
     # =========================================================
     # METHOD 3: none (Search by current chat context)
@@ -1181,24 +1191,30 @@ Output only the simulated excerpt.
         has_pages = cur.fetchone()
         cur.close()
 
-        if has_legacy:
-            legacy_results = search_similar_documents_by_chat(
-                query_text=search_text, 
-                user_id=user_id, 
-                chat_history_id=chat_history_id, 
-                top_k=top_k_text,
-                threshold_text=threshold_text
-            )
 
-        if has_pages:
-            page_search_results = search_similar_pages(
-                query_text=queryT, 
-                user_id=user_id, 
-                chat_history_id=chat_history_id, 
-                top_k=top_k_pages, 
-                threshold=threshold_page
-            )
-    
+        for i in range(0,9,2):
+            print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
+            if has_legacy:
+                legacy_results = search_similar_documents_by_chat(
+                    query_text=search_text, 
+                    user_id=user_id, 
+                    chat_history_id=chat_history_id, 
+                    top_k=top_k_text,
+                    threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                )
+
+            if has_pages:
+                page_search_results = search_similar_pages(
+                    query_text=search_text, 
+                    user_id=user_id, 
+                    chat_history_id=chat_history_id, 
+                    top_k=top_k_pages, 
+                    threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                )
+            if legacy_results or page_search_results or ( not has_legacy and  not has_pages):
+                break
+
+
     # =========================================================
     # VLM PROCESSING (Common for both methods)
     # =========================================================

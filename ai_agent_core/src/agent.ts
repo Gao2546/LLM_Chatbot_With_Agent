@@ -87,9 +87,14 @@ let setting_prompts : string = await readFile("./build/setting.txt") as string;
 
 console.log("Setting Prompt Loaded: ", setting_prompts.substring(0, 100), "...");
 
+// interface ToolData {
+//   toolName: string;
+//   arguments: {[key: string]: string[]};
+// }
+
 interface ToolData {
   toolName: string;
-  arguments: {[key: string]: string[]};
+  arguments: Record<string, any>;
 }
 
 interface OllamaResponse {
@@ -137,7 +142,17 @@ const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
   };
 
   for (const key in content) {
-    toolData.arguments[key] = content[key];
+    let value = content[key];
+
+    // Check if the tool is CreateFile or EditFile and if the value is a string
+    if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
+      // Replace html entities globally
+      console.log("Before replace: ", value.substring(0, 100), "...");
+      value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&#x2F;/g, '/').replace(/&#x60;/g, '`').replace(/&#x3D;/g, '=').replace(/&#10;/g, '\n').replace(/&#13;/g, '\r').replace(/&#9;/g, '\t').replace(/&#x0;/g, '').replace(/&nbsp;/g, ' ').replace(/&#xA0;/g, ' ');
+      console.log("After replace: ", value.substring(0, 100), "...");
+    }
+
+    toolData.arguments[key] = value;
   }
 
   return toolData;
@@ -631,7 +646,7 @@ router.post('/message', async (req : Request, res : Response) => {
           top_k_pages: 5,
           top_k_text: 5,
           threshold_page: 0.8,
-          threshold_text: 0.8,
+          threshold_text: 0.3,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
@@ -1175,12 +1190,12 @@ router.post('/message', async (req : Request, res : Response) => {
       const regex = /<use_tool>([\s\S]*?)<\/use_tool>/g;
       rrs = [...responsetext.matchAll(regex)].map(m => m[1].trim());
           
-      if (rrs.length > 0) {
-        rrs = rrs.map(xml =>
-          xml.replace(/<text>([\s\S]*?)<\/text>/g, (match, p1) => `<text><![CDATA[\n${p1}\n]]></text>`)
-             .replace(/<result>([\s\S]*?)<\/result>/g, (match, p1) => `<result><![CDATA[\n${p1}\n]]></result>`)
-        );
-      }
+      // if (rrs.length > 0) {
+      //   rrs = rrs.map(xml =>
+      //     xml.replace(/<text>([\s\S]*?)<\/text>/g, (match, p1) => `<text><![CDATA[\n${p1}\n]]></text>`)
+      //        .replace(/<result>([\s\S]*?)<\/result>/g, (match, p1) => `<result><![CDATA[\n${p1}\n]]></result>`)
+      //   );
+      // }
       
       console.log(rrs);
       
@@ -1386,7 +1401,7 @@ router.post('/edit-message', async (req, res) => {
           top_k_pages: 5,
           top_k_text: 5,
           threshold_page: 0.8,
-          threshold_text: 0.8,
+          threshold_text: 0.3,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
