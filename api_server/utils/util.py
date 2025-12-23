@@ -1742,7 +1742,7 @@ Output only the simulated excerpt.
              return None
 
         # Return a single list if text was the input (for search_similar_pages)
-        if text:
+        if text or search_text:
             print(f"✅ Generated Jina v4 embedding for text.")
             return embeddings_list[0] 
         
