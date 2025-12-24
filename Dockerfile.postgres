@@ -1,18 +1,20 @@
-# Use the specific pgvector image you requested
 FROM pgvector/pgvector:pg16
 
-# Set the environment variables provided in your file
+# Set environment variables
 ENV POSTGRES_USER=athip
 ENV POSTGRES_PASSWORD=123456
 ENV POSTGRES_DB=ai_agent
 
-# Create the init script directory and add the vector extension script
-USER root
-RUN mkdir -p /docker-entrypoint-initdb.d && \
-    echo "CREATE EXTENSION IF NOT EXISTS vector;" > /docker-entrypoint-initdb.d/init-vector.sql && \
-    chown -R postgres:postgres /docker-entrypoint-initdb.d
+# Use a subdirectory for data. 
+# This often bypasses "permission denied" errors on the root mount point.
+ENV PGDATA=/var/lib/postgresql/data/pgdata
 
-USER postgres
+# Copy the init script. 
+# We don't need to create the directory or change USER; 
+# the base image already has this directory and handles it.
+RUN echo "CREATE EXTENSION IF NOT EXISTS vector;" > /docker-entrypoint-initdb.d/init-vector.sql
 
-# Expose the default Postgres port
+# DO NOT switch to USER postgres here. 
+# The entrypoint script needs to start as root to fix permissions 
+# and then it will automatically drop down to the postgres user.
 EXPOSE 5432
