@@ -48,7 +48,7 @@ COPY scripts ./scripts
 COPY --from=builder_app /app/public ./public
 
 # Set environment variables
-ENV DATABASE_URL=postgres://athip:123456@llm_chatbot_with_agent_db_1:5432/ai_agent \
+ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
     API_SERVER_URL=http://api_server:5000 \
     API_OLLAMA=http://127.0.0.1:11434/api/generate \
     Google_API_KEY= \
@@ -56,8 +56,8 @@ ENV DATABASE_URL=postgres://athip:123456@llm_chatbot_with_agent_db_1:5432/ai_age
     OPENROUTER_API_KEY= \
     SITE_URL= \
     SITE_NAME= \
-    MINIO_ENDPOINT=llm_chatbot_with_agent_minio_1 \
-    MINIO_PORT=9010 \
+    MINIO_ENDPOINT=llm-chatbot-with-agent-minio \
+    MINIO_PORT=9000 \
     MINIO_ACCESS_KEY=minioadmin \
     MINIO_SECRET_KEY=minioadmin \
     MINIO_BUCKET=user-files \
