@@ -157,15 +157,15 @@ COPY ../TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
 RUN mkdir -p /app/TextToImage/output
 
 # Set environment variables for Docker deployment
-ENV DATABASE_URL=postgres://athip:123456@llm_chatbot_with_agent_db_1:5432/ai_agent \
+ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
     PGDATABASE=ai_agent \
     PGUSER=athip \
     PGPASSWORD=123456 \
-    PGHOST=llm_chatbot_with_agent_db_1 \
+    PGHOST=llm-chatbot-with-agent-postgresql \
     PGPORT=5432 \
-    API_SERVER_URL=http://api_server:5000 \
+    API_SERVER_URL=http://llm-chatbot-with-agent-api-server:5000 \
     API_OLLAMA=http://ollama:11434/api/generate \
-    API_APP=http://app:3000 \
+    API_APP=http://llm-chatbot-with-agent-core:3000 \
     IS_DOCKER=true \
     Google_API_KEY= \
     OPENAI_API_KEY= \
