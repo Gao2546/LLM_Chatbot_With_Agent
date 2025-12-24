@@ -150,8 +150,8 @@ RUN pip install --no-cache-dir --ignore-installed -r requirements.txt --break-sy
 # Assumes the Docker build context is the parent directory (e.g., your project root)
 # Ensure these paths are correct relative to your build context.
 COPY ./ /app/
-COPY ../TextToImage/utils/ /app/TextToImage/utils/
-COPY ../TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
+# COPY ../TextToImage/utils/ /app/TextToImage/utils/
+# COPY ../TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
 
 # Create output directory
 RUN mkdir -p /app/TextToImage/output
@@ -164,7 +164,7 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     PGHOST=llm-chatbot-with-agent-postgresql \
     PGPORT=5432 \
     API_SERVER_URL=http://llm-chatbot-with-agent-api-server:5000 \
-    API_OLLAMA=http://ollama:11434/api/generate \
+    API_OLLAMA=http://llm-chatbot-with-agent-ollama:11434/api/generate \
     API_APP=http://llm-chatbot-with-agent-core:3000 \
     IS_DOCKER=true \
     Google_API_KEY= \
