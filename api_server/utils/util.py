@@ -33,7 +33,7 @@ from docling.datamodel.pipeline_options import (
     TesseractOcrOptions,
     RapidOcrOptions,
 )
-from modelscope import snapshot_download
+# from modelscope import snapshot_download
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel import vlm_model_specs
 from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
