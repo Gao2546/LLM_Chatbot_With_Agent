@@ -154,7 +154,7 @@ COPY ./ /app/
 # COPY ../TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
 
 # Create output directory
-RUN mkdir -p /app/TextToImage/output
+# RUN mkdir -p /app/TextToImage/output
 
 # Set environment variables for Docker deployment
 ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
