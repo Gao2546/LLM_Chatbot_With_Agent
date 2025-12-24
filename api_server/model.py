@@ -39,7 +39,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Local imports (assuming 'utils' is a local package/directory)
 from utils.util import (
-    EditedFileSystem,
+    # EditedFileSystem,
     encode_text_for_embedding,
     extract_docx_text,
     extract_excel_text,
@@ -94,7 +94,7 @@ else:
     print("Run model on server")
     vlm_provider = "DeepInfra"
 
-file_system = EditedFileSystem()
+# file_system = EditedFileSystem()
 
 # Add project root to sys.path to allow absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
