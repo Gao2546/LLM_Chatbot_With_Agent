@@ -42,7 +42,6 @@ RUN apt-get update && \
 COPY package.json ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
-COPY .env ./.env
 COPY build/setting.txt ./build/setting.txt
 COPY scripts ./scripts
 COPY --from=builder_app /app/public ./public
