@@ -6,7 +6,8 @@ ENV MINIO_ROOT_USER=minioadmin
 ENV MINIO_ROOT_PASSWORD=minioadmin
 
 # Create the data directory
-RUN mkdir -p /data
+RUN mkdir -p /data && \
+    chmod -R 777 /data
 
 # Expose API (9000) and Console (9090) ports
 EXPOSE 9000
