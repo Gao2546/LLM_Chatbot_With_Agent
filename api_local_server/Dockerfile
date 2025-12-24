@@ -42,7 +42,8 @@ RUN npm install
 # Compile TypeScript
 RUN npm run build
 
-RUN echo "APP_SERVER=http://ggent.ddns.net:3000" > .env
+# RUN echo "APP_SERVER=http://ggent.ddns.net:3000" > .env
+ENV APP_SERVER=http://llmchatbot:3000
 
 # Expose port
 EXPOSE 3333

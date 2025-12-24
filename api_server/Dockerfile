@@ -77,7 +77,7 @@ WORKDIR /app
 # Copy the requirements file into the container at /app
 # This leverages Docker's build cache: if requirements.txt doesn't change,
 # the pip install step won't re-run.
-COPY api_server/requirements.txt .
+COPY ../requirements.txt .
 
 # Install Python dependencies from requirements.txt
 # --no-cache-dir: Prevents pip from storing downloaded packages in a cache.
@@ -149,12 +149,36 @@ RUN pip install --no-cache-dir --ignore-installed -r requirements.txt --break-sy
 # Copy the application code and necessary directories
 # Assumes the Docker build context is the parent directory (e.g., your project root)
 # Ensure these paths are correct relative to your build context.
-COPY ./api_server /app/
-COPY ./TextToImage/utils/ /app/TextToImage/utils/
-COPY ./TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
+COPY ./ /app/
+COPY ../TextToImage/utils/ /app/TextToImage/utils/
+COPY ../TextToImage/model/checkpoint/ /app/TextToImage/model/checkpoint/
 
 # Create output directory
 RUN mkdir -p /app/TextToImage/output
+
+# Set environment variables for Docker deployment
+ENV DATABASE_URL=postgres://athip:123456@llm_chatbot_with_agent_db_1:5432/ai_agent \
+    PGDATABASE=ai_agent \
+    PGUSER=athip \
+    PGPASSWORD=123456 \
+    PGHOST=llm_chatbot_with_agent_db_1 \
+    PGPORT=5432 \
+    API_SERVER_URL=http://api_server:5000 \
+    API_OLLAMA=http://ollama:11434/api/generate \
+    API_APP=http://app:3000 \
+    IS_DOCKER=true \
+    Google_API_KEY= \
+    OPENAI_API_KEY= \
+    OPENROUTER_API_KEY= \
+    DEEPINFRA_API_KEY= \
+    JINA_API_KEY= \
+    MINIO_ENDPOINT=127.0.0.1 \
+    MINIO_PORT=9010 \
+    MINIO_ACCESS_KEY=minioadmin \
+    MINIO_SECRET_KEY=minioadmin \
+    MINIO_BUCKET=user-files \
+    MINIO_USE_SSL=false \
+    LOCAL=False
 
 # Make port 5000 available to the world outside this container
 EXPOSE 5000
