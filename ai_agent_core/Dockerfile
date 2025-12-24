@@ -39,12 +39,12 @@ RUN apt-get update && \
     apt-get install -y bash
 
 # Setup ai_agent_core
-COPY ai_agent_core/package.json ./
+COPY package.json ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
-COPY ai_agent_core/.env ./.env
-COPY ai_agent_core/build/setting.txt ./build/setting.txt
-COPY ai_agent_core/scripts ./scripts
+COPY .env ./.env
+COPY build/setting.txt ./build/setting.txt
+COPY scripts ./scripts
 COPY --from=builder_app /app/public ./public
 
 # Setup mcp_BrowserBase build output (e.g., dist or build folder)
