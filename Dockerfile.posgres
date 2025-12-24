@@ -1,0 +1,14 @@
+# Use the specific pgvector image you requested
+FROM pgvector/pgvector:pg16
+
+# Set the environment variables provided in your file
+ENV POSTGRES_USER=athip
+ENV POSTGRES_PASSWORD=123456
+ENV POSTGRES_DB=ai_agent
+
+# Expose the default Postgres port
+EXPOSE 5432
+
+# (Optional) If you want the 'vector' extension enabled automatically on start,
+# you can add a script to /docker-entrypoint-initdb.d/
+RUN echo "CREATE EXTENSION IF NOT EXISTS vector;" > /docker-entrypoint-initdb.d/init-vector.sql
