@@ -253,6 +253,9 @@ RUN groupadd -r chatllm && \
 # Set working directory
 WORKDIR /app
 
+# Copy the requirements file into the container at /app
+COPY ./requirements.txt .
+
 # Install Python dependencies from requirements.txt
 RUN pip install --no-cache-dir --ignore-installed -r requirements.txt --break-system-packages
 
@@ -261,7 +264,7 @@ USER chatllm
 
 # 5. Copy requirements and install via PIP as USER
 # Note: --user is implied when running as non-root, and we added the path to ENV PATH above
-COPY --chown=chatllm:chatllm ./requirements.txt .
+# COPY --chown=chatllm:chatllm ./requirements.txt .
 # RUN pip install --no-cache-dir --user -r requirements.txt
 
 # 6. Copy the rest of the application
