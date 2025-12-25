@@ -461,7 +461,7 @@ einops
 langchain-core
 langchain-huggingface
 langchain-openai
-# langchain-textsplitters
+langchain-text-splitters
 
 # Document Processing & OCR
 pymupdf
