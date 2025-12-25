@@ -36,13 +36,13 @@ const port = Number(process.env.PORT) || 3000;
 app.use(express.static(path.join(__dirname, '..', 'public')));
 // app.use(express.static(path.join(__dirname, "..",'user_files')));
 // Serve static files
-app.use("/user_files", express.static(path.join(__dirname, ".." ,"user_files")));
+// app.use("/user_files", express.static(path.join(__dirname, ".." ,"user_files")));
 
 // สร้างโฟลเดอร์ uploads ถ้ายังไม่มี
-const uploadFolder = path.join(__dirname, '..', 'user_files');
-if (!fs.existsSync(uploadFolder)) {
-  fs.mkdirSync(uploadFolder);
-}
+// const uploadFolder = path.join(__dirname, '..', 'user_files');
+// if (!fs.existsSync(uploadFolder)) {
+//   fs.mkdirSync(uploadFolder);
+// }
 
 // declare module 'express-session' {
 //   interface SessionData {
