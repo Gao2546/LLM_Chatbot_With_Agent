@@ -7,7 +7,7 @@ WORKDIR /root
 
 # Ensure .ollama directory exists with proper permissions
 RUN mkdir -p /root/.ollama && \
-    chmod -R 755 /root/.ollama
+    chmod -R 777 /root/.ollama
 
 # Create startup script that pulls models on first run
 RUN echo '#!/bin/bash\n\
