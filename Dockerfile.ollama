@@ -38,4 +38,4 @@ wait $OLLAMA_PID\n\
     chmod +x /usr/local/bin/start-ollama.sh
 
 EXPOSE 11434
-ENTRYPOINT ["ollama", "serve"]
+ENTRYPOINT ["bash"]
