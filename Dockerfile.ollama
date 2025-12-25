@@ -1,40 +1,7 @@
 FROM ollama/ollama:latest
 
-# Set proper environment and working directory
-ENV OLLAMA_MODELS=/root/.ollama/models
-ENV HOME=/root
 WORKDIR /root
 
-# Ensure .ollama directory exists with proper permissions
-RUN mkdir -p /root/.ollama && \
-    chmod -R 777 /root/.ollama
-
-# Create startup script that pulls models on first run
-RUN echo '#!/bin/bash\n\
-set -e\n\
-\n\
-# Ensure directory exists\n\
-mkdir -p /root/.ollama\n\
-\n\
-# Start Ollama server\n\
-ollama serve &\n\
-OLLAMA_PID=$!\n\
-\n\
-# Wait for server to be ready\n\
-echo "Waiting for Ollama server..."\n\
-sleep 10\n\
-\n\
-# Pull models in background\n\
-(\n\
-  echo "Pulling models..."\n\
-  ollama pull gemma2:2b || echo "Failed to pull gemma2:2b"\n\
-  ollama pull qwen2.5:3b || echo "Failed to pull qwen2.5:3b"\n\
-  echo "Model pulling complete"\n\
-) &\n\
-\n\
-# Wait for main server process\n\
-wait $OLLAMA_PID\n\
-' > /usr/local/bin/start-ollama.sh && \
-    chmod +x /usr/local/bin/start-ollama.sh
+RUN chmod -R 777 /root
 
 EXPOSE 11434
