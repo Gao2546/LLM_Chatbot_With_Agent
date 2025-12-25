@@ -195,102 +195,76 @@
 
 FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
 
-# Optional: use a Python version of your choice
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-# Set DEBIAN_FRONTEND to avoid interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PATH="/home/chatllm/.local/bin:${PATH}"
 
-# Install system dependencies + Python
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-dev \
-        wget curl git && \
-    ln -s /usr/bin/python3 /usr/bin/python && \
-    pip3 install --upgrade pip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# 1. Install system dependencies as ROOT
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    wget \
+    curl \
+    git \
+    software-properties-common \
+    lsb-release \
+    gnupg \
+    ca-certificates \
+    tesseract-ocr \
+    tesseract-ocr-tha \
+    libtesseract-dev \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    ffmpeg \
+    fonts-liberation \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    unzip \
+    && ln -s /usr/bin/python3 /usr/bin/python \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && \
-    apt-get install -y \
-        software-properties-common \
-        lsb-release \
-        wget \
-        curl \
-        gnupg \
-        ca-certificates && \
-    apt-get install -y \
-        tesseract-ocr \
-        libtesseract-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && \
-    apt-get install -y tesseract-ocr-tha
-
-RUN tesseract --version
-
-RUN apt-get update && \
-    apt-get install -y \
-        tesseract-ocr \
-        libtesseract-dev \
-        libglib2.0-0 \
-        libsm6 \
-        libxrender1 \
-        libxext6 \
-        ffmpeg \
-        fonts-liberation \
-        libnss3 \
-        libatk-bridge2.0-0 \
-        libgtk-3-0 \
-        curl \
-        unzip && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install Chrome and ChromeDriver
-RUN apt-get update && apt-get install -y wget unzip gnupg ca-certificates && \
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | \
-      gpg --dearmor -o /etc/apt/trusted.gpg.d/google.gpg && \
+# 2. Install Chrome and ChromeDriver as ROOT
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | \
+    gpg --dearmor -o /etc/apt/trusted.gpg.d/google.gpg && \
     echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-      > /etc/apt/sources.list.d/google-chrome.list && \
-    apt-get update && apt-get install -y google-chrome-stable
-
-# Detect Chrome major version
-RUN CHROME_VERSION=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+' || true) && \
+    > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y google-chrome-stable && \
+    CHROME_VERSION=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+' || true) && \
     CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d'.' -f1 || echo "114") && \
-    echo "Detected Chrome Version: $CHROME_VERSION (Major: $CHROME_MAJOR_VERSION)" && \
     CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_MAJOR_VERSION" || echo "114.0.5735.90") && \
-    echo "Installing ChromeDriver version: $CHROMEDRIVER_VERSION" && \
     wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/chromedriver && \
-    rm /tmp/chromedriver.zip
+    rm /tmp/chromedriver.zip && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create non-root user 'chatllm' with a home directory
+# 3. Create non-root user and setup directories
 RUN groupadd -r chatllm && \
-    useradd -r -g chatllm -m -d /home/chatllm -s /bin/bash chatllm
+    useradd -r -g chatllm -m -d /home/chatllm -s /bin/bash chatllm && \
+    mkdir -p /app /app/managed_files /home/chatllm/.config/matplotlib /tmp/matplotlib && \
+    chown -R chatllm:chatllm /app /home/chatllm /tmp/matplotlib
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy the requirements file into the container at /app
-COPY ../requirements.txt .
+# 4. SWITCH TO NON-ROOT USER
+USER chatllm
 
-# Install Python dependencies from requirements.txt
-RUN pip install --no-cache-dir --ignore-installed -r requirements.txt --break-system-packages
+# 5. Copy requirements and install via PIP as USER
+# Note: --user is implied when running as non-root, and we added the path to ENV PATH above
+COPY --chown=chatllm:chatllm ./requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Copy the application code and necessary directories
-COPY ./ /app/
+# 6. Copy the rest of the application
+COPY --chown=chatllm:chatllm ./ /app/
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /app/managed_files && \
-    mkdir -p /home/chatllm/.config/matplotlib && \
-    mkdir -p /tmp/matplotlib && \
-    chown -R chatllm:chatllm /app && \
-    chown -R chatllm:chatllm /home/chatllm && \
-    chmod -R 755 /app
-
-# Set environment variables for matplotlib and Docker deployment
+# Environment variables for the app
 ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     HOME=/home/chatllm \
     DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
@@ -303,24 +277,8 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     API_OLLAMA=http://llm-chatbot-with-agent-ollama:11434/api/generate \
     API_APP=http://llm-chatbot-with-agent-core:3000 \
     IS_DOCKER=true \
-    Google_API_KEY= \
-    OPENAI_API_KEY= \
-    OPENROUTER_API_KEY= \
-    DEEPINFRA_API_KEY= \
-    JINA_API_KEY= \
-    MINIO_ENDPOINT=127.0.0.1 \
-    MINIO_PORT=9010 \
-    MINIO_ACCESS_KEY=minioadmin \
-    MINIO_SECRET_KEY=minioadmin \
-    MINIO_BUCKET=user-files \
-    MINIO_USE_SSL=false \
     LOCAL=False
 
-# Switch to non-root user
-USER chatllm
-
-# Make port 5000 available to the world outside this container
 EXPOSE 5000
 
-# Define the command to run the application
 CMD ["python", "model.py"]
