@@ -102,8 +102,8 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from TextToImage.utils.node import *
-from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
+# from TextToImage.utils.node import *
+# from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
 
 app = Flask(__name__)
 
