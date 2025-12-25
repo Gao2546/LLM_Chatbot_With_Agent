@@ -257,7 +257,7 @@ WORKDIR /app
 COPY ./requirements.txt .
 
 # Install Python dependencies from requirements.txt
-RUN pip install --no-cache-dir --ignore-installed -r requirements.txt --break-system-packages
+RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
 
 # 4. SWITCH TO NON-ROOT USER
 USER chatllm
