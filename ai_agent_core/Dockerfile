@@ -61,7 +61,7 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     MINIO_SECRET_KEY=minioadmin \
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
-    PORT=3000
+    PORT=3000 \
     LOCAL=True
 
 # Setup mcp_BrowserBase build output (e.g., dist or build folder)
