@@ -48,7 +48,7 @@ COPY --from=builder_app /app/public ./public
 
 # Set environment variables
 ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
-    API_SERVER_URL=http://api_server:5000 \
+    API_SERVER_URL=http://llm-chatbot-with-agent-api-server:5000 \
     API_OLLAMA=http://127.0.0.1:11434/api/generate \
     Google_API_KEY= \
     OPENAI_API_KEY= \

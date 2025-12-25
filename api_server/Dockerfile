@@ -276,6 +276,12 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     API_SERVER_URL=http://llm-chatbot-with-agent-api-server:5000 \
     API_OLLAMA=http://llm-chatbot-with-agent-ollama:11434/api/generate \
     API_APP=http://llm-chatbot-with-agent-core:3000 \
+    MINIO_ENDPOINT=llm-chatbot-with-agent-minio \
+    MINIO_PORT=9000 \
+    MINIO_ACCESS_KEY=minioadmin \
+    MINIO_SECRET_KEY=minioadmin \
+    MINIO_BUCKET=user-files \
+    MINIO_USE_SSL=false \
     IS_DOCKER=true \
     LOCAL=False
 
