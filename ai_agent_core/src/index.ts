@@ -30,19 +30,19 @@ const app = express();
 app.use(cors());
 app.use(express.json()); // Middleware to parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Middleware to parse URL-encoded form data
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
 // const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 // app.use(express.static(path.join(__dirname, "..",'user_files')));
 // Serve static files
-app.use("/user_files", express.static(path.join(__dirname, ".." ,"user_files")));
+// app.use("/user_files", express.static(path.join(__dirname, ".." ,"user_files")));
 
 // สร้างโฟลเดอร์ uploads ถ้ายังไม่มี
-const uploadFolder = path.join(__dirname, '..', 'user_files');
-if (!fs.existsSync(uploadFolder)) {
-  fs.mkdirSync(uploadFolder);
-}
+// const uploadFolder = path.join(__dirname, '..', 'user_files');
+// if (!fs.existsSync(uploadFolder)) {
+//   fs.mkdirSync(uploadFolder);
+// }
 
 // declare module 'express-session' {
 //   interface SessionData {
@@ -315,6 +315,10 @@ setInterval(async () => {
   }
 }, CHECK_INTERVAL_MS); // check every 10s
 
-httpServer.listen(port, () => {
+const host = '0.0.0.0'; // Add this line
+
+httpServer.listen(port, host, () => {
   console.log(`Server listening at http://localhost:${port}`);
+  // Note: Printing 'localhost' here is fine for your logs, 
+  // but the server must listen on '0.0.0.0' to work in Docker.
 });

@@ -39,7 +39,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Local imports (assuming 'utils' is a local package/directory)
 from utils.util import (
-    EditedFileSystem,
+    # EditedFileSystem,
     encode_text_for_embedding,
     extract_docx_text,
     extract_excel_text,
@@ -94,7 +94,7 @@ else:
     print("Run model on server")
     vlm_provider = "DeepInfra"
 
-file_system = EditedFileSystem()
+# file_system = EditedFileSystem()
 
 # Add project root to sys.path to allow absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -102,8 +102,8 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from TextToImage.utils.node import *
-from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
+# from TextToImage.utils.node import *
+# from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
 
 app = Flask(__name__)
 
@@ -1338,175 +1338,175 @@ def _get_required_fields(data, *fields):
         
     return values, None
 
-# --- File Listing (Remains GET as it doesn't target a specific resource) ---
-@app.route('/files/list', methods=['GET'])
-def api_list_files():
-    """
-    Lists all managed files.
-    Example: GET /files/list
-    """
-    files, error = file_system.list_files()
-    if error:
-        return _api_response(None, error, 500)
-    return _api_response({"files": files}, "Successfully listed files.")
+# # --- File Listing (Remains GET as it doesn't target a specific resource) ---
+# @app.route('/files/list', methods=['GET'])
+# def api_list_files():
+#     """
+#     Lists all managed files.
+#     Example: GET /files/list
+#     """
+#     files, error = file_system.list_files()
+#     if error:
+#         return _api_response(None, error, 500)
+#     return _api_response({"files": files}, "Successfully listed files.")
 
-# --- Consolidated Read Endpoint ---
-@app.route('/files/read', methods=['POST'])
-def api_read_file():
-    """
-    Reads content from a file. The action is determined by the fields provided.
-    - To read all: {"file_name": "my_doc.txt"}
-    - To read specific lines: {"file_name": "my_doc.txt", "start_line": 1, "end_line": 5}
-    - To read from start to a line: {"file_name": "my_doc.txt", "end_line": 5}
-    """
-    data = request.get_json()
-    (file_name,), error_response = _get_required_fields(data, 'file_name')
-    if error_response:
-        return error_response
+# # --- Consolidated Read Endpoint ---
+# @app.route('/files/read', methods=['POST'])
+# def api_read_file():
+#     """
+#     Reads content from a file. The action is determined by the fields provided.
+#     - To read all: {"file_name": "my_doc.txt"}
+#     - To read specific lines: {"file_name": "my_doc.txt", "start_line": 1, "end_line": 5}
+#     - To read from start to a line: {"file_name": "my_doc.txt", "end_line": 5}
+#     """
+#     data = request.get_json()
+#     (file_name,), error_response = _get_required_fields(data, 'file_name')
+#     if error_response:
+#         return error_response
 
-    start_line = data.get('start_line')
-    end_line = data.get('end_line')
+#     start_line = data.get('start_line')
+#     end_line = data.get('end_line')
 
-    try:
-        # Case 1: Read specific line range
-        if start_line is not None and end_line is not None:
-            lines, error = file_system.read_line(file_name, int(start_line), int(end_line))
-            msg = f"Successfully read lines {start_line}-{end_line} from '{file_name}'."
-        # Case 2: Read from start until a specific line
-        elif end_line is not None:
-            lines, error = file_system.read_start_until_line_n(file_name, int(end_line))
-            msg = f"Successfully read from start to line {end_line} from '{file_name}'."
-        # Case 3: Read the whole file
-        else:
-            lines, error = file_system.read_all(file_name)
-            # read_all returns a list, join it for a single content string
-            lines = {"content": "\n".join(lines)} if not error else None
-            msg = f"Successfully read all content from '{file_name}'."
+#     try:
+#         # Case 1: Read specific line range
+#         if start_line is not None and end_line is not None:
+#             lines, error = file_system.read_line(file_name, int(start_line), int(end_line))
+#             msg = f"Successfully read lines {start_line}-{end_line} from '{file_name}'."
+#         # Case 2: Read from start until a specific line
+#         elif end_line is not None:
+#             lines, error = file_system.read_start_until_line_n(file_name, int(end_line))
+#             msg = f"Successfully read from start to line {end_line} from '{file_name}'."
+#         # Case 3: Read the whole file
+#         else:
+#             lines, error = file_system.read_all(file_name)
+#             # read_all returns a list, join it for a single content string
+#             lines = {"content": "\n".join(lines)} if not error else None
+#             msg = f"Successfully read all content from '{file_name}'."
 
-        if error:
-            return _api_response(None, error, 404)
-        return _api_response(lines, msg)
+#         if error:
+#             return _api_response(None, error, 404)
+#         return _api_response(lines, msg)
 
-    except (TypeError, ValueError):
-        return _api_response(None, "Invalid 'start_line' or 'end_line' parameters. Must be integers.", 400)
+#     except (TypeError, ValueError):
+#         return _api_response(None, "Invalid 'start_line' or 'end_line' parameters. Must be integers.", 400)
 
-# --- Consolidated Edit Endpoint ---
-@app.route('/files/edit', methods=['POST'])
-def api_edit_file():
-    """
-    Edits or overwrites a file. The action is determined by the fields provided.
-    - To edit specific lines: {"file_name": "my_doc.txt", "text": "new line content", "start_line": 2, "end_line": 2}
-    - To overwrite the whole file: {"file_name": "my_doc.txt", "text": "all new content"}
-    """
-    data = request.get_json()
-    (file_name, text), error_response = _get_required_fields(data, 'file_name', 'text')
-    if error_response:
-        return error_response
+# # --- Consolidated Edit Endpoint ---
+# @app.route('/files/edit', methods=['POST'])
+# def api_edit_file():
+#     """
+#     Edits or overwrites a file. The action is determined by the fields provided.
+#     - To edit specific lines: {"file_name": "my_doc.txt", "text": "new line content", "start_line": 2, "end_line": 2}
+#     - To overwrite the whole file: {"file_name": "my_doc.txt", "text": "all new content"}
+#     """
+#     data = request.get_json()
+#     (file_name, text), error_response = _get_required_fields(data, 'file_name', 'text')
+#     if error_response:
+#         return error_response
 
-    start_line = data.get('start_line')
-    end_line = data.get('end_line')
+#     start_line = data.get('start_line')
+#     end_line = data.get('end_line')
 
-    try:
-        # Case 1: Edit specific lines
-        if start_line is not None and end_line is not None:
-            error = file_system.edit_line(file_name, text, int(start_line), int(end_line))
-            msg = f"Successfully edited lines {start_line}-{end_line} in '{file_name}'."
-        # Case 2: Overwrite the entire file
-        else:
-            error = file_system.edit_all(file_name, text)
-            msg = f"Successfully overwritten file '{file_name}'."
+#     try:
+#         # Case 1: Edit specific lines
+#         if start_line is not None and end_line is not None:
+#             error = file_system.edit_line(file_name, text, int(start_line), int(end_line))
+#             msg = f"Successfully edited lines {start_line}-{end_line} in '{file_name}'."
+#         # Case 2: Overwrite the entire file
+#         else:
+#             error = file_system.edit_all(file_name, text)
+#             msg = f"Successfully overwritten file '{file_name}'."
 
-        if error:
-            return _api_response(None, error, 400)
-        return _api_response(None, msg)
+#         if error:
+#             return _api_response(None, error, 400)
+#         return _api_response(None, msg)
 
-    except (TypeError, ValueError):
-        return _api_response(None, "'start_line' and 'end_line' must be integers.", 400)
+#     except (TypeError, ValueError):
+#         return _api_response(None, "'start_line' and 'end_line' must be integers.", 400)
 
 
-# --- Consolidated Create Endpoint ---
-@app.route('/files/create', methods=['POST'])
-def api_create_file():
-    """
-    Creates a new file.
-    - To create an empty file: {"file_name": "new_empty.txt"}
-    - To create a file with content: {"file_name": "new_content.txt", "text": "initial content"}
-    """
-    data = request.get_json()
-    (file_name,), error_response = _get_required_fields(data, 'file_name')
-    if error_response:
-        return error_response
+# # --- Consolidated Create Endpoint ---
+# @app.route('/files/create', methods=['POST'])
+# def api_create_file():
+#     """
+#     Creates a new file.
+#     - To create an empty file: {"file_name": "new_empty.txt"}
+#     - To create a file with content: {"file_name": "new_content.txt", "text": "initial content"}
+#     """
+#     data = request.get_json()
+#     (file_name,), error_response = _get_required_fields(data, 'file_name')
+#     if error_response:
+#         return error_response
         
-    text = data.get('text')
+#     text = data.get('text')
 
-    # Case 1: Create file with text (overwrites if it exists)
-    if text is not None:
-        error = file_system.create_new_file_and_text(file_name, text)
-        msg = f"Successfully created file '{file_name}' with text."
-        if error:
-            return _api_response(None, error, 500) # Internal Server Error on create failure
-    # Case 2: Create an empty file only (fails if it exists)
-    else:
-        error = file_system.create_new_file_only(file_name)
-        msg = f"Successfully created empty file '{file_name}'."
-        if error:
-            return _api_response(None, error, 409) # 409 Conflict if file exists
+#     # Case 1: Create file with text (overwrites if it exists)
+#     if text is not None:
+#         error = file_system.create_new_file_and_text(file_name, text)
+#         msg = f"Successfully created file '{file_name}' with text."
+#         if error:
+#             return _api_response(None, error, 500) # Internal Server Error on create failure
+#     # Case 2: Create an empty file only (fails if it exists)
+#     else:
+#         error = file_system.create_new_file_only(file_name)
+#         msg = f"Successfully created empty file '{file_name}'."
+#         if error:
+#             return _api_response(None, error, 409) # 409 Conflict if file exists
 
-    return _api_response(None, msg, 201)
+#     return _api_response(None, msg, 201)
 
-# --- Delete Endpoint ---
-@app.route('/files/delete', methods=['POST'])
-def api_delete_file():
-    """
-    Deletes a file.
-    - Body: {"file_name": "file_to_delete.txt"}
-    """
-    data = request.get_json()
-    (file_name,), error_response = _get_required_fields(data, 'file_name')
-    if error_response:
-        return error_response
+# # --- Delete Endpoint ---
+# @app.route('/files/delete', methods=['POST'])
+# def api_delete_file():
+#     """
+#     Deletes a file.
+#     - Body: {"file_name": "file_to_delete.txt"}
+#     """
+#     data = request.get_json()
+#     (file_name,), error_response = _get_required_fields(data, 'file_name')
+#     if error_response:
+#         return error_response
 
-    error = file_system.delete_file(file_name)
-    if error:
-        return _api_response(None, error, 404)
-    return _api_response(None, f"Successfully deleted file '{file_name}'.")
+#     error = file_system.delete_file(file_name)
+#     if error:
+#         return _api_response(None, error, 404)
+#     return _api_response(None, f"Successfully deleted file '{file_name}'.")
 
-# --- File Download Endpoint ---
-@app.route('/files/download', methods=['POST'])
-def api_download_file():
-    """
-    Downloads a specific file.
-    Note: Using POST for a download is non-standard for browsers but works for programmatic clients.
-    - Body: {"file_name": "my_document.txt"}
-    """
-    data = request.get_json()
-    (file_name,), error_response = _get_required_fields(data, 'file_name')
-    if error_response:
-        return error_response
+# # --- File Download Endpoint ---
+# @app.route('/files/download', methods=['POST'])
+# def api_download_file():
+#     """
+#     Downloads a specific file.
+#     Note: Using POST for a download is non-standard for browsers but works for programmatic clients.
+#     - Body: {"file_name": "my_document.txt"}
+#     """
+#     data = request.get_json()
+#     (file_name,), error_response = _get_required_fields(data, 'file_name')
+#     if error_response:
+#         return error_response
         
-    full_path = file_system._get_full_path(file_name)
-    if not os.path.exists(full_path) or not os.path.isfile(full_path):
-        return _api_response(None, f"File '{file_name}' not found.", 404)
+#     full_path = file_system._get_full_path(file_name)
+#     if not os.path.exists(full_path) or not os.path.isfile(full_path):
+#         return _api_response(None, f"File '{file_name}' not found.", 404)
 
-    return send_from_directory(file_system.base_dir, file_name, as_attachment=True)
+#     return send_from_directory(file_system.base_dir, file_name, as_attachment=True)
 
 
-# --- Folder Creation Endpoint ---
-@app.route('/files/create_folder', methods=['POST'])
-def api_create_folder():
-    """
-    Creates a new folder.
-    - Body: {"folder_name": "new_folder_name"}
-    """
-    data = request.get_json()
-    (folder_name,), error_response = _get_required_fields(data, 'folder_name')
-    if error_response:
-        return error_response
+# # --- Folder Creation Endpoint ---
+# @app.route('/files/create_folder', methods=['POST'])
+# def api_create_folder():
+#     """
+#     Creates a new folder.
+#     - Body: {"folder_name": "new_folder_name"}
+#     """
+#     data = request.get_json()
+#     (folder_name,), error_response = _get_required_fields(data, 'folder_name')
+#     if error_response:
+#         return error_response
 
-    error = file_system.create_folder(folder_name)
-    if error:
-        return _api_response(None, error, 409) # 409 Conflict if folder exists, or 500 for other errors
-    return _api_response(None, f"Successfully created folder '{folder_name}'.", 201)
+#     error = file_system.create_folder(folder_name)
+#     if error:
+#         return _api_response(None, error, 409) # 409 Conflict if folder exists, or 500 for other errors
+#     return _api_response(None, f"Successfully created folder '{folder_name}'.", 201)
 
 
 @app.route('/detect_objects', methods=['POST'])
@@ -1740,4 +1740,4 @@ if __name__ == '__main__':
     #             n_class=n_class
 
     #         )
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
