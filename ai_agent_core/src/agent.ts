@@ -2700,7 +2700,7 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
     const result = await pool.query(
       `SELECT av.id, av.user_id, av.commenter_name as username, 
               av.comment, av.verification_type, av.requested_departments,
-              av.created_at as "createdAt",
+              av.attachments, av.created_at as "createdAt",
               av.due_date as "dueDate"
        FROM answer_verifications av
        WHERE av.verified_answer_id = $1
@@ -2708,16 +2708,32 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
       [questionId]
     );
     
-    const verifications = result.rows.map(row => ({
-      id: row.id,
-      userId: row.user_id,
-      username: row.username || 'Anonymous',
-      comment: row.comment,
-      verification_type: row.verification_type,
-      requestedDepartments: row.requested_departments || [],
-      createdAt: row.createdAt,
-      dueDate: row.dueDate
-    }));
+    const verifications = result.rows.map(row => {
+      // Parse attachments from jsonb
+      let attachments = [];
+      if (row.attachments) {
+        try {
+          attachments = typeof row.attachments === 'string' 
+            ? JSON.parse(row.attachments)
+            : Array.isArray(row.attachments) ? row.attachments : [];
+        } catch (e) {
+          console.warn('Failed to parse attachments:', e);
+          attachments = [];
+        }
+      }
+      return {
+        id: row.id,
+        userId: row.user_id,
+        username: row.username || 'Anonymous',
+        comment: row.comment,
+        text: row.comment,
+        verification_type: row.verification_type,
+        requestedDepartments: row.requested_departments || [],
+        attachments: attachments,
+        createdAt: row.createdAt,
+        dueDate: row.dueDate
+      };
+    });
     
     res.json({ success: true, verifications });
   } catch (error) {
@@ -2777,7 +2793,26 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
       [questionId]
     );
     
-    console.log(`Found ${commentsResult.rows.length} comments from comments table`);
+    // Parse attachments from regular comments
+    const parsedCommentsResult = commentsResult.rows.map(row => {
+      let attachments = [];
+      if (row.attachments) {
+        try {
+          attachments = typeof row.attachments === 'string' 
+            ? JSON.parse(row.attachments)
+            : Array.isArray(row.attachments) ? row.attachments : [];
+        } catch (e) {
+          console.warn('Failed to parse comment attachments:', e);
+          attachments = [];
+        }
+      }
+      return {
+        ...row,
+        attachments: attachments
+      };
+    });
+    
+    console.log(`Found ${parsedCommentsResult.length} comments from comments table`);
     
     // Fetch verification comments from answer_verifications table
     // Include all verifications (with or without comment text)
@@ -2798,14 +2833,28 @@ router.get('/get-comments/:questionId', async (req: Request, res: Response) => {
     });
     
     // Format verification comments to match comment structure
-    const formattedVerifications = verificationsResult.rows.map(v => ({
-      ...v,
-      department: v.requested_departments && v.requested_departments.length > 0 ? v.requested_departments[0] : null,
-      attachments: v.attachments || []
-    }));
+    const formattedVerifications = verificationsResult.rows.map(v => {
+      // Parse attachments from jsonb
+      let attachments = [];
+      if (v.attachments) {
+        try {
+          attachments = typeof v.attachments === 'string' 
+            ? JSON.parse(v.attachments)
+            : Array.isArray(v.attachments) ? v.attachments : [];
+        } catch (e) {
+          console.warn('Failed to parse verification attachments:', e);
+          attachments = [];
+        }
+      }
+      return {
+        ...v,
+        department: v.requested_departments && v.requested_departments.length > 0 ? v.requested_departments[0] : null,
+        attachments: attachments
+      };
+    });
 
     // Combine both sources and sort by date
-    const allComments = [...commentsResult.rows, ...formattedVerifications]
+    const allComments = [...parsedCommentsResult, ...formattedVerifications]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     
     console.log(`Returning ${allComments.length} total comments`);
