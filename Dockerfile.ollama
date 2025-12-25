@@ -1,15 +1,12 @@
 FROM ollama/ollama:latest
 
-# Set the model you want to pre-load (e.g., llama3, mistral, phi3)
-ARG MODEL="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
-
-# 1. Start the Ollama server in the background
-# 2. Wait for it to initialize (sleep 5)
-# 3. Pull the specified model
-# 4. Kill the server so the build process can finish
+# Start Ollama server in background and pull models one by one
 RUN ollama serve & \
     sleep 5 && \
-    ollama pull $MODEL && \
+    ollama pull gemma3:4b && \
+    ollama pull qwen3-vl:4b-instruct && \
+    ollama pull qwen3-embedding:0.6b && \
+    ollama pull qwen3-vl:2b-instruct && \
     pkill ollama
 
 # Expose the standard port
