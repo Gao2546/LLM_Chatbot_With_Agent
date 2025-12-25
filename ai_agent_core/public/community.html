@@ -8,11 +8,39 @@
     <link rel="stylesheet" href="community.css?v=5.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <script>
+        // Apply theme immediately before page renders
+        const theme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+    </script>
 </head>
 <body>
     <!-- Auth Container (Top Right) - Same as index.html -->
     <div class="auth-container">
         <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
+        
+        <!-- Notification Bell -->
+        <div class="notification-bell-container">
+            <button id="notificationBellBtn" class="notification-bell" title="Notifications">
+                <i class="fas fa-bell"></i>
+                <span id="notificationBadge" class="notification-badge" style="display: none;">0</span>
+            </button>
+            
+            <!-- Notification Dropdown -->
+            <div id="notificationDropdown" class="notification-dropdown" style="display: none;">
+                <div class="notification-header">
+                    <h3>Notifications</h3>
+                    <button id="closeNotificationBtn" class="close-notification-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div id="notificationList" class="notification-list">
+                    <!-- Notifications will be loaded here -->
+                    <div class="empty-notifications">No notifications</div>
+                </div>
+            </div>
+        </div>
+        
         <a href="auth/login" class="login-button" id="loginBtn">Login</a>
     </div>
 
@@ -150,6 +178,9 @@
             setupSidebarToggle();
             setupFilterLinks();
             setupPageRefresh();
+            setupNotificationBell();
+            await loadNotifications(); // Load notifications immediately on page load
+            initTheme();
         });
 
         // Refresh data when user returns to this page from detail page
@@ -209,6 +240,120 @@
                 currentUserId = null;
                 currentUsername = null;
             }
+        }
+
+        function setupNotificationBell() {
+            const bellBtn = document.getElementById('notificationBellBtn');
+            const dropdown = document.getElementById('notificationDropdown');
+            const closeBtn = document.getElementById('closeNotificationBtn');
+            const notificationList = document.getElementById('notificationList');
+
+            if (!bellBtn) return;
+
+            // Toggle dropdown
+            bellBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (dropdown.style.display === 'none') {
+                    dropdown.style.display = 'block';
+                    await loadNotifications();
+                } else {
+                    dropdown.style.display = 'none';
+                }
+            });
+
+            // Close dropdown
+            closeBtn?.addEventListener('click', () => {
+                dropdown.style.display = 'none';
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.notification-bell-container')) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        async function loadNotifications() {
+            try {
+                if (!currentUserId) return;
+
+                const res = await fetch(`/api/get-notifications`);
+                const data = await res.json();
+
+                const notificationList = document.getElementById('notificationList');
+                const badge = document.getElementById('notificationBadge');
+
+                if (data.success && data.notifications && data.notifications.length > 0) {
+                    // Show unread count in badge
+                    const unreadCount = data.unreadCount || 0;
+                    badge.textContent = unreadCount;
+                    badge.style.display = unreadCount > 0 ? 'block' : 'none';
+
+                    notificationList.innerHTML = data.notifications.map(notif => `
+                        <div class="notification-item ${!notif.isRead ? 'unread' : ''}" onclick="handleNotificationClick(${notif.id}, ${notif.questionId}, ${notif.isRead})">
+                            ${!notif.isRead ? '<div class="notification-unread-indicator"></div>' : ''}
+                            <div class="notification-item-avatar">
+                                ${notif.verifiedBy ? notif.verifiedBy.charAt(0).toUpperCase() : 'V'}
+                            </div>
+                            <div class="notification-item-content">
+                                <div class="notification-item-title">Answer Verified</div>
+                                <div class="notification-item-text">
+                                    Your answer was verified by <strong>${notif.verifiedBy || 'User'}</strong> from <strong>${notif.department || 'Department'}</strong>
+                                </div>
+                                <div class="notification-item-meta">
+                                    ${formatDate(notif.createdAt)}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    badge.style.display = 'none';
+                    notificationList.innerHTML = '<div class="empty-notifications">No notifications</div>';
+                }
+            } catch (e) {
+                console.error('Error loading notifications:', e);
+            }
+        }
+
+        async function handleNotificationClick(notificationId, questionId, isRead) {
+            try {
+                // Mark as read if not already read
+                if (!isRead) {
+                    await fetch('/api/mark-notification-read', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notificationId })
+                    });
+                    
+                    // Reload notifications to update badge and UI
+                    await loadNotifications();
+                }
+                
+                // Navigate to question
+                window.location.href = `comment.html?id=${questionId}`;
+            } catch (e) {
+                console.error('Error handling notification click:', e);
+                // Still navigate even if marking fails
+                window.location.href = `comment.html?id=${questionId}`;
+            }
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Just now';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins} min ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            
+            return date.toLocaleDateString();
         }
 
         // Sidebar Toggle Functionality (same as index.html)

@@ -271,6 +271,26 @@ CREATE INDEX IF NOT EXISTS idx_question_attachments_question
 ON question_attachments(question_id);
 `;
 
+// Notifications table - tracks when users want to be notified for questions
+const createNotificationsTableQuery = `
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    verified_by_name VARCHAR(255),
+    verified_by_department VARCHAR(255),
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(question_id, user_id)
+);
+`;
+
+const createNotificationsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_question ON notifications(question_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+`;
+
 // ALTER TABLE to add missing columns
 const alterVerifiedAnswersAddNotifyMeQuery = `
 DO $$
@@ -473,6 +493,14 @@ async function initializeDatabase() {
 
     await pool.query(createQuestionAttachmentsIndexQuery);
     console.log('DB: Question attachments index created or already exists');
+
+    // Create notifications table
+    await pool.query(createNotificationsTableQuery);
+    console.log('DB: Notifications table created or already exists');
+
+    await pool.query(createNotificationsIndexQuery);
+    console.log('DB: Notifications indexes created or already exists');
+
     // Add verification_type and requested_departments columns if not exists
     await pool.query(`
       DO $$
@@ -1214,6 +1242,58 @@ async function saveVerifiedAnswer(
 }
 
 /**
+ * Trigger notifications for all users who enabled notifications for a question
+ * Get users with notify_me=true from verified_answers, create notification records
+ */
+async function triggerNotificationsForQuestion(
+  questionId: number,
+  verifiedByName: string = 'Anonymous',
+  verifiedByDepartment: string = ''
+) {
+  try {
+    // Get the user who created this question and has notify_me = true
+    // Join with users table to get user_id from created_by username
+    const result = await pool.query(
+      `SELECT u.id as user_id, va.created_by
+       FROM verified_answers va
+       JOIN users u ON u.username = va.created_by
+       WHERE va.id = $1 AND va.notify_me = true`,
+      [questionId]
+    );
+
+    if (result.rows.length === 0) {
+      console.log(`No users to notify for question ${questionId} (notify_me not enabled or user not found)`);
+      return;
+    }
+
+    // For each user, create a notification
+    for (const row of result.rows) {
+      const userId = row.user_id;
+      try {
+        await pool.query(
+          `INSERT INTO notifications (question_id, user_id, verified_by_name, verified_by_department, is_read)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (question_id, user_id) DO UPDATE SET
+             verified_by_name = EXCLUDED.verified_by_name,
+             verified_by_department = EXCLUDED.verified_by_department,
+             is_read = FALSE,
+             created_at = NOW()`,
+          [questionId, userId, verifiedByName, verifiedByDepartment, false]
+        );
+      } catch (err) {
+        console.error(`Error creating notification for user ${userId}:`, err);
+        // Continue with other users
+      }
+    }
+
+    console.log(`✅ Triggered notifications for ${result.rows.length} users for question ${questionId}`);
+  } catch (error) {
+    console.error('Error triggering notifications:', error);
+    // Don't fail the verification if notifications fail
+  }
+}
+
+/**
  * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
  * Searches for verified answers using vector similarity
  */
@@ -1802,6 +1882,7 @@ export {
   searchVerifiedAnswers,
   getAnswerVerifications,
   filterQuestionsByType,
+  triggerNotificationsForQuestion,
 
   // Question Attachments Functions
   saveQuestionAttachment,

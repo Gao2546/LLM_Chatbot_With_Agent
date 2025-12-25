@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion } from './db.js';
 
 dotenv.config();
 
@@ -2334,6 +2334,8 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
     }
     
+    console.log(`📊 saveVerifiedAnswer result:`, result);
+    
     if (result && result.answerId) {
       // Handle file attachments - Upload to MinIO and save paths
       const attachmentPaths: string[] = [];
@@ -2388,6 +2390,19 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       }
       
       console.log(`Verification type: ${verificationType}, Requested departments: ${requestedDepartments.join(', ')}, Notify: ${notifyMe}`);
+
+      // Trigger notifications for users who enabled notifications for this question
+      console.log(`🔔 About to trigger notifications for question ${result.answerId}`);
+      try {
+        await triggerNotificationsForQuestion(
+          result.answerId,
+          userName || 'Anonymous',
+          requestedDepartments[0] || ''
+        );
+        console.log(`🔔 Notification trigger completed for question ${result.answerId}`);
+      } catch (notifError) {
+        console.warn('Could not trigger notifications:', notifError);
+      }
     }
 
     res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
@@ -2739,6 +2754,74 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
   } catch (error) {
     console.error('❌ Error fetching verifications:', error);
     res.json({ success: true, verifications: [] });
+  }
+});
+
+// GET /api/get-notifications - Get notifications for current user
+router.get('/get-notifications', async (req: Request, res: Response) => {
+  try {
+    const userId = req.session.user?.id;
+    
+    if (!userId) {
+      return res.json({ success: true, notifications: [], unreadCount: 0 });
+    }
+
+    // Fetch user's notifications with question details
+    const result = await pool.query(
+      `SELECT 
+        n.id,
+        n.question_id as "questionId",
+        n.user_id as "userId",
+        n.verified_by_name as "verifiedBy",
+        n.verified_by_department as "department",
+        n.is_read as "isRead",
+        n.created_at as "createdAt",
+        va.question,
+        va.answer
+       FROM notifications n
+       JOIN verified_answers va ON n.question_id = va.id
+       WHERE n.user_id = $1
+       ORDER BY n.created_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+
+    const notifications = result.rows;
+    const unreadCount = notifications.filter(n => !n.isRead).length;
+
+    res.json({
+      success: true,
+      notifications: notifications,
+      unreadCount: unreadCount
+    });
+  } catch (error) {
+    console.error('❌ Error fetching notifications:', error);
+    res.json({ success: true, notifications: [], unreadCount: 0 });
+  }
+});
+
+// POST /api/mark-notification-read - Mark notification as read
+router.post('/mark-notification-read', async (req: Request, res: Response) => {
+  try {
+    const { notificationId } = req.body;
+    const userId = req.session.user?.id;
+
+    if (!userId || !notificationId) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Update notification to mark as read
+    await pool.query(
+      `UPDATE notifications 
+       SET is_read = TRUE 
+       WHERE id = $1 AND user_id = $2`,
+      [notificationId, userId]
+    );
+
+    res.json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('❌ Error marking notification as read:', error);
+    res.status(500).json({ success: false, error: String(error) });
   }
 });
 
@@ -3336,6 +3419,18 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
     `, [questionId, userId, commenterName, comment || null, deptArray, attachmentsJson]);
 
     console.log('✅ Verification saved:', result.rows[0].id, 'with', (attachments?.length || 0), 'attachments');
+
+    // Trigger notifications for users who enabled notifications for this question
+    try {
+      await triggerNotificationsForQuestion(
+        parseInt(questionId),
+        commenterName || 'Anonymous',
+        userDept || ''
+      );
+      console.log('✅ Notification trigger completed for question', questionId);
+    } catch (notifError) {
+      console.warn('Could not trigger notifications:', notifError);
+    }
 
     res.json({ 
       success: true, 

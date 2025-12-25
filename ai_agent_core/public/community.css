@@ -49,6 +49,171 @@ body {
     transform: scale(1.02);
 }
 
+/* ========== NOTIFICATION BELL ========== */
+.notification-bell-container {
+    position: relative;
+    margin-right: 15px;
+}
+
+.notification-bell {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #e0e0e0;
+    cursor: pointer;
+    position: relative;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+}
+
+.notification-bell:hover {
+    color: #0a8276;
+}
+
+.notification-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.notification-dropdown {
+    position: absolute;
+    top: 50px;
+    right: 0;
+    background: #2a2a2a;
+    border: 1px solid #404040;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    width: 350px;
+    max-height: 500px;
+    overflow-y: auto;
+    z-index: 1000;
+}
+
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #404040;
+    background: #333;
+}
+
+.notification-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #e0e0e0;
+}
+
+.close-notification-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: #999;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.close-notification-btn:hover {
+    color: #e0e0e0;
+}
+
+.notification-list {
+    padding: 0;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.notification-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid #404040;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    position: relative;
+}
+
+.notification-item.unread {
+    background-color: #f0f9ff;
+}
+
+.notification-item.unread:hover {
+    background-color: #e0f2fe;
+}
+
+.notification-unread-indicator {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: #10b981;
+}
+
+.notification-item:hover {
+    background-color: #333;
+}
+
+.notification-item-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0a8276, #00bfa5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.notification-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.notification-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 4px;
+}
+
+.notification-item-text {
+    font-size: 12px;
+    color: #b0b0b0;
+    line-height: 1.4;
+    margin-bottom: 4px;
+}
+
+.notification-item-meta {
+    font-size: 11px;
+    color: #666;
+}
+
+.empty-notifications {
+    padding: 40px 16px;
+    text-align: center;
+    color: #666;
+    font-size: 13px;
+}
+
 #usernameDisplay {
     color: #b0b0b0;
     font-weight: 500;
@@ -1106,4 +1271,130 @@ body[data-theme="light"] ::-webkit-scrollbar-thumb {
 
 body[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
     background-color: #aaa;
+}
+
+/* ========== DARK THEME - NOTIFICATION BELL ========== */
+body[data-theme="dark"] .notification-bell {
+    color: #e0e0e0 !important;
+}
+
+body[data-theme="dark"] .notification-bell:hover {
+    color: #0a8276 !important;
+}
+
+body[data-theme="dark"] .notification-dropdown {
+    background: #2a2a2a !important;
+    border-color: #404040 !important;
+}
+
+body[data-theme="dark"] .notification-header {
+    background: #333 !important;
+    border-bottom-color: #404040 !important;
+}
+
+body[data-theme="dark"] .notification-header h3 {
+    color: #e0e0e0 !important;
+}
+
+body[data-theme="dark"] .close-notification-btn {
+    color: #999 !important;
+}
+
+body[data-theme="dark"] .close-notification-btn:hover {
+    color: #e0e0e0 !important;
+}
+
+body[data-theme="dark"] .notification-item {
+    border-bottom-color: #404040 !important;
+}
+
+body[data-theme="dark"] .notification-item.unread {
+    background-color: #1e3a4a !important;
+}
+
+body[data-theme="dark"] .notification-item.unread:hover {
+    background-color: #2a4a5a !important;
+}
+
+body[data-theme="dark"] .notification-item:hover {
+    background-color: #333 !important;
+}
+
+body[data-theme="dark"] .notification-item-title {
+    color: #e0e0e0 !important;
+}
+
+body[data-theme="dark"] .notification-item-text {
+    color: #b0b0b0 !important;
+}
+
+body[data-theme="dark"] .notification-item-meta {
+    color: #666 !important;
+}
+
+body[data-theme="dark"] .empty-notifications {
+    color: #666 !important;
+}
+
+/* ========== LIGHT THEME - NOTIFICATION BELL ========== */
+body[data-theme="light"] .notification-bell {
+    color: #333 !important;
+}
+
+body[data-theme="light"] .notification-bell:hover {
+    color: #0a8276 !important;
+}
+
+body[data-theme="light"] .notification-dropdown {
+    background: #ffffff !important;
+    border-color: #e0e0e0 !important;
+}
+
+body[data-theme="light"] .notification-header {
+    background: #f9f9f9 !important;
+    border-bottom-color: #e0e0e0 !important;
+}
+
+body[data-theme="light"] .notification-header h3 {
+    color: #333 !important;
+}
+
+body[data-theme="light"] .close-notification-btn {
+    color: #999 !important;
+}
+
+body[data-theme="light"] .close-notification-btn:hover {
+    color: #333 !important;
+}
+
+body[data-theme="light"] .notification-item {
+    border-bottom-color: #f0f0f0 !important;
+}
+
+body[data-theme="light"] .notification-item.unread {
+    background-color: #f0f9ff !important;
+}
+
+body[data-theme="light"] .notification-item.unread:hover {
+    background-color: #e0f2fe !important;
+}
+
+body[data-theme="light"] .notification-item:hover {
+    background-color: #f5f5f5 !important;
+}
+
+body[data-theme="light"] .notification-item-title {
+    color: #333 !important;
+}
+
+body[data-theme="light"] .notification-item-text {
+    color: #666 !important;
+}
+
+body[data-theme="light"] .notification-item-meta {
+    color: #999 !important;
+}
+
+body[data-theme="light"] .empty-notifications {
+    color: #999 !important;
 }

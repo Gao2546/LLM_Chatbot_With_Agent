@@ -2808,7 +2808,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
     }
     
     // Available departments
-    const departments = ['WT', 'FT', 'PE', 'QA', 'IT', 'MFG', 'ENG', 'RnD'];
+    const departments = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
     
     // Fetch template from external file
     let templateHTML = '';
