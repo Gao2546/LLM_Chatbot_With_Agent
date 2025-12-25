@@ -289,7 +289,7 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
     IS_DOCKER=true \
-    LOCAL=False
+    LOCAL=True
 
 EXPOSE 5000
 
