@@ -1,16 +1,21 @@
 FROM ollama/ollama:latest
 
-# Start Ollama server in background and pull models one by one
-RUN ollama serve & \
-    sleep 5 && \
-    ollama pull gemma3:4b && \
-    ollama pull qwen3-vl:4b-instruct && \
-    ollama pull qwen3-embedding:0.6b && \
-    ollama pull qwen3-vl:2b-instruct && \
-    pkill ollama
+# Create a startup script that pulls models on first run
+RUN echo '#!/bin/bash\n\
+ollama serve &\n\
+OLLAMA_PID=$!\n\
+sleep 5\n\
+\n\
+# Pull models in background\n\
+(\n\
+  ollama pull gemma2:2b\n\
+  ollama pull qwen2.5:3b\n\
+  ollama pull llama3.2:1b\n\
+) &\n\
+\n\
+wait $OLLAMA_PID\n\
+' > /usr/local/bin/start-ollama.sh && \
+    chmod +x /usr/local/bin/start-ollama.sh
 
-# Expose the standard port
 EXPOSE 11434
-
-# Use the base image's default entrypoint
-ENTRYPOINT ["ollama", "serve"]
+ENTRYPOINT ["/usr/local/bin/start-ollama.sh"]
