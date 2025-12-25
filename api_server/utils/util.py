@@ -10,6 +10,7 @@ import psycopg2
 import fitz  # PyMuPDF
 import time
 import mimetypes # For guessing mime types
+import numpy as np
 
 from PIL import Image
 from sentence_transformers import SentenceTransformer
@@ -1524,6 +1525,7 @@ def DeepInfraEmbedding(inputs: list[str], model_name: str = "Qwen/Qwen3-Embeddin
 # --- UPDATED: Jina v4 Multimodal Embedding Function ---
 def get_image_embedding_jinna_api(
     text: str = None, 
+    search_text: str = None,
     image_bytes_list: List[bytes] = None, 
     model_name: str = "jina-embeddings-v4"
 ) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
@@ -1549,10 +1551,10 @@ def get_image_embedding_jinna_api(
         return None
     
     # Ensure only one input type is provided
-    if text and image_bytes_list:
+    if (text or search_text) and image_bytes_list:
         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
         return None
-    if not text and not image_bytes_list:
+    if not (text or search_text) and not image_bytes_list:
         print("Error: Must provide either 'text' or 'image_bytes_list' to get_image_embedding_jinna_api.")
         return None
 
@@ -1600,21 +1602,25 @@ Output only the simulated excerpt.
 # Output only the search string.
 # """
     
-    if text:
+    if text or search_text:
         print("Requesting Jina v4 embedding (Type: Text)...")
-        if not LOCAL:
-            search_text = DeepInfraInference(
-                prompt=create_search_prompt,
-                # system_prompt=system_prompt,
-                # image_bytes_list=image_bytes_list,
-                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
-            )
+        if search_text == None:
+            if not LOCAL:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
+                )
 
-        else :
-            search_text = ollama_generate_text(
-                prompt=create_search_prompt,
-                model="gemma3:4b"
-            )
+            else :
+                search_text = ollama_generate_text(
+                    prompt=create_search_prompt,
+                    model="gemma3:4b"
+                )
+        else:
+            search_text = search_text
+
         print(f"Search prompt: {search_text}")
         input_data.append({"text": search_text})
         task_type = "retrieval.query"
@@ -1736,7 +1742,7 @@ Output only the simulated excerpt.
              return None
 
         # Return a single list if text was the input (for search_similar_pages)
-        if text:
+        if text or search_text:
             print(f"✅ Generated Jina v4 embedding for text.")
             return embeddings_list[0] 
         
@@ -1761,6 +1767,7 @@ Output only the simulated excerpt.
 
 def get_image_embedding_jinna_api_local(
     text: str = None, 
+    search_text: str = None,
     image_bytes_list: List[bytes] = None, 
     model_name: str = "jinaai/jina-embeddings-v4"
 ) -> Union[Optional[List[float]], Optional[List[List[float]]]]:
@@ -1802,7 +1809,7 @@ def get_image_embedding_jinna_api_local(
         # model = _JINA_MODEL_INSTANCE
 
         # 3. Handle Text Input (Retrieval Query)
-        if text:
+        if text or search_text:
             print("Generating Jina v4 embedding (Type: Text)...")
             
             # --- START: Query Expansion / HyDE Logic (Preserved) ---
@@ -1815,18 +1822,20 @@ User Query: {text}
 
 Output only the descriptive paragraph. No introductory text.
 """
-            # Ensure LOCAL and helper functions are defined in your outer scope
-            if not LOCAL:
-                search_text = DeepInfraInference(
-                    prompt=create_search_prompt,
-                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
-                )
+            if search_text == None:
+                # Ensure LOCAL and helper functions are defined in your outer scope
+                if not LOCAL:
+                    search_text = DeepInfraInference(
+                        prompt=create_search_prompt,
+                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+                    )
+                else:
+                    search_text = ollama_generate_text(
+                        prompt=create_search_prompt,
+                        model="gemma3:4b"
+                    )
             else:
-                search_text = ollama_generate_text(
-                    prompt=create_search_prompt,
-                    model="gemma3:4b"
-                )
-            
+                search_text = search_text
             print(f"Search prompt (HyDE): {search_text}")
             # --- END: Query Expansion Logic ---
 
@@ -2734,9 +2743,9 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
     # Step 1: Encode the query text to a vector
     query_embedding = encode_text_for_embedding(query_text)
     # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
     conn = None
@@ -2811,9 +2820,9 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
     """
     # Step 1: Encode the query text using the *CLIP* model
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(text=query_text)
+        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
-        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     if not query_embedding:
         print("❌ Failed to get CLIP embedding for query.")
         return []
@@ -2924,9 +2933,9 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
 
     # Encode using jinna Text-Image-Embedding
     # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"  
 
     conn = None
@@ -2951,7 +2960,7 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
             ORDER BY distance
             LIMIT %s
         """
-        cur.execute(query, (query_vector, user_id, query_vector, 2, top_k))
+        cur.execute(query, (query_vector, user_id, query_vector, threshold_text, top_k))
         results = cur.fetchall()
         cur.close()
 
@@ -2977,9 +2986,9 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(text=query_text)
+        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
-        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
     if not query_embedding: return []
 
@@ -3054,9 +3063,9 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
     # Encode query
     query_embedding = encode_text_for_embedding(query_text)
     # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
 
     conn = None
@@ -3107,9 +3116,9 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(text=query_text)
+        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
-        query_embedding = get_image_embedding_jinna_api_local(text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
     if not query_embedding: return []
 
