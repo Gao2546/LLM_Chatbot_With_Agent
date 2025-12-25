@@ -1,6 +1,11 @@
 FROM ollama/ollama:latest
 
+ENV OLLAMA_MODELS=/root/.ollama/models
+ENV HOME=/root
+
 WORKDIR /root
+
+RUN ollama serve
 
 RUN chmod -R 777 /root
 
