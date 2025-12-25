@@ -29,14 +29,12 @@
         
         <div class="verify-tags-section">
             <div style="margin-top: 0;">
-                <label style="font-size: 13px; color: #666; margin-bottom: 8px; display: block; font-weight: 600;">
+                <label class="verify-tags-label">
                     <i class="fas fa-tags" style="margin-right: 6px;"></i>Add Tags
                 </label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <input type="text" id="customTagInput" placeholder="Type tag name and press Enter or click +" 
-                        style="flex: 1; padding: 10px 14px; border: 2px solid #3a3a3a; border-radius: 8px; background: rgba(10, 130, 118, 0.08); color: #2a2a2a; font-size: 13px; transition: all 0.2s;">
-                    <button type="button" id="addCustomTagBtn" 
-                        style="padding: 10px 16px; background: #0a8276; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; display: flex; align-items: center; gap: 6px;">
+                    <input type="text" id="customTagInput" class="verify-tag-input" placeholder="Type tag name and press Enter or click +">
+                    <button type="button" id="addCustomTagBtn" class="verify-add-tag-btn">
                         <i class="fas fa-plus"></i>
                         <span>Add</span>
                     </button>
@@ -69,12 +67,12 @@
                             </div>
                             <div class="verify-dept-dropdown-menu" id="myDeptDropdownMenu">
                                 <label class="verify-dept-dropdown-item">
-                                    <input type="checkbox" name="myDept" value="WT">
+                                    <input type="radio" name="myDept" value="WT">
                                     <span class="verify-dept-checkbox-box"></span>
                                     <span class="verify-dept-checkbox-text">WT</span>
                                 </label>
                                 <label class="verify-dept-dropdown-item">
-                                    <input type="checkbox" name="myDept" value="FT">
+                                    <input type="radio" name="myDept" value="FT">
                                     <span class="verify-dept-checkbox-box"></span>
                                     <span class="verify-dept-checkbox-text">FT</span>
                                 </label>
