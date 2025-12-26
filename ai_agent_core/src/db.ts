@@ -1269,6 +1269,15 @@ async function triggerNotificationsForQuestion(
     // For each user, create a notification
     for (const row of result.rows) {
       const userId = row.user_id;
+      const createdBy = row.created_by;
+      
+      // ✅ Don't send notification if the verifier is the question creator (self-verification)
+      // This means the request shows "✓ Requested by username" and should not trigger bell notification
+      if (verifiedByName === createdBy) {
+        console.log(`⏭️ Skipping notification for question ${questionId} - self-verification by ${verifiedByName}`);
+        continue;
+      }
+      
       try {
         await pool.query(
           `INSERT INTO notifications (question_id, user_id, verified_by_name, verified_by_department, is_read)
