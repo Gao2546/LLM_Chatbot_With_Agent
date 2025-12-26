@@ -9,7 +9,8 @@ RUN useradd -m -u 1001 ollama
 # By default, Ollama uses /root/.ollama. We change it to the new home directory.
 ENV OLLAMA_MODELS=/home/ollama/.ollama/models
 RUN mkdir -p /home/ollama/.ollama/models /.ollama /.ollama/models && \
-    chown -R ollama:ollama /home/ollama/ /.ollama /.ollama/models
+    chown -R ollama:ollama /home/ollama/ /.ollama /.ollama/models && \
+    chown -R 777 /home/ollama/ /.ollama /.ollama/models
 
 # 3. Switch to the non-root user
 USER ollama
