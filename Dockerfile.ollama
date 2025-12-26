@@ -44,6 +44,7 @@ echo "Ollama is ready!"
 wait $OLLAMA_PID
 EOF
 
+
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
     chgrp 0 /usr/local/bin/docker-entrypoint.sh && \
     chmod g=u /usr/local/bin/docker-entrypoint.sh
