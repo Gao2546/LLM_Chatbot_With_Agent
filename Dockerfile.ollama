@@ -12,37 +12,28 @@ RUN mkdir -p /.ollama \
     chmod -R g=u /.ollama /home/ollama && \
     chmod -R 775 /.ollama /home/ollama
 
-# Create startup script
-RUN cat > /usr/local/bin/docker-entrypoint.sh <<'EOF'
-#!/bin/bash
-set -e
+RUN apt update && \
+    apt install curl -y
 
-# Models to pull
-MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
-
-# Start ollama in background
-ollama serve &
-OLLAMA_PID=$!
-
-# Wait for ollama to be ready
-echo "Waiting for Ollama to start..."
-sleep 10
-
-# Pull models if they don't exist
-for MODEL in $MODELS; do
-    if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
-        echo "Pulling $MODEL..."
-        ollama pull $MODEL || echo "Warning: Failed to pull $MODEL"
-    else
-        echo "$MODEL already exists"
-    fi
-done
-
-echo "Ollama is ready!"
-
-# Keep ollama running
-wait $OLLAMA_PID
-EOF
+# 2. Create startup script using printf (Fixes the "SET" error)
+RUN printf '#!/bin/bash\n\
+set -e\n\
+ollama serve &\n\
+OLLAMA_PID=$!\n\
+echo "Waiting for Ollama to start..."\n\
+until curl -s localhost:11434/api/tags > /dev/null; do sleep 2; done\n\
+\n\
+MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"\n\
+\n\
+for MODEL in $MODELS; do\n\
+    if ! ollama list | grep -q "$MODEL"; then\n\
+        echo "Pulling $MODEL..."\n\
+        ollama pull $MODEL || echo "Warning: Failed to pull $MODEL"\n\
+    else\n\
+        echo "$MODEL already exists"\n\
+    fi\ndone\n\
+echo "Ollama is ready!"\n\
+wait $OLLAMA_PID' > /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
     chgrp 0 /usr/local/bin/docker-entrypoint.sh && \
