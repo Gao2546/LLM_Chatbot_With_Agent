@@ -1,12 +1,12 @@
 FROM ollama/ollama:latest
 
-# Create ollama user and group if they don't exist
-RUN groupadd -f -g 1000 ollama && \
-    useradd -m -u 1000 -g ollama -s /bin/bash ollama || true
+# Check if ollama user exists, if not create it
+RUN id -u ollama &>/dev/null || (groupadd -f -g 1000 ollama && useradd -m -u 1000 -g ollama -s /bin/bash ollama)
 
 # Create necessary directories and set permissions
-RUN mkdir -p /root/.ollama /usr/share/ollama/.ollama && \
-    chown -R ollama:ollama /root/.ollama /usr/share/ollama/.ollama
+RUN mkdir -p /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama && \
+    chown -R ollama:ollama /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama 2>/dev/null || \
+    chown -R $(id -u ollama):$(id -g ollama) /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama
 
 # Set the models you want to pre-load
 ARG MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
