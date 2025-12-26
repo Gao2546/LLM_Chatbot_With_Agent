@@ -1,15 +1,21 @@
 FROM ollama/ollama:latest
 
 # Set environment
-ENV OLLAMA_MODELS=/usr/share/ollama/.ollama/models
+ENV OLLAMA_MODELS=/.ollama/models
 
 # Create user if it doesn't exist, suppress errors if it does
 RUN (groupadd -g 1000 ollama 2>/dev/null || true) && \
     (useradd -u 1000 -g 1000 -m -s /bin/bash ollama 2>/dev/null || true)
 
 # Create necessary directories and set permissions
-RUN mkdir -p /usr/share/ollama/.ollama/models /home/ollama/.ollama && \
-    chown -R 1000:1000 /usr/share/ollama/.ollama /home/ollama 2>/dev/null || true
+RUN mkdir -p /.ollama /.ollama/models /home/ollama/.ollama && \
+    chown -R 1000:1000 /.ollama /.ollama/models /home/ollama 2>/dev/null || true
+
+# Pre-generate SSH key as root, then change ownership
+RUN ssh-keygen -t ed25519 -f /.ollama/id_ed25519 -N "" && \
+    chown -R 1000:1000 /.ollama && \
+    chmod 600 /.ollama/id_ed25519 && \
+    chmod 644 /.ollama/id_ed25519.pub
 
 # Set the models you want to pre-load
 # ARG MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
@@ -25,6 +31,9 @@ USER 1000
 #         ollama pull $MODEL; \
 #     done && \
 #     pkill ollama
+
+RUN ollama serve && \
+    pkill ollama
 
 # Expose the standard port
 EXPOSE 11434
