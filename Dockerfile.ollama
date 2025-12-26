@@ -1,33 +1,29 @@
 FROM ollama/ollama:latest
 
-# Set environment
-ENV OLLAMA_MODELS=/.ollama/models
+# 1. Create a system user 'ollama'
+# -m creates the home directory
+# -u 1000 sets a standard UID
+RUN useradd -m -u 1001 ollama
 
-# Create user if it doesn't exist, suppress errors if it does
-RUN (groupadd -g 1000 ollama 2>/dev/null || true) && \
-    (useradd -u 1000 -g 1000 -m -s /bin/bash ollama 2>/dev/null || true)
+# 2. Prepare the directory where models are stored
+# By default, Ollama uses /root/.ollama. We change it to the new home directory.
+ENV OLLAMA_MODELS=/home/ollama/.ollama/models
+RUN mkdir -p /home/ollama/.ollama/models && \
+    chown -R ollama:ollama /home/ollama/
 
-# Create necessary directories and set permissions
-RUN mkdir -p /.ollama /.ollama/models /home/ollama/.ollama && \
-    chown -R 1000:1000 /.ollama /.ollama/models /home/ollama 2>/dev/null || true
+# 3. Switch to the non-root user
+USER ollama
 
-# Set the models you want to pre-load
-# ARG MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
+# 4. Set the working directory
+WORKDIR /home/ollama
 
-# Switch to UID 1000
-USER 1000
+RUN pwd
+RUN whoami
 
-# Start Ollama server, pull each model, then stop the server
-# RUN ollama serve & \
-#     sleep 10 && \
-#     for MODEL in $MODELS; do \
-#         echo "Pulling $MODEL..." && \
-#         ollama pull $MODEL; \
-#     done && \
-#     pkill ollama
-
-# Expose the standard port
+# Expose the default port
 EXPOSE 11434
 
-# Use the base image's default entrypoint
+# Ensure the server listens on all interfaces
+ENV OLLAMA_HOST=0.0.0.0
+
 ENTRYPOINT ["ollama", "serve"]
