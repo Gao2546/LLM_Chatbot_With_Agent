@@ -1,8 +1,9 @@
 FROM ollama/ollama:latest
 
+# Set environment
 ENV OLLAMA_MODELS=/usr/share/ollama/.ollama/models
 
-# Create user if it doesn't exist
+# Create user if it doesn't exist, suppress errors if it does
 RUN (groupadd -g 1000 ollama 2>/dev/null || true) && \
     (useradd -u 1000 -g 1000 -m -s /bin/bash ollama 2>/dev/null || true)
 
@@ -10,38 +11,23 @@ RUN (groupadd -g 1000 ollama 2>/dev/null || true) && \
 RUN mkdir -p /usr/share/ollama/.ollama/models /home/ollama/.ollama && \
     chown -R 1000:1000 /usr/share/ollama/.ollama /home/ollama 2>/dev/null || true
 
-# Create startup script
-COPY --chown=1000:1000 <<'EOF' /usr/local/bin/start-ollama.sh
-#!/bin/bash
-set -e
+# Set the models you want to pre-load
+# ARG MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
 
-# Start ollama in background
-ollama serve &
-OLLAMA_PID=$!
-
-# Wait for ollama to be ready
-sleep 10
-
-# Pull models if they don't exist
-MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
-
-for MODEL in $MODELS; do
-    if ! ollama list | grep -q "$MODEL"; then
-        echo "Pulling $MODEL..."
-        ollama pull $MODEL || echo "Failed to pull $MODEL, will retry later"
-    else
-        echo "$MODEL already exists"
-    fi
-done
-
-# Bring ollama to foreground
-wait $OLLAMA_PID
-EOF
-
-RUN chmod +x /usr/local/bin/start-ollama.sh
-
+# Switch to UID 1000
 USER 1000
 
+# Start Ollama server, pull each model, then stop the server
+# RUN ollama serve & \
+#     sleep 10 && \
+#     for MODEL in $MODELS; do \
+#         echo "Pulling $MODEL..." && \
+#         ollama pull $MODEL; \
+#     done && \
+#     pkill ollama
+
+# Expose the standard port
 EXPOSE 11434
 
-ENTRYPOINT ["/usr/local/bin/start-ollama.sh"]
+# Use the base image's default entrypoint
+ENTRYPOINT ["ollama", "serve"]
