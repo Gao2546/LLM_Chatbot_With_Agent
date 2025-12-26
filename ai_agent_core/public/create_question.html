@@ -1240,7 +1240,7 @@
             if (allQuestions.length === 0) {
                 const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
                 if (hotQuestionsDiv) {
-                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center; font-size: 13px;">No questions yet</div>';
                 }
                 return;
             }
@@ -1254,18 +1254,17 @@
                 })
                 .slice(0, 3);
 
-            // Update Hot Questions list
+            // Update Hot Questions list with consistent styling
             const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
             if (hotQuestionsDiv) {
-                hotQuestionsDiv.innerHTML = topQuestions.map(q => {
-                    const scoreDisplay = q.score || 0;
-                    const title = escapeHtml(q.question || q.question_title || 'Untitled');
-                    return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" title="Score: ${scoreDisplay}">${title}</a>`;
-                }).join('');
-
-                // If no questions, show placeholder
                 if (topQuestions.length === 0) {
-                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center; font-size: 13px;">No questions yet</div>';
+                } else {
+                    hotQuestionsDiv.innerHTML = topQuestions.map((q, idx) => {
+                        const scoreDisplay = q.score || 0;
+                        const title = escapeHtml(q.question || q.question_title || 'Untitled');
+                        return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" style="display: flex; align-items: center; gap: 8px;" title="Score: ${scoreDisplay}"><span style="background: #0a8276; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span><span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span></a>`;
+                    }).join('');
                 }
             }
         }

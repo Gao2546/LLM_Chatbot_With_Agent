@@ -164,6 +164,7 @@
 
     <script>
         let allQuestions = [];
+        let allQuestionsForHotQuestions = []; // Store ALL questions for Hot Questions (never filtered)
         let currentFilter = 'all';
         let currentSort = 'newest';
         let selectedTags = [];
@@ -438,8 +439,14 @@
                     ...q,
                     id: q.id || idx,
                     views: q.views || 0,
-                    score: q.verification_count || 0
+                    // Keep vote_score for Hot Questions sorting
+                    vote_score: q.vote_score || 0
                 }));
+                
+                // Store all questions for Hot Questions when loading 'all' questions
+                if (filter === 'all') {
+                    allQuestionsForHotQuestions = [...allQuestions];
+                }
                 
                 console.log(`Loaded ${allQuestions.length} questions with filter: ${filter}`);
                 
@@ -557,10 +564,15 @@
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
             
+            let filterChanged = false;
+            
             // Map tab to filter or sort
             if (tab === 'verified') {
                 // "Verified" tab should filter by verified items
-                currentFilter = 'verified';
+                if (currentFilter !== 'verified') {
+                    currentFilter = 'verified';
+                    filterChanged = true;
+                }
                 currentSort = 'newest';
             } else {
                 // Other tabs are sorting options (newest, score, views)
@@ -568,11 +580,16 @@
                 // Keep current filter or reset to 'all'
                 if (currentFilter === 'verified') {
                     currentFilter = 'all';
+                    filterChanged = true;
                 }
             }
             
-            // Reload questions with new filter/sort
-            loadQuestionsByFilter(currentFilter);
+            // Only reload if filter changed, otherwise just re-render with new sort
+            if (filterChanged) {
+                loadQuestionsByFilter(currentFilter);
+            } else {
+                renderQuestions();
+            }
         }
 
         function updateSort() {
@@ -584,8 +601,8 @@
             // Always show total from 'all' filter, not current filtered count
             document.getElementById('totalQuestions').textContent = totalQuestionCount;
             
-            // Count verified questions: self-verified OR fully verified requests
-            const verifiedCount = allQuestions.filter(q => {
+            // Count verified questions: self-verified OR fully verified requests (from all questions)
+            const verifiedCount = allQuestionsForHotQuestions.filter(q => {
                 // Self-verified
                 if (q.verification_type === 'self') {
                     return true;
@@ -605,10 +622,11 @@
         }
 
         function updateHotQuestions() {
-            if (allQuestions.length === 0) return;
+            // Always use ALL questions for Hot Questions (top 3 by score, regardless of filters)
+            if (allQuestionsForHotQuestions.length === 0) return;
             
             // Sort by vote_score (descending) and get top 3
-            const topQuestions = [...allQuestions]
+            const topQuestions = [...allQuestionsForHotQuestions]
                 .sort((a, b) => {
                     const scoreA = a.vote_score || a.score || 0;
                     const scoreB = b.vote_score || b.score || 0;
@@ -616,18 +634,17 @@
                 })
                 .slice(0, 3);
             
-            // Update Hot Questions list
+            // Update Hot Questions list with consistent styling
             const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
             if (hotQuestionsDiv) {
-                hotQuestionsDiv.innerHTML = topQuestions.map(q => {
-                    const scoreDisplay = q.score || 0;
-                    const title = esc(q.question || q.question_title || 'Untitled');
-                    return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" title="Score: ${scoreDisplay}">${title}</a>`;
-                }).join('');
-                
-                // If no questions, show placeholder
                 if (topQuestions.length === 0) {
-                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center; font-size: 13px;">No questions yet</div>';
+                } else {
+                    hotQuestionsDiv.innerHTML = topQuestions.map((q, idx) => {
+                        const scoreDisplay = q.score || 0;
+                        const title = esc(q.question || q.question_title || 'Untitled');
+                        return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" style="display: flex; align-items: center; gap: 8px;" title="Score: ${scoreDisplay}"><span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span></a>`;
+                    }).join('');
                 }
             }
         }

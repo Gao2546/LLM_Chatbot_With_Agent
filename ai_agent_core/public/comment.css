@@ -205,7 +205,7 @@
 
 .ai-answer-header {
     background: #f9f9f9;
-    color: #333;
+    color: #066b63;
     padding: 12px 16px;
     font-size: 14px;
     font-weight: 700;
@@ -268,7 +268,7 @@
 
 .verification-header {
     background: #f9f9f9;
-    color: #333;
+    color: #066b63;
     padding: 12px 16px;
     font-size: 14px;
     font-weight: 700;
@@ -526,7 +526,7 @@
 
 .related-questions-section-right .related-questions-header {
     background: #f9f9f9;
-    color: #333;
+    color: #066b63;
     padding: 12px 16px;
     margin: 0;
     font-size: 14px;
@@ -577,7 +577,7 @@
 
 .comments-section .comments-header {
     background: #f9f9f9;
-    color: #333;
+    color: #066b63;
     padding: 12px 16px;
     margin: 0;
     font-size: 14px;
