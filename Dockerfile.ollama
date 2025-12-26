@@ -1,22 +1,25 @@
 FROM ollama/ollama:latest
 
-# Check if ollama user exists, if not create it
-RUN id -u ollama &>/dev/null || (groupadd -f -g 1000 ollama && useradd -m -u 1000 -g ollama -s /bin/bash ollama)
+# Set environment
+ENV OLLAMA_MODELS=/usr/share/ollama/.ollama/models
+
+# Create user if it doesn't exist, suppress errors if it does
+RUN (groupadd -g 1000 ollama 2>/dev/null || true) && \
+    (useradd -u 1000 -g 1000 -m -s /bin/bash ollama 2>/dev/null || true)
 
 # Create necessary directories and set permissions
-RUN mkdir -p /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama && \
-    chown -R ollama:ollama /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama 2>/dev/null || \
-    chown -R $(id -u ollama):$(id -g ollama) /root/.ollama /usr/share/ollama/.ollama /home/ollama/.ollama
+RUN mkdir -p /usr/share/ollama/.ollama/models /home/ollama/.ollama && \
+    chown -R 1000:1000 /usr/share/ollama/.ollama /home/ollama 2>/dev/null || true
 
 # Set the models you want to pre-load
 ARG MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
 
-# Switch to ollama user
-USER ollama
+# Switch to UID 1000
+USER 1000
 
 # Start Ollama server, pull each model, then stop the server
 RUN ollama serve & \
-    sleep 5 && \
+    sleep 10 && \
     for MODEL in $MODELS; do \
         echo "Pulling $MODEL..." && \
         ollama pull $MODEL; \
