@@ -26,9 +26,6 @@ USER 1000
 #     done && \
 #     pkill ollama
 
-RUN ollama serve & \
-    pkill ollama
-
 # Expose the standard port
 EXPOSE 11434
 
