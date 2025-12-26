@@ -1,30 +1,53 @@
 FROM ollama/ollama:latest
 
-# 1. Create a system user 'ollama'
-# -m creates the home directory
-# -u 1000 sets a standard UID
-RUN useradd -m -u 1001 ollama
+ENV OLLAMA_MODELS=/.ollama/models
+ENV HOME=/home/ollama
 
-# 2. Prepare the directory where models are stored
-# By default, Ollama uses /root/.ollama. We change it to the new home directory.
-ENV OLLAMA_MODELS=/home/ollama/.ollama/models
-RUN mkdir -p /home/ollama/.ollama/models /.ollama /.ollama/models && \
-    chown -R ollama:ollama /home/ollama/ /.ollama /.ollama/models && \
-    chown -R 777 /home/ollama/ /.ollama /.ollama/models
+# Create directories with OpenShift-compatible permissions
+# chmod g=u allows any UID in group 0 (root group) to access
+RUN mkdir -p /.ollama \
+             /.ollama/models \
+             /home/ollama/.ollama && \
+    chgrp -R 0 /.ollama /home/ollama && \
+    chmod -R g=u /.ollama /home/ollama && \
+    chmod -R 775 /.ollama /home/ollama
 
-# 3. Switch to the non-root user
-USER ollama
+# Create startup script
+RUN cat > /usr/local/bin/docker-entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
 
-# 4. Set the working directory
-WORKDIR /home/ollama
+# Models to pull
+MODELS="gemma3:4b qwen3-vl:4b-instruct qwen3-embedding:0.6b qwen3-vl:2b-instruct"
 
-RUN pwd
-RUN whoami
+# Start ollama in background
+ollama serve &
+OLLAMA_PID=$!
 
-# Expose the default port
+# Wait for ollama to be ready
+echo "Waiting for Ollama to start..."
+sleep 10
+
+# Pull models if they don't exist
+for MODEL in $MODELS; do
+    if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+        echo "Pulling $MODEL..."
+        ollama pull $MODEL || echo "Warning: Failed to pull $MODEL"
+    else
+        echo "$MODEL already exists"
+    fi
+done
+
+echo "Ollama is ready!"
+
+# Keep ollama running
+wait $OLLAMA_PID
+EOF
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    chgrp 0 /usr/local/bin/docker-entrypoint.sh && \
+    chmod g=u /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 11434
 
-# Ensure the server listens on all interfaces
-ENV OLLAMA_HOST=0.0.0.0
-
-ENTRYPOINT ["ollama", "serve"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
