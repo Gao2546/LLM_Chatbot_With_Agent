@@ -784,6 +784,351 @@
             }
         }
 
+        // =====================================================
+        // ========== AI SUGGESTION FUNCTIONS ==========
+        // =====================================================
+
+        /**
+         * Load AI suggestion for the current question
+         * @param {number} questionId - The question ID
+         * @param {string} fallbackAnswer - The original answer to use as fallback
+         */
+        async function loadAISuggestion(questionId, fallbackAnswer) {
+            const aiAnswerContent = document.getElementById('aiAnswerContent');
+            if (!aiAnswerContent) return;
+
+            try {
+                // First try to get existing AI suggestion
+                const res = await fetch(`/api/ai-suggestion/${questionId}`);
+                const data = await res.json();
+
+                if (data.success && data.suggestion) {
+                    // Display existing AI suggestion
+                    renderAISuggestion(data.suggestion, fallbackAnswer);
+                } else {
+                    // No existing suggestion, try to generate one
+                    await generateAISuggestion(questionId, fallbackAnswer);
+                }
+            } catch (error) {
+                console.error('Error loading AI suggestion:', error);
+                // Fallback to original answer
+                renderAISuggestionFallback(fallbackAnswer);
+            }
+        }
+
+        /**
+         * Generate a new AI suggestion for the question
+         */
+        async function generateAISuggestion(questionId, fallbackAnswer) {
+            const aiAnswerContent = document.getElementById('aiAnswerContent');
+            if (!aiAnswerContent) return;
+
+            try {
+                // Show generating state
+                aiAnswerContent.innerHTML = `
+                    <div class="ai-answer-box">
+                        <div class="ai-answer-badge generating">
+                            <i class="fas fa-cog fa-spin"></i> Generating AI Suggestion...
+                        </div>
+                        <div class="ai-answer-text">
+                            <p style="color: #666;">Analyzing question and searching knowledge base...</p>
+                        </div>
+                    </div>
+                `;
+
+                const res = await fetch('/api/ai-generate-suggestion', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        questionId: parseInt(questionId),
+                        sourceType: 'create_question'
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success && data.suggestion) {
+                    renderAISuggestion({
+                        answer: data.suggestion.answer,
+                        model: data.suggestion.model,
+                        confidence: data.suggestion.confidence,
+                        sources: data.suggestion.sources,
+                        decision: 'pending',
+                        id: data.suggestion.id
+                    }, fallbackAnswer);
+                } else {
+                    // Failed to generate, use fallback
+                    renderAISuggestionFallback(fallbackAnswer);
+                }
+            } catch (error) {
+                console.error('Error generating AI suggestion:', error);
+                renderAISuggestionFallback(fallbackAnswer);
+            }
+        }
+
+        /**
+         * Render AI suggestion with full UI
+         */
+        function renderAISuggestion(suggestion, fallbackAnswer) {
+            const aiAnswerContent = document.getElementById('aiAnswerContent');
+            if (!aiAnswerContent) return;
+
+            let answer = suggestion.answer || fallbackAnswer || 'No AI answer available yet';
+            const confidence = suggestion.confidence ? Math.round(suggestion.confidence * 100) : null;
+            const model = suggestion.model || 'AI';
+            const decision = suggestion.decision || 'pending';
+            const suggestionId = suggestion.id;
+            const sourcesCount = suggestion.verifiedSourcesCount || suggestion.sources?.length || 0;
+            const sourcesData = suggestion.sources || [];
+
+            // Format answer - convert newlines to HTML if not already HTML
+            if (!answer.includes('<div') && !answer.includes('<p>') && !answer.includes('<ul>')) {
+                // Convert plain text with newlines to formatted HTML
+                answer = formatPlainTextAnswer(answer);
+            }
+
+            // Decision badge styling
+            let decisionBadge = '';
+            if (decision === 'accepted') {
+                decisionBadge = '<span class="decision-badge accepted"><i class="fas fa-check"></i> Accepted</span>';
+            } else if (decision === 'modified') {
+                decisionBadge = '<span class="decision-badge modified"><i class="fas fa-edit"></i> Modified</span>';
+            } else if (decision === 'rejected') {
+                decisionBadge = '<span class="decision-badge rejected"><i class="fas fa-times"></i> Rejected</span>';
+            }
+
+            // Sources section - clickable to show details
+            let sourcesHtml = '';
+            if (sourcesCount > 0) {
+                // Build sources list HTML
+                let sourcesListHtml = sourcesData.map((source, idx) => {
+                    const type = source.type || 'unknown';
+                    const questionId = source.questionId || '';
+                    const question = source.question || '';
+                    const verifiedBy = source.verifiedBy || '';
+                    const similarity = source.similarity ? Math.round(source.similarity * 100) : null;
+                    
+                    let sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
+                    let sourceLabel = 'Verified Answer';
+                    
+                    if (type === 'self_verified') {
+                        sourceIcon = '<i class="fas fa-user-check" style="color: #017374;"></i>';
+                        sourceLabel = 'Self-verified';
+                    } else if (type === 'similar_verified') {
+                        sourceIcon = '<i class="fas fa-search" style="color: #17a2b8;"></i>';
+                        sourceLabel = 'Similar Question';
+                    } else if (type === 'expert_verification') {
+                        sourceIcon = '<i class="fas fa-user-tie" style="color: #ffc107;"></i>';
+                        sourceLabel = 'Expert Verification';
+                    }
+                    
+                    const questionLink = questionId ? 
+                        `<a href="comment.html?id=${questionId}" style="color: #017374; text-decoration: none;" target="_blank">${question || 'View Question'}</a>` : 
+                        (question || 'Unknown source');
+                    
+                    const similarityBadge = similarity ? `<span style="background: #e8f5e9; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${similarity}% match</span>` : '';
+                    
+                    return `
+                        <div style="padding: 8px 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #017374;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                ${sourceIcon}
+                                <span style="font-weight: 500; font-size: 12px;">${sourceLabel}</span>
+                                ${similarityBadge}
+                            </div>
+                            <div style="font-size: 13px; color: #333;">
+                                ${questionLink}
+                            </div>
+                            ${verifiedBy ? `<div style="font-size: 11px; color: #666; margin-top: 4px;"><i class="fas fa-user" style="margin-right: 4px;"></i>${verifiedBy}</div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+                sourcesHtml = `
+                    <div class="ai-sources" style="margin-top: 12px;">
+                        <div onclick="toggleSourcesDetails()" style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #555; font-size: 13px; padding: 8px 12px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px;">
+                            <i class="fas fa-database" style="color: #017374;"></i>
+                            <span>อ้างอิงจาก ${sourcesCount} คำตอบที่ยืนยันแล้ว</span>
+                            <i class="fas fa-chevron-down" id="sourcesToggleIcon" style="margin-left: auto; transition: transform 0.3s; color: #999;"></i>
+                        </div>
+                        <div id="sourcesDetailsList" style="display: none; margin-top: 8px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff;">
+                            <div style="font-weight: 600; margin-bottom: 10px; color: #333; font-size: 13px;">
+                                <i class="fas fa-list"></i> แหล่งอ้างอิง:
+                            </div>
+                            ${sourcesListHtml}
+                        </div>
+                    </div>
+                `;
+            }
+
+            aiAnswerContent.innerHTML = `
+                <div class="ai-answer-box ${decision !== 'pending' ? 'reviewed' : ''}">
+                    <div class="ai-answer-badge">
+                        <i class="fas fa-sparkles"></i> AI GENERATED
+                        ${confidence !== null ? `<span class="confidence-badge">${confidence}% CONFIDENCE</span>` : ''}
+                    </div>
+                    ${decisionBadge}
+                    <div class="ai-answer-text">
+                        ${answer}
+                    </div>
+                    ${sourcesHtml}
+                    <div class="ai-answer-meta">
+                        <small>Generated by ${model} • This answer requires verification</small>
+                    </div>
+                </div>
+            `;
+        }
+
+        /**
+         * Toggle sources details visibility
+         */
+        function toggleSourcesDetails() {
+            const detailsList = document.getElementById('sourcesDetailsList');
+            const toggleIcon = document.getElementById('sourcesToggleIcon');
+            
+            if (detailsList && toggleIcon) {
+                if (detailsList.style.display === 'none') {
+                    detailsList.style.display = 'block';
+                    toggleIcon.style.transform = 'rotate(180deg)';
+                } else {
+                    detailsList.style.display = 'none';
+                    toggleIcon.style.transform = 'rotate(0deg)';
+                }
+            }
+        }
+
+        /**
+         * Format plain text answer to HTML with proper formatting
+         */
+        function formatPlainTextAnswer(text) {
+            if (!text) return '';
+            
+            // Clean up excessive whitespace first
+            let formatted = text
+                .replace(/\r\n/g, '\n')  // Normalize line endings
+                .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+                .trim();
+            
+            // Convert markdown-style headers (must be before other formatting)
+            formatted = formatted
+                .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^# (.+)$/gm, '<h2>$1</h2>');
+            
+            // Convert bold text with colon as section title (e.g., **หัวข้อ:**)
+            formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<span class="section-title">$1:</span>');
+            
+            // Convert remaining bold
+            formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            
+            // Convert italic
+            formatted = formatted.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
+            
+            // Convert special labels to bold
+            formatted = formatted
+                .replace(/ข้อจำกัด:/g, '<strong>ข้อจำกัด:</strong>')
+                .replace(/คำแนะนำ:/g, '<strong>คำแนะนำ:</strong>')
+                .replace(/หมายเหตุ:/g, '<strong>หมายเหตุ:</strong>')
+                .replace(/แหล่งข้อมูล:/g, '<strong>แหล่งข้อมูล:</strong>')
+                .replace(/วัตถุประสงค์:/g, '<strong>วัตถุประสงค์:</strong>')
+                .replace(/เงื่อนไข:/g, '<strong>เงื่อนไข:</strong>');
+            
+            // Split into paragraphs and process
+            const paragraphs = formatted.split(/\n\n+/);
+            const processedParagraphs = [];
+            
+            for (let para of paragraphs) {
+                para = para.trim();
+                if (!para) continue;
+                
+                // Check if it's already HTML
+                if (para.startsWith('<h') || para.startsWith('<div')) {
+                    processedParagraphs.push(para);
+                    continue;
+                }
+                
+                // Check if paragraph contains bullet points
+                const lines = para.split('\n');
+                const bulletLines = [];
+                const normalLines = [];
+                let inList = false;
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (/^[•\-\*]\s+/.test(trimmedLine)) {
+                        // Bullet point
+                        const content = trimmedLine.replace(/^[•\-\*]\s+/, '');
+                        if (!inList && normalLines.length > 0) {
+                            // Add normal lines as paragraph first
+                            processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
+                            normalLines.length = 0;
+                        }
+                        bulletLines.push('<li>' + content + '</li>');
+                        inList = true;
+                    } else if (/^\d+\.\s+/.test(trimmedLine)) {
+                        // Numbered list
+                        const content = trimmedLine.replace(/^\d+\.\s+/, '');
+                        if (!inList && normalLines.length > 0) {
+                            processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
+                            normalLines.length = 0;
+                        }
+                        bulletLines.push('<li>' + content + '</li>');
+                        inList = true;
+                    } else if (trimmedLine) {
+                        // Normal text
+                        if (inList && bulletLines.length > 0) {
+                            // Close previous list
+                            processedParagraphs.push('<ul>' + bulletLines.join('') + '</ul>');
+                            bulletLines.length = 0;
+                            inList = false;
+                        }
+                        normalLines.push(trimmedLine);
+                    }
+                }
+                
+                // Handle remaining content
+                if (bulletLines.length > 0) {
+                    processedParagraphs.push('<ul>' + bulletLines.join('') + '</ul>');
+                }
+                if (normalLines.length > 0) {
+                    processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
+                }
+            }
+            
+            const result = processedParagraphs.join('');
+            return result || '<p>' + text + '</p>';
+        }
+
+        /**
+         * Render fallback when no AI suggestion available
+         */
+        function renderAISuggestionFallback(fallbackAnswer) {
+            const aiAnswerContent = document.getElementById('aiAnswerContent');
+            if (!aiAnswerContent) return;
+
+            let formattedAnswer = fallbackAnswer || 'No AI answer available yet';
+            if (!formattedAnswer.includes('<div') && !formattedAnswer.includes('<p>')) {
+                formattedAnswer = formatPlainTextAnswer(formattedAnswer);
+            }
+
+            aiAnswerContent.innerHTML = `
+                <div class="ai-answer-box">
+                    <div class="ai-answer-badge">
+                        <i class="fas fa-sparkles"></i> AI GENERATED
+                    </div>
+                    <div class="ai-answer-text">
+                        ${formattedAnswer}
+                    </div>
+                    <div class="ai-answer-meta">
+                        <small>This answer was generated by AI and requires verification</small>
+                    </div>
+                </div>
+            `;
+        }
+
+        // =====================================================
+        // ========== END AI SUGGESTION FUNCTIONS ==========
+        // =====================================================
+
         function renderQuestionDetail(q) {
             currentQuestion = q; // Store for verify button visibility check
             
@@ -901,22 +1246,26 @@
                 </div>
             `;
 
-            // Render AI Answer (Right Column)
+            // Render AI Answer (Right Column) - Now loads from AI Suggestions API
             const aiAnswerContent = document.getElementById('aiAnswerContent');
             if (aiAnswerContent) {
+                // Show loading state first
                 aiAnswerContent.innerHTML = `
                     <div class="ai-answer-box">
                         <div class="ai-answer-badge">
                             <i class="fas fa-sparkles"></i> AI Generated
                         </div>
                         <div class="ai-answer-text">
-                            ${q.answer || 'No AI answer available yet'}
-                        </div>
-                        <div class="ai-answer-meta">
-                            <small>This answer was generated by AI and requires verification</small>
+                            <div style="display: flex; align-items: center; gap: 10px; color: #666;">
+                                <div class="spinner" style="width: 16px; height: 16px;"></div>
+                                Loading AI suggestion...
+                            </div>
                         </div>
                     </div>
                 `;
+                
+                // Load AI suggestion from API
+                loadAISuggestion(currentQuestionId, q.answer);
             }
 
             // Render Verification Status (Right Column)
@@ -977,24 +1326,8 @@
                 
                 attachmentsSection.style.display = 'block';
                 attachmentsSection.innerHTML = `
-                    <div class="attachments-header">
+                    <div class="attachments-link" onclick="showAttachmentsModal(${JSON.stringify(attachments).replace(/"/g, '&quot;')})">
                         <i class="fas fa-paperclip"></i> Attachments (${attachments.length})
-                    </div>
-                    <div class="attachments-list">
-                        ${attachments.map(att => `
-                            <div class="attachment-item">
-                                <div class="attachment-info">
-                                    <i class="fas ${getFileIcon(att.mime_type)}"></i>
-                                    <div class="attachment-details">
-                                        <div class="attachment-name">${att.file_name}</div>
-                                        <div class="attachment-meta">${formatFileSize(att.file_size_bytes)} • Uploaded by ${att.uploaded_by}</div>
-                                    </div>
-                                </div>
-                                <button class="attachment-preview-btn" onclick="previewAttachment(${att.id}, '${att.mime_type}', '${att.file_name}')" title="Preview file">
-                                    <i class="fas fa-eye"></i> Preview
-                                </button>
-                            </div>
-                        `).join('')}
                     </div>
                 `;
             } catch (e) {
@@ -1050,6 +1383,40 @@
                 console.error('Error previewing attachment:', e);
                 alert('Failed to preview file. Please try again.');
             }
+        }
+
+        // Show attachments in a simple modal
+        function showAttachmentsModal(attachments) {
+            // Remove existing modal if any
+            const existing = document.getElementById('attachmentsModal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'attachmentsModal';
+            modal.className = 'attachments-modal-overlay';
+            modal.innerHTML = `
+                <div class="attachments-modal">
+                    <div class="attachments-modal-header">
+                        <span><i class="fas fa-paperclip"></i> Attachments (${attachments.length})</span>
+                        <button onclick="document.getElementById('attachmentsModal').remove()">&times;</button>
+                    </div>
+                    <div class="attachments-modal-body">
+                        ${attachments.map(att => `
+                            <div class="attachments-modal-item" onclick="previewAttachment(${att.id}, '${att.mime_type}', '${att.file_name}')">
+                                <i class="fas ${getFileIcon(att.mime_type)}"></i>
+                                <span>${att.file_name}</span>
+                                <small>${formatFileSize(att.file_size_bytes)}</small>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Close when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
         }
 
         function setupVerificationButtons() {

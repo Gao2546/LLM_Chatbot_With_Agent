@@ -77,7 +77,7 @@ router.post('/login', async (req, res) => {
 
     // Create a session
     req.session.user = { id: user.id, username: user.username, socketId: socketId, isGuest: false };
-    console.log("Auth: session has create")
+    console.log(`Auth: Session created for user ${user.username} (ID: ${user.id})`)
 
     // await createUserFolder(user.id); // comment it in new patch
 

@@ -233,6 +233,28 @@ CREATE INDEX IF NOT EXISTS idx_comments_question
 ON comments(question_id);
 `;
 
+// Additional indexes for optimization
+const createOptimizationIndexesQuery = `
+-- Index for verified_answers commonly used filters
+CREATE INDEX IF NOT EXISTS idx_verified_answers_verification_type 
+ON verified_answers(verification_type);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_created_at 
+ON verified_answers(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_created_by 
+ON verified_answers(created_by);
+
+-- Composite index for common query patterns
+CREATE INDEX IF NOT EXISTS idx_verified_answers_type_embedding 
+ON verified_answers(verification_type) 
+WHERE question_embedding IS NOT NULL;
+
+-- Index for tags array search
+CREATE INDEX IF NOT EXISTS idx_verified_answers_tags 
+ON verified_answers USING GIN(tags);
+`;
+
 // Question Votes table for Stack Overflow style voting
 const createQuestionVotesTableQuery = `
 CREATE TABLE IF NOT EXISTS question_votes (
@@ -480,6 +502,10 @@ async function initializeDatabase() {
     await pool.query(createCommentsIndexQuery);
     console.log('DB: Comments index created or already exists');
 
+    // Create optimization indexes
+    await pool.query(createOptimizationIndexesQuery);
+    console.log('DB: Optimization indexes created or already exists');
+
     // Create question votes table
     await pool.query(createQuestionVotesTableQuery);
     console.log('DB: Question votes table created or already exists');
@@ -542,10 +568,19 @@ async function initializeDatabase() {
     `);
     console.log('DB: verification_type, requested_departments, due_date, and attachments columns added');
 
-    // DROP rating column if exists
+    // DROP rating column and its CHECK constraint if exists
     await pool.query(`
       DO $$
       BEGIN
+        -- Drop the CHECK constraint first if it exists
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'answer_verifications_rating_check'
+        ) THEN
+          ALTER TABLE answer_verifications DROP CONSTRAINT answer_verifications_rating_check;
+        END IF;
+        
+        -- Then drop the rating column if it exists
         IF EXISTS (
           SELECT 1 FROM information_schema.columns
           WHERE table_name='answer_verifications' AND column_name='rating'
@@ -555,7 +590,7 @@ async function initializeDatabase() {
       END
       $$;
     `);
-    console.log('DB: rating column removed from answer_verifications table');
+    console.log('DB: rating column and constraint removed from answer_verifications table');
 
     // DROP department, due_date columns if exists from verified_answers
     // But keep created_by column if it exists
@@ -636,6 +671,9 @@ async function initializeDatabase() {
   try {
     await initializeDatabase();
     console.log('✅ Database initialization complete');
+    
+    // Initialize AI Suggestions tables (NEW)
+    await initializeAISuggestionsTables();
   } catch (error) {
     console.error('❌ FATAL: Database initialization failed:', error);
     process.exit(1);
@@ -1187,15 +1225,16 @@ async function saveVerifiedAnswer(
       // Answer already exists - get its ID
       answerId = existingAnswer.rows[0].id;
       
-      // Update verification_type and requested_departments if provided
-      if (verificationType || requestedDepartments) {
-        await pool.query(
-          `UPDATE verified_answers 
-           SET verification_type = $1, requested_departments = $2
-           WHERE id = $3`,
-          [verificationType || 'self', requestedDepartments || [], answerId]
-        );
-      }
+      // Update verification_type, requested_departments, and tags if provided
+      await pool.query(
+        `UPDATE verified_answers 
+         SET verification_type = COALESCE($1, verification_type),
+             requested_departments = COALESCE($2, requested_departments),
+             tags = COALESCE($3, tags),
+             last_updated_at = NOW()
+         WHERE id = $4`,
+        [verificationType || 'self', requestedDepartments || [], tags || [], answerId]
+      );
     } else {
       // Answer doesn't exist - create new one
       // Format embeddings as PostgreSQL vector string (allow NULL if no embedding)
@@ -1305,6 +1344,7 @@ async function triggerNotificationsForQuestion(
 /**
  * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
  * Searches for verified answers using vector similarity
+ * Searches both question_embedding AND answer_embedding for better matching
  */
 async function searchVerifiedAnswers(
   questionEmbedding: number[],
@@ -1321,15 +1361,23 @@ async function searchVerifiedAnswers(
     // Format embedding as PostgreSQL vector string
     const embeddingStr = `[${questionEmbedding.join(',')}]`;
 
+    // Search using BOTH question and answer embeddings, take the best match
     const result = await pool.query(
       `SELECT 
         id,
         question,
         answer,
         created_by,
-        1 - (question_embedding <-> $1) as similarity
+        GREATEST(
+          COALESCE(1 - (question_embedding <-> $1), 0),
+          COALESCE(1 - (answer_embedding <-> $1), 0)
+        ) as similarity
        FROM verified_answers
-       WHERE 1 - (question_embedding <-> $1) > $2
+       WHERE question_embedding IS NOT NULL
+         AND (
+           1 - (question_embedding <-> $1) > $2
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1) > $2)
+         )
        ORDER BY similarity DESC
        LIMIT $3`,
       [embeddingStr, threshold, limit]
@@ -1846,6 +1894,269 @@ async function setFileProcessStatus(fileId: number, status: string) {
   }
 }
 
+// =====================================================
+// ========== AI SUGGESTIONS FUNCTIONS ==========
+// =====================================================
+// These functions handle AI-generated suggestions for Q&A
+// Separate from main chat flow - used in Q&A Detail page
+// =====================================================
+
+/**
+ * Creates the AI suggestions tables if they don't exist
+ */
+async function initializeAISuggestionsTables() {
+  try {
+    // Create ai_suggestions table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_suggestions (
+        id SERIAL PRIMARY KEY,
+        verified_answer_id INT REFERENCES verified_answers(id) ON DELETE CASCADE,
+        source_type VARCHAR(50) NOT NULL DEFAULT 'create_question',
+        original_chat_message TEXT,
+        original_ai_response TEXT,
+        ai_generated_answer TEXT NOT NULL,
+        ai_model_used VARCHAR(100),
+        ai_confidence FLOAT DEFAULT 0.0,
+        sources_used JSONB DEFAULT '[]'::jsonb,
+        human_final_answer TEXT,
+        decision VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        reviewed_at TIMESTAMP,
+        reviewed_by VARCHAR(255)
+      );
+    `);
+
+    // Create ai_learning_analysis table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_learning_analysis (
+        id SERIAL PRIMARY KEY,
+        ai_suggestion_id INT NOT NULL REFERENCES ai_suggestions(id) ON DELETE CASCADE,
+        conflict_type VARCHAR(100),
+        conflict_details TEXT,
+        severity VARCHAR(50) DEFAULT 'minor',
+        similarity_score FLOAT,
+        key_differences JSONB DEFAULT '[]'::jsonb,
+        suggested_prompt_fix TEXT,
+        suggested_routing TEXT,
+        error_tags TEXT[],
+        analyzed_at TIMESTAMP DEFAULT NOW(),
+        analyzed_by VARCHAR(100) DEFAULT 'auto'
+      );
+    `);
+
+    // Create indexes
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_verified_answer ON ai_suggestions(verified_answer_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_decision ON ai_suggestions(decision);
+      CREATE INDEX IF NOT EXISTS idx_ai_learning_analysis_suggestion ON ai_learning_analysis(ai_suggestion_id);
+    `);
+
+    console.log('✅ AI Suggestions tables initialized');
+  } catch (error) {
+    console.error('Error initializing AI suggestions tables:', error);
+    throw error;
+  }
+}
+
+/**
+ * Save an AI-generated suggestion for a question
+ * @param verifiedAnswerId The ID of the verified_answers record
+ * @param aiGeneratedAnswer The answer AI generated
+ * @param sourceType 'chat_verify' or 'create_question'
+ * @param options Additional options
+ */
+async function saveAISuggestion(
+  verifiedAnswerId: number,
+  aiGeneratedAnswer: string,
+  sourceType: 'chat_verify' | 'create_question' = 'create_question',
+  options?: {
+    originalChatMessage?: string;
+    originalAiResponse?: string;
+    aiModelUsed?: string;
+    aiConfidence?: number;
+    sourcesUsed?: any[];
+  }
+) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO ai_suggestions (
+        verified_answer_id, ai_generated_answer, source_type,
+        original_chat_message, original_ai_response, 
+        ai_model_used, ai_confidence, sources_used
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id`,
+      [
+        verifiedAnswerId,
+        aiGeneratedAnswer,
+        sourceType,
+        options?.originalChatMessage || null,
+        options?.originalAiResponse || null,
+        options?.aiModelUsed || null,
+        options?.aiConfidence || 0,
+        JSON.stringify(options?.sourcesUsed || [])
+      ]
+    );
+    
+    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}`);
+    return { success: true, suggestionId: result.rows[0].id };
+  } catch (error) {
+    console.error('Error saving AI suggestion:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get AI suggestion for a specific question
+ * @param verifiedAnswerId The ID of the verified_answers record
+ */
+async function getAISuggestion(verifiedAnswerId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM ai_suggestions 
+       WHERE verified_answer_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [verifiedAnswerId]
+    );
+    
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting AI suggestion:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update AI suggestion decision after human review
+ * @param suggestionId The AI suggestion ID
+ * @param decision 'accepted' | 'modified' | 'rejected'
+ * @param humanFinalAnswer The final answer after human review
+ * @param reviewedBy Username of the reviewer
+ */
+async function updateAISuggestionDecision(
+  suggestionId: number,
+  decision: 'accepted' | 'modified' | 'rejected',
+  humanFinalAnswer: string,
+  reviewedBy: string
+) {
+  try {
+    await pool.query(
+      `UPDATE ai_suggestions 
+       SET decision = $1, human_final_answer = $2, reviewed_at = NOW(), reviewed_by = $3
+       WHERE id = $4`,
+      [decision, humanFinalAnswer, reviewedBy, suggestionId]
+    );
+    
+    console.log(`✅ AI suggestion ${suggestionId} decision updated to: ${decision}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating AI suggestion decision:', error);
+    throw error;
+  }
+}
+
+/**
+ * Save AI learning analysis for a suggestion
+ * This is used to track AI mistakes and improve the model
+ */
+async function saveAILearningAnalysis(
+  suggestionId: number,
+  analysis: {
+    conflictType?: string;
+    conflictDetails?: string;
+    severity?: 'minor' | 'major' | 'critical';
+    similarityScore?: number;
+    keyDifferences?: any[];
+    suggestedPromptFix?: string;
+    suggestedRouting?: string;
+    errorTags?: string[];
+    analyzedBy?: string;
+  }
+) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO ai_learning_analysis (
+        ai_suggestion_id, conflict_type, conflict_details, severity,
+        similarity_score, key_differences, suggested_prompt_fix,
+        suggested_routing, error_tags, analyzed_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id`,
+      [
+        suggestionId,
+        analysis.conflictType || null,
+        analysis.conflictDetails || null,
+        analysis.severity || 'minor',
+        analysis.similarityScore || null,
+        JSON.stringify(analysis.keyDifferences || []),
+        analysis.suggestedPromptFix || null,
+        analysis.suggestedRouting || null,
+        analysis.errorTags || [],
+        analysis.analyzedBy || 'auto'
+      ]
+    );
+    
+    console.log(`✅ AI learning analysis saved for suggestion ${suggestionId}`);
+    return { success: true, analysisId: result.rows[0].id };
+  } catch (error) {
+    console.error('Error saving AI learning analysis:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get AI performance summary (for dashboard)
+ */
+async function getAIPerformanceSummary(days: number = 30) {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        ai_model_used,
+        COUNT(*) as total_suggestions,
+        COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
+        COUNT(CASE WHEN decision = 'modified' THEN 1 END) as modified_count,
+        COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count,
+        COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count
+       FROM ai_suggestions
+       WHERE created_at >= NOW() - INTERVAL '${days} days'
+       GROUP BY ai_model_used`
+    );
+    
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting AI performance summary:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get common conflict patterns from AI learning analysis
+ */
+async function getAIConflictPatterns() {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        conflict_type,
+        severity,
+        COUNT(*) as occurrence_count
+       FROM ai_learning_analysis
+       WHERE conflict_type IS NOT NULL
+       GROUP BY conflict_type, severity
+       ORDER BY occurrence_count DESC`
+    );
+    
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting AI conflict patterns:', error);
+    throw error;
+  }
+}
+
+// =====================================================
+// ========== END AI SUGGESTIONS FUNCTIONS ==========
+// =====================================================
+
 // These startup cleanup functions can be run if needed.
 export {
   // User Functions
@@ -1904,6 +2215,15 @@ export {
 
   // Hot Tags Function
   getHotTags,
+
+  // AI Suggestions Functions (NEW - Q&A AI Suggests)
+  initializeAISuggestionsTables,
+  saveAISuggestion,
+  getAISuggestion,
+  updateAISuggestionDecision,
+  saveAILearningAnalysis,
+  getAIPerformanceSummary,
+  getAIConflictPatterns,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

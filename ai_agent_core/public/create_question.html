@@ -1490,6 +1490,9 @@
             }
         }
 
+        // Tags array - must be declared before submitQuestion uses it
+        let customTags = [];
+
         // Main submit function
         async function submitQuestion() {
             const title = document.getElementById('questionTitle').value.trim();
@@ -1621,9 +1624,7 @@
             }
         }
 
-        // Tags functionality
-        let customTags = [];
-
+        // Tags functionality (customTags is declared above submitQuestion)
         function addCustomTag() {
             const input = document.getElementById('questionTags');
             const tagName = input.value.trim();
