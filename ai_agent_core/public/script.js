@@ -1368,7 +1368,7 @@ function displayMessage(text, className) {
         messageElement.appendChild(editButton);
     }
     
-    // Add Verify + Community buttons for AI messages
+    // Add Verify button for AI messages
     if (className === 'ai-message') {
         const buttonsDiv = document.createElement('div');
         buttonsDiv.className = 'message-buttons';
@@ -1381,25 +1381,13 @@ function displayMessage(text, className) {
         verifyBtn.style.display = 'none';
         verifyBtn.onclick = () => verifyAnswer(text);
         
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = () => goToCommunity(text);
-        communityBtn.onclick = () => window.open('/communities');
-        
         buttonsDiv.appendChild(verifyBtn);
-        buttonsDiv.appendChild(communityBtn);
         
         messageElement.addEventListener('mouseenter', () => {
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         messageElement.appendChild(buttonsDiv);
@@ -1543,27 +1531,14 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         verifyBtn.style.display = 'none';
         verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
         
-        // Community button
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = () => goToCommunity(messageElement.dataset.fullText || text);
-        // communityBtn.onclick = () => fetch('/community');
-        communityBtn.onclick = () => window.open('/communities');
-        
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
             copyButton.style.display = 'inline-flex';
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             copyButton.style.display = 'none';
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         // Copy button click handler
@@ -1581,7 +1556,6 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         
         messageElement.appendChild(copyButton);
         messageElement.appendChild(verifyBtn);
-        messageElement.appendChild(communityBtn);
     }
 
     // Add edit button for user messages
@@ -1703,35 +1677,18 @@ function displayMarkdownMessageStream(text, messageElement) {
             verifyAnswer(answer, this); 
         };
         
-        // Community button
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = function() { 
-        //     const answer = messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
-        //     goToCommunity(answer); 
-        // };
-        // communityBtn.onclick = () => fetch('/community');
-        communityBtn.onclick = () => window.open('/communities');
-        
         // Add buttons directly to messageElement
         messageElement.appendChild(copyButton);
         messageElement.appendChild(verifyBtn);
-        messageElement.appendChild(communityBtn);
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
             copyButton.style.display = 'inline-flex';
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             copyButton.style.display = 'none';
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         // Copy button click handler

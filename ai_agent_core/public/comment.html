@@ -610,20 +610,13 @@
                         usernameDisplay.style.display = 'none';
                     }
                 } else {
-                    currentUserId = null;
-                    currentUsername = 'Guest';
-                    if (loginBtn) {
-                        loginBtn.textContent = 'Login';
-                        loginBtn.href = '/auth/login';
-                    }
-                    if (usernameDisplay) {
-                        usernameDisplay.style.display = 'none';
-                    }
+                    // Not logged in, redirect to login
+                    window.location.href = '/auth/login';
+                    return;
                 }
             } catch (e) {
                 console.log('User not logged in:', e);
-                currentUserId = null;
-                currentUsername = 'Guest';
+                window.location.href = '/auth/login';
             }
         }
 
@@ -917,6 +910,9 @@
                     } else if (type === 'similar_verified') {
                         sourceIcon = '<i class="fas fa-search" style="color: #17a2b8;"></i>';
                         sourceLabel = 'Similar Question';
+                    } else if (type === 'similar_unverified') {
+                        sourceIcon = '<i class="fas fa-clock" style="color: #ffc107;"></i>';
+                        sourceLabel = 'Similar Question (รอยืนยัน)';
                     } else if (type === 'expert_verification') {
                         sourceIcon = '<i class="fas fa-user-tie" style="color: #ffc107;"></i>';
                         sourceLabel = 'Expert Verification';
@@ -962,11 +958,13 @@
 
             aiAnswerContent.innerHTML = `
                 <div class="ai-answer-box ${decision !== 'pending' ? 'reviewed' : ''}">
-                    <div class="ai-answer-badge">
-                        <i class="fas fa-sparkles"></i> AI GENERATED
-                        ${confidence !== null ? `<span class="confidence-badge">${confidence}% CONFIDENCE</span>` : ''}
+                    <div class="ai-answer-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+                        <div class="ai-answer-badge">
+                            <i class="fas fa-sparkles"></i> AI GENERATED
+                            ${confidence !== null ? `<span class="confidence-badge">${confidence}% CONFIDENCE</span>` : ''}
+                        </div>
+                        ${decisionBadge}
                     </div>
-                    ${decisionBadge}
                     <div class="ai-answer-text">
                         ${answer}
                     </div>
@@ -1201,9 +1199,10 @@
 
                     <div class="detail-question-content">${q.answer || 'No content available'}</div>
 
-                    <div class="detail-question-tags">
+                    <!-- Tags hidden in detail view - only show in community list -->
+                    <!-- <div class="detail-question-tags">
                         ${(q.tags || []).map(tag => `<span class="tag-badge">${tag}</span>`).join('')}
-                    </div>
+                    </div> -->
 
                     <div id="attachmentsSection" class="detail-attachments-section"></div>
 

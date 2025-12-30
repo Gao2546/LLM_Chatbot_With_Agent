@@ -1770,7 +1770,7 @@ strong {
 /* Preprocess Button Styles */
 #preprocessButton {
     width: 100%;
-    margin-bottom: 15px; 
+    margin-bottom: 10px; 
     padding: 10px 15px;
     background-color: var(--input-bg); 
     color: var(--text-color);
@@ -1799,6 +1799,42 @@ strong {
 }
 
 #preprocessButton:active {
+    transform: scale(0.98);
+    background-color: var(--input-bg);
+}
+
+/* Q&A Community Button Styles */
+#communityButton {
+    width: 100%;
+    margin-bottom: 15px; 
+    padding: 10px 15px;
+    background-color: var(--input-bg); 
+    color: var(--text-color);
+    border: 1px solid var(--border-color); 
+    border-radius: 8px; 
+    cursor: pointer;
+    font-size: 1em;
+    transition: all 0.2s ease, transform 0.1s ease;
+    
+    display: flex;
+    align-items: center;
+    justify-content: center; 
+    gap: 10px; 
+    
+    overflow-x: hidden;
+    white-space: nowrap;
+    text-overflow: clip;
+}
+
+#communityButton:hover {
+    background-color: var(--border-color); 
+    border-color: var(--accent-color); 
+    color: var(--accent-color);
+    transform: scale(1.02); 
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#communityButton:active {
     transform: scale(0.98);
     background-color: var(--input-bg);
 }

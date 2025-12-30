@@ -3332,8 +3332,17 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
     const questionEmbeddingStr = questionEmbedding.length > 0 ? `[${questionEmbedding.join(',')}]` : null;
     const answerEmbeddingStr = answerEmbedding.length > 0 ? `[${answerEmbedding.join(',')}]` : null;
 
+    // Parse tags - handle both string and array formats
+    let tagsArray: string[] = [];
+    if (Array.isArray(tags)) {
+      tagsArray = tags.filter((t: any) => t && typeof t === 'string' && t.trim());
+    } else if (typeof tags === 'string' && tags.trim()) {
+      // Split comma-separated string into array
+      tagsArray = tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+    }
+    console.log('📝 Tags parsed:', tagsArray);
+
     // Insert the question with embeddings
-    const tagsArray = Array.isArray(tags) ? tags : [];
     const result = await pool.query(`
       INSERT INTO verified_answers 
       (question, answer, tags, department, verification_type, requested_departments, due_date, created_by, question_embedding, answer_embedding, created_at)
@@ -3482,11 +3491,282 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
       console.warn('Could not trigger notifications:', notifError);
     }
 
+    // Send response IMMEDIATELY - LLM Judge runs async after this
     res.json({ 
       success: true, 
       message: 'Verification submitted successfully',
-      verification: result.rows[0]
+      verification: result.rows[0],
+      asyncAnalysis: true // Indicate analysis is running async
     });
+
+    // ========== LLM AS JUDGE: AI Learning Analysis (ASYNC - after response) ==========
+    // Run in background using setImmediate to not block the response
+    setImmediate(async () => {
+      try {
+        const aiSuggestion = await getAISuggestion(parseInt(questionId));
+        
+        if (aiSuggestion && aiSuggestion.decision === 'pending') {
+          // Get the question info including requested departments
+          const questionResult = await pool.query(
+            `SELECT question, answer, verification_type, requested_departments 
+             FROM verified_answers WHERE id = $1`,
+            [questionId]
+          );
+          const questionData = questionResult.rows[0];
+          const originalQuestion = questionData?.question || '';
+          const humanAnswer = questionData?.answer || '';
+          const aiAnswer = aiSuggestion.ai_generated_answer || '';
+          const verificationType = questionData?.verification_type || 'self';
+        const requestedDepartments: string[] = questionData?.requested_departments || [];
+        
+        // Check if verification is complete
+        let isVerificationComplete = false;
+        
+        if (verificationType === 'self') {
+          // Self-verified questions are always complete
+          isVerificationComplete = true;
+        } else if (verificationType === 'request' && requestedDepartments.length > 0) {
+          // Check how many departments have verified
+          const verificationCountResult = await pool.query(
+            `SELECT COUNT(DISTINCT requested_departments[1]) as verified_count
+             FROM answer_verifications 
+             WHERE verified_answer_id = $1 
+             AND verification_type = 'verification'`,
+            [questionId]
+          );
+          const verifiedCount = parseInt(verificationCountResult.rows[0]?.verified_count || '0');
+          const requestedCount = requestedDepartments.length;
+          
+          isVerificationComplete = verifiedCount >= requestedCount;
+          console.log(`📋 Verification status: ${verifiedCount}/${requestedCount} departments verified`);
+        } else {
+          // No specific request, consider complete after first verification
+          isVerificationComplete = true;
+        }
+        
+        // Only run LLM Judge when verification is complete
+        if (!isVerificationComplete) {
+          console.log(`⏳ Waiting for more verifications (${requestedDepartments.length} requested)`);
+        } else {
+          console.log(`✅ All verifications complete! Running LLM Judge analysis...`);
+          
+          // Collect all expert comments for comprehensive analysis
+          const allVerifications = await pool.query(
+            `SELECT commenter_name, comment, requested_departments 
+             FROM answer_verifications 
+             WHERE verified_answer_id = $1 
+             AND verification_type = 'verification'
+             ORDER BY created_at`,
+            [questionId]
+          );
+          
+          const expertComments = allVerifications.rows
+            .map(v => `- ${v.commenter_name} (${v.requested_departments?.[0] || 'General'}): ${v.comment || 'ยืนยันแล้ว'}`)
+            .join('\n');
+        
+          // Use LLM to judge the difference
+          const judgePrompt = `คุณเป็นผู้ตรวจสอบคุณภาพคำตอบ AI โปรดวิเคราะห์ความแตกต่างระหว่างคำตอบ AI กับคำตอบจากผู้เชี่ยวชาญ
+
+คำถาม: ${originalQuestion}
+
+คำตอบจาก AI:
+${aiAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+คำตอบจากผู้เชี่ยวชาญ (คำตอบที่ถูกต้อง):
+${humanAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+ความเห็นจากผู้เชี่ยวชาญที่ยืนยัน:
+${expertComments || 'ไม่มีความเห็นเพิ่มเติม'}
+
+**เกณฑ์การตัดสิน:**
+- "accepted" = AI ตอบถูกต้อง ครบถ้วน ตรงคำถาม (ใช้ได้เลย)
+- "modified" = AI ตอบถูกบางส่วน หรือ ตอบไม่ตรงคำถาม หรือ ข้อมูลไม่ครบ (ต้องแก้ไขเพิ่มเติม) ← ใช้กรณีนี้ถ้า AI ให้ข้อมูลที่ถูกต้องแต่ไม่ตอบคำถามโดยตรง
+- "rejected" = AI ให้ข้อมูลที่ผิดพลาด/เป็นเท็จ (ข้อมูลผิดจริงๆ ไม่ใช่แค่ไม่ครบ)
+
+**conflictType:**
+- "none" = ไม่มีปัญหา
+- "off_topic" = ตอบไม่ตรงคำถาม (แต่ข้อมูลที่ให้ไม่ผิด)
+- "incomplete_answer" = ตอบไม่ครบถ้วน
+- "factual_error" = ข้อมูลผิดพลาดจริง
+- "wrong_context" = เข้าใจบริบทผิด
+- "outdated_info" = ข้อมูลเก่า/ไม่อัปเดต
+- "style_difference" = แค่สไตล์การเขียนต่าง
+
+กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
+{
+  "decision": "accepted" หรือ "modified" หรือ "rejected",
+  "similarityPercent": ตัวเลข 0-100,
+  "conflictType": "none/off_topic/incomplete_answer/factual_error/wrong_context/outdated_info/style_difference",
+  "severity": "none" หรือ "minor" หรือ "major" หรือ "critical",
+  "keyDifferences": ["จุดที่ต่าง 1", "จุดที่ต่าง 2"],
+  "analysis": "อธิบายสั้นๆ ว่า AI ตอบผิดตรงไหน หรือถูกต้อง",
+  "suggestedImprovement": "คำแนะนำในการปรับปรุง prompt หรือ AI",
+  "aiInfoCorrect": true หรือ false (ข้อมูลที่ AI ให้ถูกต้องไหม แม้จะไม่ตรงคำถาม)
+}
+
+ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีคำอธิบายเพิ่มเติม`;
+
+          let judgeResult: any = null;
+          
+          // Use Google Gemini Flash for fast LLM Judge (much faster than Ollama)
+          try {
+            const geminiResult = await ai.models.generateContent({
+              model: 'gemini-2.0-flash',
+              contents: judgePrompt,
+              config: {
+                maxOutputTokens: 1000,
+                temperature: 0.1,
+              },
+            });
+            
+            const responseText = geminiResult.text || '';
+            
+            // Extract JSON from response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              judgeResult = JSON.parse(jsonMatch[0]);
+            }
+          } catch (llmError) {
+            console.warn('LLM Judge (Gemini) failed, using fallback:', llmError);
+          }
+          
+          // Fallback: Smarter text comparison if LLM fails
+          if (!judgeResult) {
+            const normalizeText = (text: string) => 
+              text.toLowerCase().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+            
+            const humanNorm = normalizeText(humanAnswer);
+            const aiNorm = normalizeText(aiAnswer);
+            
+            // Calculate word overlap (Jaccard similarity)
+            const humanWords = new Set(humanNorm.split(' ').filter(w => w.length > 2));
+            const aiWords = new Set(aiNorm.split(' ').filter(w => w.length > 2));
+            const intersection = [...humanWords].filter(w => aiWords.has(w));
+            const union = new Set([...humanWords, ...aiWords]);
+            const jaccardSimilarity = union.size > 0 ? (intersection.length / union.size) * 100 : 0;
+            
+            // Check if AI mentions the same key technical terms
+            const keyTerms = ['digital core', 'analog block', 'i/o ring', 'power distribution', 
+                             'die', 'wafer', 'pad', 'specification', 'design'];
+            const aiHasKeyTerms = keyTerms.filter(term => aiNorm.includes(term));
+            const humanHasKeyTerms = keyTerms.filter(term => humanNorm.includes(term));
+            const keyTermOverlap = aiHasKeyTerms.filter(t => humanHasKeyTerms.includes(t));
+            const keyTermScore = humanHasKeyTerms.length > 0 ? 
+              (keyTermOverlap.length / humanHasKeyTerms.length) * 100 : 0;
+            
+            // Combined score: 50% Jaccard + 50% key terms
+            const combinedScore = (jaccardSimilarity * 0.4) + (keyTermScore * 0.6);
+            
+            // More lenient decision criteria for fallback
+            // Since we can't use LLM to understand context, we should be conservative
+            // and use "modified" instead of "rejected" when there's some overlap
+            let decision: 'accepted' | 'modified' | 'rejected';
+            let conflictType: string;
+            let severity: string;
+            
+            if (combinedScore > 60) {
+              decision = 'accepted';
+              conflictType = 'none';
+              severity = 'none';
+            } else if (combinedScore > 25 || keyTermOverlap.length >= 2) {
+              // If AI mentions at least 2 key terms correctly, it's not completely wrong
+              decision = 'modified';
+              conflictType = 'incomplete_answer';
+              severity = 'minor';
+            } else if (keyTermOverlap.length === 0 && humanHasKeyTerms.length > 0) {
+              // AI missed all key terms - likely off topic or wrong context
+              decision = 'rejected';
+              conflictType = 'off_topic';
+              severity = 'major';
+            } else {
+              // Low similarity but has some overlap - likely factual differences
+              decision = 'rejected';
+              conflictType = 'factual_error';
+              severity = 'major';
+            }
+            
+            console.log(`📊 Fallback analysis: Jaccard=${jaccardSimilarity.toFixed(1)}%, KeyTerms=${keyTermScore.toFixed(1)}%, Combined=${combinedScore.toFixed(1)}%`);
+            console.log(`📊 Key terms overlap: AI[${aiHasKeyTerms.join(', ')}] ∩ Human[${humanHasKeyTerms.join(', ')}] = [${keyTermOverlap.join(', ')}]`);
+            
+            // Generate appropriate improvement suggestion based on conflict type
+            let suggestedImprovement = '';
+            if (conflictType === 'off_topic') {
+              suggestedImprovement = 'ปรับปรุง prompt ให้เข้าใจคำถามและตอบตรงประเด็นมากขึ้น เพิ่ม context ที่เกี่ยวข้องกับ domain';
+            } else if (conflictType === 'incomplete_answer') {
+              suggestedImprovement = 'เพิ่มข้อมูลในฐานความรู้เกี่ยวกับหัวข้อนี้ให้ครบถ้วนมากขึ้น';
+            } else if (conflictType === 'factual_error') {
+              suggestedImprovement = 'ตรวจสอบและอัปเดตข้อมูลในฐานความรู้ ข้อมูลปัจจุบันอาจไม่ถูกต้อง';
+            } else {
+              suggestedImprovement = 'พิจารณาเพิ่ม verified answers ใน domain นี้เพื่อปรับปรุงคุณภาพ';
+            }
+            
+            judgeResult = {
+              decision,
+              similarityPercent: Math.round(combinedScore),
+              conflictType,
+              severity,
+              keyDifferences: keyTermOverlap.length < humanHasKeyTerms.length ? 
+                [`AI ขาดคำสำคัญ: ${humanHasKeyTerms.filter(t => !keyTermOverlap.includes(t)).join(', ')}`] : [],
+              analysis: `Fallback analysis - Combined score: ${combinedScore.toFixed(1)}% (Jaccard: ${jaccardSimilarity.toFixed(1)}%, Key terms: ${keyTermScore.toFixed(1)}%)`,
+              suggestedImprovement: suggestedImprovement,
+              aiInfoCorrect: keyTermOverlap.length >= 2
+            };
+          }
+          
+          // Update AI suggestion decision
+          await updateAISuggestionDecision(
+            aiSuggestion.id,
+            judgeResult.decision as 'accepted' | 'modified' | 'rejected',
+            humanAnswer,
+            commenterName || 'LLM-Judge'
+          );
+          
+          // Save learning analysis for ALL decisions (including accepted)
+          // This helps track AI performance over time
+          // Determine suggested routing based on conflict type
+          const suggestedRouting = judgeResult.conflictType === 'factual_error' ? 'expert_review' :
+                                   judgeResult.conflictType === 'off_topic' ? 'prompt_refinement' :
+                                   judgeResult.conflictType === 'incomplete_answer' ? 'knowledge_expansion' :
+                                   judgeResult.conflictType === 'outdated_info' ? 'data_update' :
+                                   judgeResult.conflictType === 'wrong_context' ? 'context_training' : 'none';
+          
+          // Extract error tags from conflict type and key differences
+          const errorTags: string[] = [];
+          if (judgeResult.conflictType && judgeResult.conflictType !== 'none') {
+            errorTags.push(judgeResult.conflictType);
+          }
+          if (judgeResult.severity === 'major' || judgeResult.severity === 'critical') {
+            errorTags.push('needs_attention');
+          }
+          if (judgeResult.decision === 'rejected') {
+            errorTags.push('ai_failed');
+          }
+          
+          await saveAILearningAnalysis(aiSuggestion.id, {
+            conflictType: judgeResult.conflictType || 'none',
+            conflictDetails: judgeResult.analysis || '',
+            severity: judgeResult.severity || 'none',
+            similarityScore: (judgeResult.similarityPercent || 0) / 100,
+            keyDifferences: judgeResult.keyDifferences || [],
+            suggestedPromptFix: judgeResult.suggestedImprovement || '',
+            suggestedRouting: suggestedRouting,
+            errorTags: errorTags,
+            analyzedBy: 'llm-judge'
+          });
+          
+          // Store judge result to return in response
+          (req as any).llmJudgeResult = judgeResult;
+          
+          console.log(`📊 LLM Judge: Q${questionId} - ${judgeResult.decision} (${judgeResult.similarityPercent}%) - ${judgeResult.conflictType}`);
+        }
+      }
+    } catch (judgeError) {
+      console.warn('LLM Judge analysis failed (non-critical):', judgeError);
+      // Don't fail the verification if judge fails
+    }
+    // ========== END LLM AS JUDGE (ASYNC) ==========
+    }); // End setImmediate
+
   } catch (error) {
     console.error('❌ Error submitting verification:', error);
     console.error('Error details:', {
@@ -3691,20 +3971,23 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
     }
 
     // 2. Get total count of related questions (same criteria as main query)
+    // Increased threshold to 0.70 for better relevance
+    // Also filter out very short questions (< 10 chars) as they tend to be low quality
     const countResult = await pool.query(
       `SELECT COUNT(*) as total
       FROM verified_answers va
       WHERE va.id != $1
         AND va.question_embedding IS NOT NULL
         AND va.verification_type = 'self'
-        AND (1 - (va.question_embedding <=> $2::vector)) > 0.55`,
+        AND LENGTH(va.question) >= 10
+        AND (1 - (va.question_embedding <=> $2::vector)) > 0.70`,
       [qId, question_embedding]
     );
     
     const totalRelated = parseInt(countResult.rows[0]?.total) || 0;
 
     // 3. Search for similar questions using vector similarity
-    // Same logic as AI Sources - similarity > 0.55 and self-verified
+    // Improved filtering: higher threshold (0.70) and minimum question length
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -3721,11 +4004,12 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
       WHERE va.id != $2
         AND va.question_embedding IS NOT NULL
         AND va.verification_type = 'self'
-        AND (1 - (va.question_embedding <=> $1::vector)) > 0.55
+        AND LENGTH(va.question) >= 10
+        AND (1 - (va.question_embedding <=> $1::vector)) > 0.70
       GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
       ORDER BY 
         (1 - (va.question_embedding <=> $1::vector)) DESC
-      LIMIT 2`,
+      LIMIT 5`,
       [question_embedding, qId]
     );
 
@@ -3777,7 +4061,8 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
       return res.json({ success: true, results: [] });
     }
 
-    // 2. Search for ALL similar questions - same logic as main query
+    // 2. Search for ALL similar questions - improved filtering
+    // Higher threshold (0.70) and minimum question length for better relevance
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -3794,7 +4079,8 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
       WHERE va.id != $2
         AND va.question_embedding IS NOT NULL
         AND va.verification_type = 'self'
-        AND (1 - (va.question_embedding <=> $1::vector)) > 0.55
+        AND LENGTH(va.question) >= 10
+        AND (1 - (va.question_embedding <=> $1::vector)) > 0.70
       GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
       ORDER BY (1 - (va.question_embedding <=> $1::vector)) DESC`,
       [question_embedding, qId]
@@ -3998,26 +4284,174 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     }
 
     console.log(`📚 Expert verifications: ${expertVerifications.rows.length}`);
+
+    // ========== 4. ดึงไฟล์แนบและวิเคราะห์ (Priority 2 - รองจาก Knowledge Base) ==========
+    // OPTIMIZED: Process attachments in PARALLEL for faster loading
+    let attachmentContext = '';
+    const attachments = await getQuestionAttachments(parseInt(questionId));
+    
+    if (attachments && attachments.length > 0) {
+      console.log(`📎 Found ${attachments.length} attachments for question ${questionId}`);
+      
+      // Process attachments in parallel for faster loading
+      const attachmentPromises = attachments.map(async (att): Promise<{context: string, source: any} | null> => {
+        try {
+          // Get full attachment data including file content
+          const attachmentData = await getQuestionAttachmentData(att.id);
+          
+          if (attachmentData && attachmentData.file_data) {
+            const mimeType = attachmentData.mime_type || '';
+            const fileName = attachmentData.file_name || 'unknown';
+            
+            // Handle different file types
+            if (mimeType.startsWith('image/')) {
+              // For images - use VLM to describe
+              console.log(`📎 Processing image: ${fileName}`);
+              try {
+                const imageBase64 = attachmentData.file_data.toString('base64');
+                
+                // Call Python API to analyze image with VLM
+                const vlmResponse = await fetch(`${process.env.API_SERVER_URL}/analyze_image`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    image_base64: imageBase64,
+                    prompt: `Describe this image in detail. What information does it contain? Answer in Thai if the image contains Thai text.`
+                  })
+                });
+                
+                if (vlmResponse.ok) {
+                  const vlmData = await vlmResponse.json() as { description: string };
+                  if (vlmData.description) {
+                    return {
+                      context: `\n[ไฟล์แนบ: ${fileName}]\n${vlmData.description}\n`,
+                      source: {
+                        type: 'attachment_image',
+                        fileName: fileName,
+                        description: vlmData.description.substring(0, 100) + '...'
+                      }
+                    };
+                  }
+                }
+              } catch (imgError) {
+                console.warn(`⚠️ Could not analyze image ${fileName}:`, imgError);
+              }
+            } else if (mimeType === 'application/pdf' || mimeType.includes('document') || mimeType === 'text/plain') {
+              // For PDFs and documents - extract text
+              console.log(`📎 Processing document: ${fileName}`);
+              try {
+                const fileBase64 = attachmentData.file_data.toString('base64');
+                
+                // Call Python API to extract text from document
+                const extractResponse = await fetch(`${process.env.API_SERVER_URL}/extract_text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    file_base64: fileBase64,
+                    file_name: fileName,
+                    mime_type: mimeType
+                  })
+                });
+                
+                if (extractResponse.ok) {
+                  const extractData = await extractResponse.json() as { text: string };
+                  if (extractData.text && extractData.text.trim()) {
+                    // Limit text length to avoid token overflow
+                    const extractedText = extractData.text.substring(0, 3000);
+                    return {
+                      context: `\n[ไฟล์แนบ: ${fileName}]\n${extractedText}\n`,
+                      source: {
+                        type: 'attachment_document',
+                        fileName: fileName,
+                        textLength: extractData.text.length
+                      }
+                    };
+                  }
+                }
+              } catch (docError) {
+                console.warn(`⚠️ Could not extract text from ${fileName}:`, docError);
+              }
+            }
+          }
+        } catch (attError) {
+          console.warn(`⚠️ Error processing attachment ${att.id}:`, attError);
+        }
+        return null;
+      });
+      
+      // Wait for all attachments to be processed in parallel
+      const attachmentResults = await Promise.allSettled(attachmentPromises);
+      
+      // Combine results
+      for (const result of attachmentResults) {
+        if (result.status === 'fulfilled' && result.value) {
+          const { context: ctx, source } = result.value;
+          if (ctx) attachmentContext += ctx;
+          if (source) sourcesUsed.push(source);
+        }
+      }
+      
+      if (attachmentContext) {
+        console.log(`📎 Attachment context length: ${attachmentContext.length} chars`);
+      }
+    }
+
     console.log(`📚 Total sources for AI: ${totalSources}`);
 
     // Generate AI suggestion using LLM 
-    const systemPrompt = `You are an AI assistant that creates answers from verified knowledge base.
+    // สร้าง system prompt โดยดูว่ามีข้อมูลหรือไม่
+    const hasKnowledgeData = totalSources > 0 && context && context.trim().length > 0;
+    const hasAttachments = attachmentContext && attachmentContext.trim().length > 0;
+    
+    // Build system prompt with priority: Knowledge Base > Attachments
+    let systemPrompt = '';
+    
+    if (hasKnowledgeData || hasAttachments) {
+      systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
 
-Important rules:
-1. If there is a verified answer for this question directly, use it as the main reference and rephrase for clarity
-2. If there are expert verification comments, incorporate them into your answer
-3. Do NOT copy the original answer word-for-word - rephrase it to be complete and clear
-4. If there is no data in the knowledge base, say "ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยัน"
+IMPORTANT PRIORITY RULES:
+1. **PRIORITY 1 (HIGHEST)**: Use KNOWLEDGE BASE data as the main source of truth
+2. **PRIORITY 2 (SECONDARY)**: Use ATTACHED FILES as supplementary information
+3. If Knowledge Base and Attachments conflict, prefer Knowledge Base data
+4. If only Attachments are available (no Knowledge Base), use them but note it's from attachments
+
+Rules:
+1. Use the verified answers and expert comments as your PRIMARY reference
+2. Use attached file content as SECONDARY/supporting information
+3. Rephrase and summarize the information clearly - do NOT copy word-for-word
+4. Include all important data, numbers, and specifications mentioned
 5. Answer in Thai language
 
 Response format:
 - Write in continuous paragraphs, concise and clear
 - Use **bold** for important keywords
+- Use bullet points for lists when appropriate
 - Do not leave multiple blank lines in a row
-- Use bullet points for lists
+`;
 
-Knowledge Base Data:
-${context || 'No data available in knowledge base for this question'}`;
+      if (hasKnowledgeData) {
+        systemPrompt += `
+========== KNOWLEDGE BASE DATA (PRIORITY 1 - USE THIS FIRST!) ==========
+${context}
+========================================================================
+`;
+      }
+
+      if (hasAttachments) {
+        systemPrompt += `
+========== ATTACHED FILES DATA (PRIORITY 2 - SUPPLEMENTARY) ==========
+${attachmentContext}
+======================================================================
+`;
+      }
+    } else {
+      systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+
+Since there is NO data available, respond with exactly:
+"ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยัน"
+
+Do not make up any information.`;
+    }
 
     const userPrompt = `Question: ${question}
 ${questionBody ? `\nDetails: ${questionBody}` : ''}
@@ -4064,7 +4498,7 @@ Create a summary answer from the knowledge base:
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'gemma3:4b-it-qat',
+            model: 'llama3:latest',
             prompt: `${systemPrompt}\n\n${userPrompt}`,
             stream: false
           })
@@ -4076,7 +4510,7 @@ Create a summary answer from the knowledge base:
             .replace(/\r\n/g, '\n')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
-          aiModelUsed = 'gemma3:4b-it-qat (Ollama)';
+          aiModelUsed = 'llama3:latest (Ollama)';
           console.log('✅ Ollama generated answer successfully');
         }
       } catch (ollamaError) {
@@ -4084,28 +4518,58 @@ Create a summary answer from the knowledge base:
       }
     }
     
+    // Check if LLM incorrectly said "no data" when we actually have sources
+    const noDataPhrases = [
+      'ยังไม่มีคำตอบที่ยืนยันแล้ว',
+      'ไม่มีข้อมูลในฐานความรู้',
+      'ยังไม่มีข้อมูล',
+      'No data available',
+      'no verified',
+      'กรุณารอผู้เชี่ยวชาญมายืนยัน'
+    ];
+    
+    const llmSaidNoData = noDataPhrases.some(phrase => 
+      aiGeneratedAnswer.toLowerCase().includes(phrase.toLowerCase())
+    );
+    
+    // If LLM said no data but we have sources, use fallback instead
+    if (llmSaidNoData && totalSources > 0) {
+      console.log('⚠️ LLM incorrectly said no data, using fallback with actual sources');
+      aiGeneratedAnswer = ''; // Reset to trigger fallback below
+    }
+    
     // Fallback if LLM fails or returns empty
     if (!aiGeneratedAnswer) {
       if (totalSources > 0) {
-        // Show verified answers directly
-        aiGeneratedAnswer = '<div class="ai-answer-formatted">';
+        // Show verified answers directly from sources
+        aiGeneratedAnswer = '';
         
+        // Show self-verified answer if exists
         if (isCurrentSelfVerified && currentAnswer) {
-          aiGeneratedAnswer += `<p><strong>คำตอบที่ยืนยันแล้ว (${currentCreatedBy}):</strong></p>`;
-          aiGeneratedAnswer += `<p>${currentAnswer}</p>`;
+          aiGeneratedAnswer += `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
+        }
+        
+        // Show answers from similar verified questions
+        const similarSources = sourcesUsed.filter((s: any) => s.type === 'similar_verified');
+        if (similarSources.length > 0) {
+          aiGeneratedAnswer += '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n';
+          similarSources.forEach((source: any, idx: number) => {
+            const similarity = source.similarity ? Math.round(source.similarity * 100) : 0;
+            aiGeneratedAnswer += `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`;
+          });
+          aiGeneratedAnswer += '\n';
         }
         
         // Show expert verifications if any
         if (expertVerifications.rows.length > 0) {
-          aiGeneratedAnswer += '<p><strong>ความเห็นจากผู้เชี่ยวชาญ:</strong></p><ul>';
+          aiGeneratedAnswer += '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n';
           expertVerifications.rows.forEach((v) => {
             const dept = v.requested_departments?.[0] || '';
-            aiGeneratedAnswer += `<li><strong>${v.commenter_name}${dept ? ` (${dept})` : ''}:</strong> ${v.comment}</li>`;
+            aiGeneratedAnswer += `• **${v.commenter_name}${dept ? ` (${dept})` : ''}:** ${v.comment}\n`;
           });
-          aiGeneratedAnswer += '</ul>';
         }
         
-        aiGeneratedAnswer += '</div>';
+        aiGeneratedAnswer = aiGeneratedAnswer.trim();
       } else {
         aiGeneratedAnswer = 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
       }

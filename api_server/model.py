@@ -1338,6 +1338,128 @@ def _get_required_fields(data, *fields):
         
     return values, None
 
+# ========== NEW: Analyze Image with VLM ==========
+@app.route('/analyze_image', methods=['POST'])
+def analyze_image_api():
+    """
+    Analyze an image using VLM and return description.
+    Request: { "image_base64": "...", "prompt": "..." }
+    Response: { "description": "..." }
+    """
+    try:
+        data = request.get_json()
+        image_base64 = data.get('image_base64')
+        prompt = data.get('prompt', 'Describe this image in detail.')
+        
+        if not image_base64:
+            return jsonify({"error": "image_base64 is required"}), 400
+        
+        # Decode base64 to bytes
+        import base64
+        image_bytes = base64.b64decode(image_base64)
+        
+        # Use VLM to describe image
+        description = ""
+        
+        if LOCAL:
+            # Use Ollama VLM
+            description = ollama_describe_image(
+                image_bytes=image_bytes,
+                user_query=prompt,
+                model='llava'
+            )
+        else:
+            # Use DeepInfra VLM
+            description = DeepInfraInference(
+                prompt=prompt,
+                base64_images_data=[image_base64],
+                model_name='Qwen/Qwen2.5-VL-32B-Instruct'
+            )
+        
+        return jsonify({"description": description or "Could not analyze image"})
+        
+    except Exception as e:
+        print(f"Error in analyze_image: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ========== NEW: Extract Text from Document ==========
+@app.route('/extract_text', methods=['POST'])
+def extract_text_api():
+    """
+    Extract text from a document file (PDF, DOCX, TXT, etc.)
+    Request: { "file_base64": "...", "file_name": "...", "mime_type": "..." }
+    Response: { "text": "..." }
+    """
+    try:
+        data = request.get_json()
+        file_base64 = data.get('file_base64')
+        file_name = data.get('file_name', 'document')
+        mime_type = data.get('mime_type', '')
+        
+        if not file_base64:
+            return jsonify({"error": "file_base64 is required"}), 400
+        
+        # Decode base64 to bytes
+        import base64
+        file_bytes = base64.b64decode(file_base64)
+        
+        extracted_text = ""
+        
+        # Determine file type and extract text
+        file_ext = os.path.splitext(file_name)[1].lower() if file_name else ''
+        
+        if mime_type == 'application/pdf' or file_ext == '.pdf':
+            # Extract text from PDF using PyMuPDF (fitz)
+            try:
+                pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                text_parts = []
+                for page_num in range(min(len(pdf_doc), 20)):  # Limit to first 20 pages
+                    page = pdf_doc[page_num]
+                    text_parts.append(page.get_text())
+                extracted_text = "\n".join(text_parts)
+                pdf_doc.close()
+            except Exception as pdf_err:
+                print(f"PDF extraction error: {pdf_err}")
+                extracted_text = ""
+                
+        elif mime_type == 'text/plain' or file_ext == '.txt':
+            # Plain text file
+            try:
+                extracted_text = file_bytes.decode('utf-8')
+            except:
+                extracted_text = file_bytes.decode('latin-1', errors='ignore')
+                
+        elif 'word' in mime_type or file_ext in ['.docx', '.doc']:
+            # Word document
+            try:
+                from io import BytesIO
+                extracted_text = extract_docx_text(BytesIO(file_bytes))
+            except Exception as doc_err:
+                print(f"DOCX extraction error: {doc_err}")
+                extracted_text = ""
+                
+        elif 'excel' in mime_type or 'spreadsheet' in mime_type or file_ext in ['.xlsx', '.xls']:
+            # Excel file
+            try:
+                from io import BytesIO
+                extracted_text = extract_excel_text(BytesIO(file_bytes))
+            except Exception as xls_err:
+                print(f"Excel extraction error: {xls_err}")
+                extracted_text = ""
+        
+        # Clean up text
+        if extracted_text:
+            extracted_text = extracted_text.strip()
+            # Remove excessive whitespace
+            extracted_text = re.sub(r'\n{3,}', '\n\n', extracted_text)
+            extracted_text = re.sub(r' {2,}', ' ', extracted_text)
+        
+        return jsonify({"text": extracted_text or ""})
+        
+    except Exception as e:
+        print(f"Error in extract_text: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # # --- File Listing (Remains GET as it doesn't target a specific resource) ---
 # @app.route('/files/list', methods=['GET'])
 # def api_list_files():
@@ -1675,6 +1797,50 @@ def encode_embedding():
         return jsonify({
             'success': False,
             'error': str(e)
+        }), 500
+
+
+# === LLM INFERENCE ENDPOINT (for AI Judge) ===
+@app.route('/llm_inference', methods=['POST'])
+def llm_inference():
+    """เรียกใช้ LLM เพื่อ generate text
+    
+    Request body:
+    {
+        "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
+        "model": "llama3:latest",  # optional (default: llama3:latest)
+        "system_prompt": ""  # optional
+    }
+    
+    Used for: AI Judge to analyze AI vs Human answers
+    """
+    try:
+        data = request.json
+        prompt = data.get('prompt', '')
+        model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
+        system_prompt = data.get('system_prompt', '')
+        
+        if not prompt:
+            return jsonify({'error': 'No prompt provided'}), 400
+        
+        # Use ollama_generate_text from utils
+        response = ollama_generate_text(
+            prompt=prompt,
+            model=model,
+            system_prompt=system_prompt
+        )
+        
+        return jsonify({
+            'success': True,
+            'response': response,
+            'model': model
+        })
+    except Exception as e:
+        print(f"LLM inference error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'response': ''
         }), 500
 
 

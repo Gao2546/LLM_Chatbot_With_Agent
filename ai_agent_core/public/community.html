@@ -226,20 +226,13 @@
                         usernameDisplay.style.display = 'none';
                     }
                 } else {
-                    currentUserId = null;
-                    currentUsername = null;
-                    if (loginBtn) {
-                        loginBtn.textContent = 'Login';
-                        loginBtn.href = '/auth/login';
-                    }
-                    if (usernameDisplay) {
-                        usernameDisplay.style.display = 'none';
-                    }
+                    // Not logged in, redirect to login
+                    window.location.href = '/auth/login';
+                    return;
                 }
             } catch (e) {
                 console.log('User not logged in:', e);
-                currentUserId = null;
-                currentUsername = null;
+                window.location.href = '/auth/login';
             }
         }
 

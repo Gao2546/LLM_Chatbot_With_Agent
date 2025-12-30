@@ -1136,6 +1136,9 @@
         const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
         let selectedFiles = []; // Store selected files for submission
         
+        // Tags array - MUST be declared at top level so all functions can access it
+        let customTags = [];
+        
         // Initialize markdown-it
         const md = window.markdownit({
             html: true,
@@ -1490,15 +1493,15 @@
             }
         }
 
-        // Tags array - must be declared before submitQuestion uses it
-        let customTags = [];
-
-        // Main submit function
+        // Main submit function (customTags is now declared at top of script)
         async function submitQuestion() {
             const title = document.getElementById('questionTitle').value.trim();
             const body = tinymce.get('questionBody') ? tinymce.get('questionBody').getContent() : document.getElementById('questionBody').value;
             const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
             const notifyMe = document.getElementById('notifyCheckbox').checked; // Get notify_me value
+
+            console.log('🏷️ customTags before submit:', customTags);
+            console.log('🏷️ customTags length:', customTags.length);
 
             if (!title) {
                 alert('Please enter a title');
@@ -1624,10 +1627,12 @@
             }
         }
 
-        // Tags functionality (customTags is declared above submitQuestion)
+        // Tags functionality (customTags is declared at top of script block)
         function addCustomTag() {
             const input = document.getElementById('questionTags');
             const tagName = input.value.trim();
+            
+            console.log('🏷️ addCustomTag called, tagName:', tagName);
             
             if (!tagName) {
                 return;
@@ -1644,6 +1649,7 @@
             }
             
             customTags.push(tagName);
+            console.log('🏷️ Tag added, customTags now:', customTags);
             renderCustomTags();
             input.value = '';
         }
@@ -1665,14 +1671,30 @@
             `).join('');
         }
 
-        // Add tag button click event
-        document.getElementById('addTagBtn').addEventListener('click', addCustomTag);
-
-        // Add tag on Enter key press
-        document.getElementById('questionTags').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                addCustomTag();
+        // Add tag button click event - use DOMContentLoaded to ensure elements exist
+        document.addEventListener('DOMContentLoaded', function() {
+            const addTagBtn = document.getElementById('addTagBtn');
+            const questionTagsInput = document.getElementById('questionTags');
+            
+            console.log('🏷️ Setting up tag listeners...');
+            console.log('🏷️ addTagBtn found:', !!addTagBtn);
+            console.log('🏷️ questionTagsInput found:', !!questionTagsInput);
+            
+            if (addTagBtn) {
+                addTagBtn.addEventListener('click', function() {
+                    console.log('🏷️ Add button clicked!');
+                    addCustomTag();
+                });
+            }
+            
+            if (questionTagsInput) {
+                questionTagsInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        console.log('🏷️ Enter pressed!');
+                        e.preventDefault();
+                        addCustomTag();
+                    }
+                });
             }
         });
 
