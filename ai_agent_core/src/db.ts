@@ -1423,7 +1423,8 @@ async function filterQuestionsByType(
   filterType: string,
   username?: string,
   sortBy: string = 'newest',
-  limit: number = 100
+  limit: number = 20,
+  page: number = 1
 ) {
   try {
     let query = `
@@ -1541,9 +1542,14 @@ async function filterQuestionsByType(
         query += ` ORDER BY va.created_at DESC`;
     }
 
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+    
     const limitIndex = params.length + 1;
-    query += ` LIMIT $${limitIndex}`;
+    const offsetIndex = params.length + 2;
+    query += ` LIMIT $${limitIndex} OFFSET $${offsetIndex}`;
     params.push(limit);
+    params.push(offset);
 
     const result = await pool.query(query, params);
 
@@ -1565,6 +1571,85 @@ async function filterQuestionsByType(
   } catch (error) {
     console.error('Error filtering questions:', error);
     throw error;
+  }
+}
+
+/**
+ * Count total questions by filter type (for pagination)
+ */
+async function countQuestionsByType(filterType: string, username?: string): Promise<number> {
+  try {
+    let query = `SELECT COUNT(*) as total FROM verified_answers va`;
+    const params: any[] = [];
+
+    switch (filterType) {
+      case 'my-questions':
+        if (username) {
+          query += ` WHERE va.created_by = $1`;
+          params.push(username);
+        }
+        break;
+
+      case 'my-answers':
+        if (username) {
+          query += ` WHERE EXISTS (
+            SELECT 1 FROM comments 
+            WHERE question_id = va.id AND username = $1
+          )`;
+          params.push(username);
+        }
+        break;
+
+      case 'pending-review':
+        query += ` WHERE va.verification_type = 'request'
+                   AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') > 0
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') < ARRAY_LENGTH(va.requested_departments, 1)`;
+        break;
+
+      case 'unverified':
+        query += ` WHERE va.verification_type = 'request'
+                   AND COALESCE((SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != ''), 0) = 0`;
+        break;
+
+      case 'verified':
+        query += ` WHERE (va.verification_type = 'self')
+                   OR (va.verification_type = 'request' 
+                       AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                       AND (SELECT COUNT(DISTINCT dept) 
+                        FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                        WHERE av.verified_answer_id = va.id 
+                        AND av.verification_type = 'verification'
+                        AND av.commenter_name IS NOT NULL 
+                        AND av.commenter_name != ''
+                        AND dept = ANY(va.requested_departments)) >= ARRAY_LENGTH(va.requested_departments, 1))`;
+        break;
+
+      case 'all':
+      default:
+        break;
+    }
+
+    const result = await pool.query(query, params);
+    return parseInt(result.rows[0]?.total) || 0;
+  } catch (error) {
+    console.error('Error counting questions:', error);
+    return 0;
   }
 }
 
@@ -2202,6 +2287,7 @@ export {
   searchVerifiedAnswers,
   getAnswerVerifications,
   filterQuestionsByType,
+  countQuestionsByType,
   triggerNotificationsForQuestion,
 
   // Question Attachments Functions

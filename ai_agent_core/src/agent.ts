@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns } from './db.js';
 
 dotenv.config();
 
@@ -738,6 +738,194 @@ router.post('/message', async (req : Request, res : Response) => {
 
     let response: { text: string } | null = null;
     
+    // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
+    if (modeToUse === 'ai_suggests') {
+      console.log('AI Suggests Mode: Using LLM + Verified Knowledge Base...');
+      
+      try {
+        const userQuestion = userMessage || '';
+        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+        
+        // 1. Generate embedding for the question
+        let embedding: number[] = [];
+        try {
+          const embeddingRes = await axios.post(
+            `${API_SERVER_URL}/encode_embedding`,
+            { text: userQuestion, dimensions: 1024 },
+            { timeout: 30000 }
+          );
+          
+          if (embeddingRes.data && embeddingRes.data.embedding) {
+            embedding = embeddingRes.data.embedding;
+            console.log(`AI Suggests: Got embedding with ${embedding.length} dimensions`);
+          }
+        } catch (apiError: any) {
+          console.error('AI Suggests: Failed to get embedding:', apiError.message);
+          socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
+          return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+        }
+        
+        // 2. Search verified answers from knowledge base
+        const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+        
+        let context = '';
+        let sourcesUsed: any[] = [];
+        let totalSources = 0;
+        
+        if (results && results.length > 0) {
+          context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+          results.forEach((result: any, idx: number) => {
+            const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+            context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
+            context += `[คำตอบ]: ${result.answer}\n`;
+            if (result.tags && result.tags.length > 0) {
+              context += `[แท็ก]: ${result.tags.join(', ')}\n`;
+            }
+            context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+            
+            sourcesUsed.push({
+              type: 'verified_answer',
+              question: result.question,
+              similarity: result.similarity
+            });
+            totalSources++;
+          });
+        }
+        
+        console.log(`📚 Total verified sources found: ${totalSources}`);
+        
+        // 3. Build prompt for LLM
+        const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
+        
+        let systemPrompt = '';
+        if (hasKnowledgeData) {
+          systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+
+กฎสำคัญ:
+1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
+2. สรุปและเรียบเรียงข้อมูลให้ชัดเจน - อย่าคัดลอกทั้งหมด
+3. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่เกี่ยวข้อง
+4. ตอบเป็นภาษาไทย
+5. ใช้ **ตัวหนา** สำหรับคำสำคัญ
+6. ถ้ามีหลายคำตอบที่เกี่ยวข้อง ให้สังเคราะห์รวมกัน
+
+========== ข้อมูลจากฐานความรู้ ==========
+${context}
+==========================================
+`;
+        } else {
+          systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
+
+หมายเหตุ: ไม่พบข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
+กรุณาตอบตามความรู้ทั่วไป และระบุว่านี่เป็นคำตอบจาก AI โดยยังไม่ได้รับการยืนยันจากผู้เชี่ยวชาญ`;
+        }
+        
+        const userPrompt = `คำถาม: ${userQuestion}
+
+${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้อมูลในฐานความรู้:' : 'กรุณาตอบคำถาม:'}
+- เขียนเป็นย่อหน้าที่กระชับ ชัดเจน
+- รวมข้อมูลสำคัญและตัวเลขที่เกี่ยวข้อง
+- ตอบเป็นภาษาไทย`;
+
+        let aiGeneratedAnswer = '';
+        let aiModelUsed = modelToUse || 'gemma-3-4b-it';
+        
+        // 4. Call LLM to synthesize answer
+        try {
+          console.log('🤖 AI Suggests: Calling LLM to synthesize answer...');
+          
+          const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+          
+          // Use Google AI API
+          const aiResponse = await ai.models.generateContent({
+            model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+            contents: fullPrompt
+          });
+          
+          if (aiResponse && aiResponse.text) {
+            aiGeneratedAnswer = aiResponse.text
+              .replace(/\r\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            console.log('✅ AI Suggests: LLM generated answer successfully');
+          }
+        } catch (llmError: any) {
+          console.error('⚠️ AI Suggests: Google AI failed:', llmError.message);
+          
+          // Fallback to Ollama
+          try {
+            console.log('🔄 AI Suggests: Trying Ollama as fallback...');
+            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'gemma3:4b',
+                prompt: `${systemPrompt}\n\n${userPrompt}`,
+                stream: false
+              })
+            });
+            
+            if (ollamaResponse.ok) {
+              const ollamaData = await ollamaResponse.json() as { response: string };
+              aiGeneratedAnswer = (ollamaData.response || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+              aiModelUsed = 'gemma3:4b (Ollama)';
+              console.log('✅ AI Suggests: Ollama generated answer');
+            }
+          } catch (ollamaError) {
+            console.error('⚠️ AI Suggests: Ollama also failed');
+          }
+        }
+        
+        // 5. Build final response
+        let finalResponse = '';
+        
+        if (aiGeneratedAnswer) {
+          finalResponse = aiGeneratedAnswer;
+          
+          // Add sources reference (without model name for chat page)
+          if (totalSources > 0) {
+            finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`;
+          } else {
+            finalResponse += `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`;
+          }
+        } else {
+          // Fallback if LLM fails completely
+          if (totalSources > 0) {
+            finalResponse = '## 🔍 ผลลัพธ์จากฐานความรู้\n\n';
+            results.forEach((result: any, idx: number) => {
+              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+              finalResponse += `### ${idx + 1}. ${result.question}\n`;
+              finalResponse += `**ความคล้าย:** ${similarity}%\n\n`;
+              finalResponse += `${result.answer}\n\n---\n\n`;
+            });
+          } else {
+            finalResponse = '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n';
+            finalResponse += 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n';
+            finalResponse += '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง';
+          }
+        }
+        
+        response = { text: finalResponse };
+        socket?.emit('StreamText', finalResponse);
+        
+        // Save to chat history
+        chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
+        await storeChatHistory(currentChatId, chatContent);
+        
+        return res.json({ response: finalResponse });
+        
+      } catch (aiSuggestError: any) {
+        console.error('AI Suggests Error:', aiSuggestError);
+        const errorMsg = '❌ เกิดข้อผิดพลาดในการค้นหาฐานความรู้: ' + aiSuggestError.message;
+        socket?.emit('StreamText', errorMsg);
+        return res.status(500).json({ error: errorMsg });
+      }
+    }
+    // ===== END AI SUGGESTS MODE =====
+    
     // AI Model calling logic (Google, Ollama, OpenRouter, MyModel) remains the same...
     // ... [ The large block of code for calling different AI APIs is omitted for brevity but should be kept as is ] ...
     // --- Assume one of the blocks below runs and populates `response` ---
@@ -1452,6 +1640,120 @@ router.post('/edit-message', async (req, res) => {
     }
 
     let response: { text: string } | null = null;
+
+  // ===== AI SUGGESTS MODE for edit-message - Use LLM + Knowledge Base =====
+  if (modeToUse === 'ai_suggests') {
+    console.log('AI Suggests Mode (edit-message): Using LLM + Verified Knowledge Base...');
+    
+    try {
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      let embedding: number[] = [];
+      
+      try {
+        const embeddingRes = await axios.post(
+          `${API_SERVER_URL}/encode_embedding`,
+          { text: newMessage, dimensions: 1024 },
+          { timeout: 30000 }
+        );
+        
+        if (embeddingRes.data && embeddingRes.data.embedding) {
+          embedding = embeddingRes.data.embedding;
+        }
+      } catch (apiError: any) {
+        console.error('AI Suggests: Failed to get embedding:', apiError.message);
+        socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
+        return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+      }
+      
+      // Search verified answers
+      const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+      
+      let context = '';
+      let sourcesUsed: any[] = [];
+      let totalSources = 0;
+      
+      if (results && results.length > 0) {
+        context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+        results.forEach((result: any, idx: number) => {
+          const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+          context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
+          context += `[คำตอบ]: ${result.answer}\n`;
+          context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+          sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
+          totalSources++;
+        });
+      }
+      
+      // Build prompt for LLM
+      const hasKnowledgeData = totalSources > 0;
+      let systemPrompt = hasKnowledgeData 
+        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+
+กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
+
+========== ข้อมูลจากฐานความรู้ ==========
+${context}
+==========================================`
+        : `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`;
+      
+      const userPrompt = `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`;
+      
+      let aiGeneratedAnswer = '';
+      let aiModelUsed = modelToUse || 'gemma-3-4b-it';
+      
+      // Call LLM
+      try {
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        const aiResponse = await ai.models.generateContent({
+          model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+          contents: fullPrompt
+        });
+        
+        if (aiResponse && aiResponse.text) {
+          aiGeneratedAnswer = aiResponse.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+      } catch (llmError: any) {
+        console.error('⚠️ AI Suggests: LLM failed:', llmError.message);
+        // Fallback to Ollama
+        try {
+          const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'gemma3:4b', prompt: `${systemPrompt}\n\n${userPrompt}`, stream: false })
+          });
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response: string };
+            aiGeneratedAnswer = (ollamaData.response || '').replace(/\n{3,}/g, '\n\n').trim();
+            aiModelUsed = 'gemma3:4b (Ollama)';
+          }
+        } catch (e) { /* ignore */ }
+      }
+      
+      // Build final response
+      let finalResponse = aiGeneratedAnswer || (totalSources > 0 
+        ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
+        : 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask');
+      
+      if (aiGeneratedAnswer && totalSources > 0) {
+        finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
+      }
+      
+      response = { text: finalResponse };
+      socket?.emit('StreamText', finalResponse);
+      
+      newChatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
+      await storeChatHistory(chatId, newChatContent);
+      
+      return res.json({ response: finalResponse });
+      
+    } catch (aiSuggestError: any) {
+      console.error('AI Suggests Error:', aiSuggestError);
+      const errorMsg = '❌ เกิดข้อผิดพลาด: ' + aiSuggestError.message;
+      socket?.emit('StreamText', errorMsg);
+      return res.status(500).json({ error: errorMsg });
+    }
+  }
+  // ===== END AI SUGGESTS MODE =====
 
   if (
         // modelToUse.startsWith("gemini") || 
@@ -2845,24 +3147,45 @@ router.get('/hot-tags', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/filter-questions - Filter questions by type
+// GET /api/filter-questions - Filter questions by type with pagination
 router.get('/filter-questions', async (req: Request, res: Response) => {
   try {
-    const { type = 'all', username, sortBy = 'newest', limit = 100 } = req.query;
+    const { type = 'all', username, sortBy = 'newest', limit = 20, page = 1 } = req.query;
 
     if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified', 'verified'].includes(type as string)) {
       return res.status(400).json({ success: false, error: 'Invalid filter type' });
     }
 
+    const pageNum = parseInt(page as string) || 1;
+    const limitNum = parseInt(limit as string) || 20;
+
+    // Get questions for current page
     const results = await filterQuestionsByType(
       type as string,
       username as string,
       sortBy as string,
-      parseInt(limit as string) || 100
+      limitNum,
+      pageNum
     );
 
-    console.log(`✅ Filtered ${results.length} questions by type: ${type}`);
-    res.json({ success: true, results, count: results.length });
+    // Get total count for pagination
+    const totalCount = await countQuestionsByType(
+      type as string,
+      username as string
+    );
+
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    console.log(`✅ Filtered ${results.length} questions by type: ${type} (page ${pageNum}/${totalPages}, total: ${totalCount})`);
+    res.json({ 
+      success: true, 
+      results, 
+      count: results.length,
+      totalCount,
+      totalPages,
+      currentPage: pageNum,
+      limit: limitNum
+    });
   } catch (error) {
     console.error('❌ Error filtering questions:', error);
     res.status(500).json({ success: false, error: String(error) });

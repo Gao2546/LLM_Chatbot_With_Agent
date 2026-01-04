@@ -303,6 +303,20 @@
     margin-right: 4px;
 }
 
+/* Dark theme for .ai-sources container */
+[data-theme="dark"] .ai-sources,
+body[data-theme="dark"] .ai-sources,
+html[data-theme="dark"] .ai-sources {
+    background: #2a2a2a !important;
+    color: #e0e0e0 !important;
+    border-color: #404040 !important;
+}
+
+[data-theme="dark"] .ai-sources i,
+body[data-theme="dark"] .ai-sources i {
+    color: #0a8276 !important;
+}
+
 /* Simple Attachments Link */
 .attachments-link {
     display: inline-flex;
@@ -2648,4 +2662,191 @@
 /* Preserve teal border in dark theme */
 [data-theme="dark"] .detail-question-box {
     border-left-color: #0a8276 !important;
+}
+/* Fix comment textarea and department select for dark theme */
+[data-theme="dark"] .comment-textarea {
+    background-color: #2a2a2a !important;
+    color: #e0e0e0 !important;
+    border-color: #404040 !important;
+}
+
+[data-theme="dark"] .comment-textarea::placeholder {
+    color: #999 !important;
+}
+
+[data-theme="dark"] .dept-select {
+    background-color: #2a2a2a !important;
+    color: #e0e0e0 !important;
+    border-color: #404040 !important;
+}
+
+[data-theme="dark"] .dept-select option {
+    background-color: #2a2a2a !important;
+    color: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .comment-dept-select label {
+    color: #0a8276 !important;
+}
+
+/* Fix file upload button for dark theme */
+[data-theme="dark"] .file-upload-btn {
+    background: #2a2a2a !important;
+    border-color: #4caf50 !important;
+    color: #66bb6a !important;
+}
+
+[data-theme="dark"] .file-upload-btn:hover {
+    background: rgba(76, 175, 80, 0.1) !important;
+    border-color: #66bb6a !important;
+    color: #81c784 !important;
+}
+
+/* Fix comment input group background */
+[data-theme="dark"] .comment-input-group {
+    background: transparent !important;
+}
+
+/* Ensure comments form has correct dark background */
+[data-theme="dark"] .comments-form {
+    background-color: #2a2a2a !important;
+}
+
+/* ===== AI SOURCES STYLES ===== */
+.ai-sources-toggle {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #555;
+    font-size: 13px;
+    padding: 8px 12px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+}
+
+.ai-sources-toggle i.fa-chevron-down {
+    color: #999;
+}
+
+.ai-sources-details {
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.ai-sources-title {
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #333;
+    font-size: 13px;
+}
+
+.ai-source-item {
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    border-left: 3px solid #017374;
+}
+
+.ai-source-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.ai-source-label {
+    font-weight: 500;
+    font-size: 12px;
+    color: #333;
+}
+
+.source-similarity-badge {
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.ai-source-question {
+    font-size: 13px;
+    color: #333;
+}
+
+.source-question-link {
+    color: #017374;
+    text-decoration: none;
+}
+
+.source-question-link:hover {
+    text-decoration: underline;
+}
+
+.ai-source-verified-by {
+    font-size: 11px;
+    color: #666;
+    margin-top: 4px;
+}
+
+/* Dark theme for AI Sources */
+[data-theme="dark"] .ai-sources-toggle,
+body[data-theme="dark"] .ai-sources-toggle,
+html[data-theme="dark"] .ai-sources-toggle {
+    background: #2a2a2a !important;
+    border-color: #404040 !important;
+    color: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ai-sources-toggle i.fa-chevron-down,
+body[data-theme="dark"] .ai-sources-toggle i.fa-chevron-down {
+    color: #999 !important;
+}
+
+[data-theme="dark"] .ai-sources-details,
+body[data-theme="dark"] .ai-sources-details,
+html[data-theme="dark"] .ai-sources-details {
+    background: #2a2a2a !important;
+    border-color: #404040 !important;
+}
+
+[data-theme="dark"] .ai-sources-title,
+body[data-theme="dark"] .ai-sources-title {
+    color: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ai-source-item,
+body[data-theme="dark"] .ai-source-item {
+    background: #333 !important;
+    border-left-color: #0a8276 !important;
+}
+
+[data-theme="dark"] .ai-source-label,
+body[data-theme="dark"] .ai-source-label {
+    color: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .source-similarity-badge,
+body[data-theme="dark"] .source-similarity-badge {
+    background: rgba(46, 125, 50, 0.3) !important;
+    color: #81c784 !important;
+}
+
+[data-theme="dark"] .ai-source-question,
+body[data-theme="dark"] .ai-source-question {
+    color: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .source-question-link,
+body[data-theme="dark"] .source-question-link {
+    color: #64b5f6 !important;
+}
+
+[data-theme="dark"] .ai-source-verified-by {
+    color: #999 !important;
 }

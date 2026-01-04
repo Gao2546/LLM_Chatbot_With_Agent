@@ -49,7 +49,6 @@ transformers
 sentence-transformers
 bitsandbytes
 accelerate
-einops
 
 # LangChain Ecosystem
 langchain-core
@@ -60,9 +59,6 @@ langchain-text-splitters
 # Document Processing & OCR
 pymupdf
 Pillow
-docling
-docling-core
-unstructured[pdf]
 beautifulsoup4
 
 # Search & Web Scraping
@@ -78,3 +74,6 @@ matplotlib
 
 # Optional: LLM Client (for vLLM/OpenAI compatible APIs)
 openai
+
+# Note: Removed einops, docling, unstructured[pdf] due to Windows path length issues
+# These can be installed separately if needed

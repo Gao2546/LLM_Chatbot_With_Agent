@@ -381,6 +381,14 @@ body {
     border-color: #0a8276;
 }
 
+.tags-loading {
+    color: #888;
+    font-size: 12px;
+    padding: 8px;
+    text-align: center;
+    width: 100%;
+}
+
 .hot-questions-list {
     display: flex;
     flex-direction: column;
@@ -1397,4 +1405,88 @@ body[data-theme="light"] .notification-item-meta {
 
 body[data-theme="light"] .empty-notifications {
     color: #999 !important;
+}
+
+/* ========== PAGINATION STYLES ========== */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    padding: 20px 0;
+    margin-top: 10px;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.pagination-btn {
+    background: #2a2a2a;
+    border: 1px solid #404040;
+    color: #e0e0e0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    min-width: 40px;
+}
+
+.pagination-btn:hover:not(.disabled):not(.active) {
+    background: #3a3a3a;
+    border-color: #0a8276;
+}
+
+.pagination-btn.active {
+    background: #0a8276;
+    border-color: #0a8276;
+    color: white;
+    font-weight: 600;
+}
+
+.pagination-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: #777;
+}
+
+.pagination-ellipsis {
+    color: #777;
+    padding: 0 5px;
+}
+
+.pagination-info {
+    margin-left: 15px;
+    color: #888;
+    font-size: 13px;
+}
+
+/* Light Theme Pagination */
+body[data-theme="light"] .pagination-btn {
+    background: #f5f5f5;
+    border-color: #ddd;
+    color: #333;
+}
+
+body[data-theme="light"] .pagination-btn:hover:not(.disabled):not(.active) {
+    background: #e8e8e8;
+    border-color: #0a8276;
+}
+
+body[data-theme="light"] .pagination-btn.active {
+    background: #0a8276;
+    border-color: #0a8276;
+    color: white;
+}
+
+body[data-theme="light"] .pagination-btn.disabled {
+    color: #aaa;
+}
+
+body[data-theme="light"] .pagination-ellipsis,
+body[data-theme="light"] .pagination-info {
+    color: #666;
 }

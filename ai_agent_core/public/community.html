@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
@@ -14,7 +14,14 @@
         document.documentElement.setAttribute('data-theme', theme);
     </script>
 </head>
-<body>
+<body data-theme="dark">
+    <!-- Inline script to apply theme to body immediately -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', theme);
+        })();
+    </script>
     <!-- Auth Container (Top Right) - Same as index.html -->
     <div class="auth-container">
         <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
@@ -74,14 +81,7 @@
             <div class="sidebar-section">
                 <div class="section-title">Tags</div>
                 <div id="tagsList" class="sidebar-tags-grid">
-                    <span class="sidebar-tag-item" data-tag="PRVX 4">PRVX 4</span>
-                    <span class="sidebar-tag-item" data-tag="D1">D1</span>
-                    <span class="sidebar-tag-item" data-tag="Handler">Handler</span>
-                    <span class="sidebar-tag-item" data-tag="V9300">V9300</span>
-                    <span class="sidebar-tag-item" data-tag="Prober">Prober</span>
-                    <span class="sidebar-tag-item" data-tag="Tester">Tester</span>
-                    <span class="sidebar-tag-item" data-tag="AI">AI</span>
-                    <span class="sidebar-tag-item" data-tag="Sensor">Sensor</span>
+                    <span class="tags-loading">Loading tags...</span>
                 </div>
             </div>
 
@@ -171,10 +171,84 @@
         let currentUserId = null;
         let currentUsername = null;
         let totalQuestionCount = 0; // Store total count from 'all' filter
+        
+        // Pagination variables
+        let currentPage = 1;
+        let totalPages = 1;
+        const questionsPerPage = 20;
+
+        // ===== URL Params Functions =====
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            const tagsParam = params.get('tags');
+            return {
+                filter: params.get('filter') || 'all',
+                sort: params.get('sort') || 'newest',
+                page: parseInt(params.get('page')) || 1,
+                tags: tagsParam ? tagsParam.split(',') : []
+            };
+        }
+
+        function updateUrlParams() {
+            const params = new URLSearchParams();
+            if (currentFilter !== 'all') params.set('filter', currentFilter);
+            if (currentSort !== 'newest') params.set('sort', currentSort);
+            if (currentPage > 1) params.set('page', currentPage);
+            if (selectedTags.length > 0) params.set('tags', selectedTags.join(','));
+            
+            const newUrl = params.toString() 
+                ? `${window.location.pathname}?${params.toString()}`
+                : window.location.pathname;
+            
+            window.history.replaceState({}, '', newUrl);
+        }
+
+        function restoreFromUrlParams() {
+            const params = getUrlParams();
+            currentFilter = params.filter;
+            currentSort = params.sort;
+            currentPage = params.page;
+            selectedTags = params.tags; // Restore selected tags
+            
+            // Update sidebar active state
+            document.querySelectorAll('.sidebar-link[data-filter]').forEach(link => {
+                link.classList.toggle('active', link.dataset.filter === currentFilter);
+            });
+            
+            // Update tab active state - remove all active first, then add to correct one
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            
+            document.querySelectorAll('.tab').forEach(tab => {
+                const tabType = tab.textContent.toLowerCase();
+                if (currentFilter === 'verified' && tabType === 'verified') {
+                    tab.classList.add('active');
+                } else if (currentFilter !== 'verified') {
+                    if (currentSort === 'newest' && tabType === 'newest') tab.classList.add('active');
+                    else if (currentSort === 'score' && tabType === 'score') tab.classList.add('active');
+                    else if (currentSort === 'views' && tabType === 'views') tab.classList.add('active');
+                }
+            });
+        }
+        
+        // Apply saved tags after hot tags are loaded
+        function applySelectedTagsToUI() {
+            if (selectedTags.length === 0) return;
+            
+            document.querySelectorAll('.sidebar-tag-item').forEach(tag => {
+                if (selectedTags.includes(tag.dataset.tag)) {
+                    tag.classList.add('active');
+                }
+            });
+            
+            // Re-render with tag filter
+            renderQuestions();
+        }
 
         document.addEventListener('DOMContentLoaded', async () => {
             await getCurrentUser();
-            await loadAllQuestions();
+            restoreFromUrlParams(); // Restore filter/sort/page/tags from URL
+            loadHotTags(); // Load hot tags immediately (no await - load in parallel)
+            await loadQuestionsByFilter(currentFilter, currentPage); // Use restored values
             setupSearchListener();
             setupSidebarToggle();
             setupFilterLinks();
@@ -397,6 +471,7 @@
         function filterByTags() {
             selectedTags = Array.from(document.querySelectorAll('.sidebar-tag-item.active')).map(t => t.dataset.tag);
             console.log('Selected tags:', selectedTags);
+            updateUrlParams(); // Save tags to URL
             
             // If no tags selected, reload with current filter
             if (selectedTags.length === 0) {
@@ -409,12 +484,14 @@
 
         async function applyFilter(filter) {
             currentFilter = filter;
+            currentPage = 1; // Reset to first page when filter changes
+            updateUrlParams(); // Save to URL
             await loadQuestionsByFilter(filter);
         }
 
-        async function loadQuestionsByFilter(filter) {
+        async function loadQuestionsByFilter(filter, page = 1) {
             try {
-                let url = '/api/filter-questions?type=' + filter;
+                let url = `/api/filter-questions?type=${filter}&page=${page}&limit=${questionsPerPage}`;
                 
                 // Add username if user is logged in
                 if (currentUsername) {
@@ -436,20 +513,22 @@
                     vote_score: q.vote_score || 0
                 }));
                 
+                // Update pagination info
+                currentPage = data.currentPage || 1;
+                totalPages = data.totalPages || 1;
+                totalQuestionCount = data.totalCount || allQuestions.length;
+                
                 // Store all questions for Hot Questions when loading 'all' questions
-                if (filter === 'all') {
+                if (filter === 'all' && page === 1) {
+                    // For hot questions, we might want to fetch separately or use first page
                     allQuestionsForHotQuestions = [...allQuestions];
                 }
                 
-                console.log(`Loaded ${allQuestions.length} questions with filter: ${filter}`);
-                
-                // Update total count only when loading 'all' questions
-                if (filter === 'all') {
-                    totalQuestionCount = allQuestions.length;
-                }
+                console.log(`Loaded ${allQuestions.length} questions with filter: ${filter} (page ${currentPage}/${totalPages}, total: ${totalQuestionCount})`);
                 
                 updateStats();
                 renderQuestions();
+                renderPagination();
                 await loadHotTags();
             } catch (e) {
                 console.error('Error loading filtered questions:', e);
@@ -474,6 +553,9 @@
                             filterByTags();
                         });
                     });
+                    
+                    // Apply saved tags from URL after tags are loaded
+                    applySelectedTagsToUI();
                 }
             } catch (e) {
                 console.error('Error loading hot tags:', e);
@@ -489,8 +571,29 @@
             }
         }
 
+        // Debounce utility function
+        function debounce(func, wait = 300) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
         function setupSearchListener() {
             const searchInput = document.getElementById('headerSearch');
+            
+            // Debounced search - รอ 300ms หลังหยุดพิมพ์
+            const debouncedSearch = debounce((value) => {
+                performSearch(value);
+            }, 300);
+            
+            // Search while typing (with debounce)
+            searchInput.addEventListener('input', (e) => {
+                debouncedSearch(e.target.value);
+            });
+            
+            // Immediate search on Enter
             searchInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') performSearch(searchInput.value);
             });
@@ -577,11 +680,16 @@
                 }
             }
             
+            // Reset to page 1 when filter/sort changes
+            currentPage = 1;
+            updateUrlParams(); // Save to URL
+            
             // Only reload if filter changed, otherwise just re-render with new sort
             if (filterChanged) {
-                loadQuestionsByFilter(currentFilter);
+                loadQuestionsByFilter(currentFilter, 1);
             } else {
-                renderQuestions();
+                // For sort change, we need to reload from API since sorting is done server-side
+                loadQuestionsByFilter(currentFilter, 1);
             }
         }
 
@@ -767,6 +875,88 @@
 
         function showEmpty() {
             document.getElementById('questionsList').innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No questions found</p></div>';
+            // Clear pagination when no results
+            const paginationContainer = document.getElementById('paginationContainer');
+            if (paginationContainer) {
+                paginationContainer.innerHTML = '';
+            }
+        }
+
+        function renderPagination() {
+            let paginationContainer = document.getElementById('paginationContainer');
+            
+            // Create pagination container if it doesn't exist
+            if (!paginationContainer) {
+                paginationContainer = document.createElement('div');
+                paginationContainer.id = 'paginationContainer';
+                paginationContainer.className = 'pagination-container';
+                document.getElementById('questionsList').after(paginationContainer);
+            }
+            
+            // Don't show pagination if only 1 page
+            if (totalPages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
+            
+            let paginationHtml = '<div class="pagination">';
+            
+            // Previous button
+            paginationHtml += `<button class="pagination-btn ${currentPage === 1 ? 'disabled' : ''}" 
+                onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                ← Prev
+            </button>`;
+            
+            // Page numbers
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+            
+            // Adjust start if we're near the end
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+            
+            // First page
+            if (startPage > 1) {
+                paginationHtml += `<button class="pagination-btn" onclick="goToPage(1)">1</button>`;
+                if (startPage > 2) {
+                    paginationHtml += `<span class="pagination-ellipsis">...</span>`;
+                }
+            }
+            
+            // Page numbers
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHtml += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" 
+                    onclick="goToPage(${i})">${i}</button>`;
+            }
+            
+            // Last page
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    paginationHtml += `<span class="pagination-ellipsis">...</span>`;
+                }
+                paginationHtml += `<button class="pagination-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+            }
+            
+            // Next button
+            paginationHtml += `<button class="pagination-btn ${currentPage === totalPages ? 'disabled' : ''}" 
+                onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                Next →
+            </button>`;
+            
+            paginationHtml += '</div>';
+            
+            paginationContainer.innerHTML = paginationHtml;
+        }
+        
+        function goToPage(page) {
+            if (page < 1 || page > totalPages || page === currentPage) return;
+            currentPage = page;
+            updateUrlParams(); // Save to URL
+            loadQuestionsByFilter(currentFilter, page);
+            // Scroll to top of questions list
+            document.getElementById('questionsList').scrollIntoView({ behavior: 'smooth' });
         }
 
         function formatDate(d) {

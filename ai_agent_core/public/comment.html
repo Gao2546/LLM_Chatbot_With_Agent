@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>Q&A Detail - Comments</title>
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
     <link rel="stylesheet" href="community.css?v=5.0">
-    <link rel="stylesheet" href="comment.css?v=1.0">
+    <link rel="stylesheet" href="comment.css?v=2.1">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <script>
@@ -14,8 +14,69 @@
         const theme = localStorage.getItem('theme') || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
     </script>
+    <style>
+        /* CSS Variables for AI Sources */
+        :root {
+            --sources-bg: #fff;
+            --sources-border: #e0e0e0;
+            --sources-text: #333;
+            --source-item-bg: #f8f9fa;
+        }
+        
+        body[data-theme="dark"],
+        [data-theme="dark"] {
+            --sources-bg: #2a2a2a;
+            --sources-border: #404040;
+            --sources-text: #e0e0e0;
+            --source-item-bg: #333;
+        }
+        
+        /* Dark theme fix for AI Sources - inline to ensure priority */
+        body[data-theme="dark"] .ai-sources-toggle,
+        [data-theme="dark"] .ai-sources-toggle {
+            background: #2a2a2a !important;
+            border-color: #404040 !important;
+            color: #e0e0e0 !important;
+        }
+        body[data-theme="dark"] .ai-sources-details,
+        [data-theme="dark"] .ai-sources-details {
+            background: #2a2a2a !important;
+            border-color: #404040 !important;
+        }
+        body[data-theme="dark"] .ai-sources-title,
+        [data-theme="dark"] .ai-sources-title {
+            color: #e0e0e0 !important;
+        }
+        body[data-theme="dark"] .ai-source-item,
+        [data-theme="dark"] .ai-source-item {
+            background: #333 !important;
+        }
+        body[data-theme="dark"] .ai-source-label,
+        [data-theme="dark"] .ai-source-label {
+            color: #e0e0e0 !important;
+        }
+        body[data-theme="dark"] .ai-source-question,
+        [data-theme="dark"] .ai-source-question {
+            color: #e0e0e0 !important;
+        }
+        body[data-theme="dark"] .source-question-link,
+        [data-theme="dark"] .source-question-link {
+            color: #64b5f6 !important;
+        }
+        body[data-theme="dark"] .ai-source-verified-by,
+        [data-theme="dark"] .ai-source-verified-by {
+            color: #999 !important;
+        }
+    </style>
 </head>
-<body>
+<body data-theme="dark">
+    <!-- Inline script to apply theme to body immediately -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', theme);
+        })();
+    </script>
     <!-- Auth Container (Top Right) -->
     <div class="auth-container">
         <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
@@ -893,6 +954,15 @@
             // Sources section - clickable to show details
             let sourcesHtml = '';
             if (sourcesCount > 0) {
+                // Get current theme for proper colors - define BEFORE building sourcesListHtml
+                const isDarkTheme = document.body.getAttribute('data-theme') === 'dark' || localStorage.getItem('theme') === 'dark';
+                const sourcesBg = isDarkTheme ? '#2a2a2a' : '#fff';
+                const sourcesBorder = isDarkTheme ? '#404040' : '#e0e0e0';
+                const sourcesText = isDarkTheme ? '#e0e0e0' : '#555';
+                const itemBg = isDarkTheme ? '#333' : '#f8f9fa';
+                const itemText = isDarkTheme ? '#e0e0e0' : '#333';
+                const itemTextMuted = isDarkTheme ? '#999' : '#666';
+                
                 // Build sources list HTML
                 let sourcesListHtml = sourcesData.map((source, idx) => {
                     const type = source.type || 'unknown';
@@ -919,35 +989,35 @@
                     }
                     
                     const questionLink = questionId ? 
-                        `<a href="comment.html?id=${questionId}" style="color: #017374; text-decoration: none;" target="_blank">${question || 'View Question'}</a>` : 
+                        `<a href="comment.html?id=${questionId}" class="source-question-link" target="_blank">${question || 'View Question'}</a>` : 
                         (question || 'Unknown source');
                     
-                    const similarityBadge = similarity ? `<span style="background: #e8f5e9; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${similarity}% match</span>` : '';
+                    const similarityBadge = similarity ? `<span class="source-similarity-badge">${similarity}% match</span>` : '';
                     
                     return `
-                        <div style="padding: 8px 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #017374;">
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <div class="ai-source-item" style="padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid #017374; background: ${itemBg};">
+                            <div class="ai-source-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                                 ${sourceIcon}
-                                <span style="font-weight: 500; font-size: 12px;">${sourceLabel}</span>
+                                <span class="ai-source-label" style="font-weight: 500; font-size: 12px; color: ${itemText};">${sourceLabel}</span>
                                 ${similarityBadge}
                             </div>
-                            <div style="font-size: 13px; color: #333;">
+                            <div class="ai-source-question" style="font-size: 13px; color: ${itemText};">
                                 ${questionLink}
                             </div>
-                            ${verifiedBy ? `<div style="font-size: 11px; color: #666; margin-top: 4px;"><i class="fas fa-user" style="margin-right: 4px;"></i>${verifiedBy}</div>` : ''}
+                            ${verifiedBy ? `<div class="ai-source-verified-by" style="font-size: 11px; color: ${itemTextMuted}; margin-top: 4px;"><i class="fas fa-user" style="margin-right: 4px;"></i>${verifiedBy}</div>` : ''}
                         </div>
                     `;
                 }).join('');
                 
                 sourcesHtml = `
                     <div class="ai-sources" style="margin-top: 12px;">
-                        <div onclick="toggleSourcesDetails()" style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: #555; font-size: 13px; padding: 8px 12px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px;">
+                        <div onclick="toggleSourcesDetails()" class="ai-sources-toggle" style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 12px; border-radius: 6px; background: ${sourcesBg}; border: 1px solid ${sourcesBorder}; color: ${sourcesText};">
                             <i class="fas fa-database" style="color: #017374;"></i>
                             <span>อ้างอิงจาก ${sourcesCount} คำตอบที่ยืนยันแล้ว</span>
-                            <i class="fas fa-chevron-down" id="sourcesToggleIcon" style="margin-left: auto; transition: transform 0.3s; color: #999;"></i>
+                            <i class="fas fa-chevron-down" id="sourcesToggleIcon" style="margin-left: auto; transition: transform 0.3s;"></i>
                         </div>
-                        <div id="sourcesDetailsList" style="display: none; margin-top: 8px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff;">
-                            <div style="font-weight: 600; margin-bottom: 10px; color: #333; font-size: 13px;">
+                        <div id="sourcesDetailsList" class="ai-sources-details" style="display: none; margin-top: 8px; padding: 10px; border-radius: 8px; background: ${sourcesBg}; border: 1px solid ${sourcesBorder};">
+                            <div class="ai-sources-title" style="font-weight: 600; margin-bottom: 10px; font-size: 13px; color: ${sourcesText};">
                                 <i class="fas fa-list"></i> แหล่งอ้างอิง:
                             </div>
                             ${sourcesListHtml}
@@ -974,6 +1044,44 @@
                     </div>
                 </div>
             `;
+        }
+
+        /**
+         * Update decision badge directly in UI without refresh
+         */
+        function updateDecisionBadgeUI(decision) {
+            const aiAnswerContent = document.getElementById('aiAnswerContent');
+            if (!aiAnswerContent) return;
+            
+            // Find existing decision badge or create container for it
+            const headerDiv = aiAnswerContent.querySelector('.ai-answer-header');
+            if (!headerDiv) return;
+            
+            // Remove existing decision badge if any
+            const existingBadge = headerDiv.querySelector('.decision-badge');
+            if (existingBadge) {
+                existingBadge.remove();
+            }
+            
+            // Create new decision badge
+            let badgeHtml = '';
+            if (decision === 'accepted') {
+                badgeHtml = '<span class="decision-badge accepted"><i class="fas fa-check"></i> Accepted</span>';
+            } else if (decision === 'modified') {
+                badgeHtml = '<span class="decision-badge modified"><i class="fas fa-edit"></i> Modified</span>';
+            } else if (decision === 'rejected') {
+                badgeHtml = '<span class="decision-badge rejected"><i class="fas fa-times"></i> Rejected</span>';
+            }
+            
+            if (badgeHtml) {
+                headerDiv.insertAdjacentHTML('beforeend', badgeHtml);
+                
+                // Also add 'reviewed' class to ai-answer-box
+                const answerBox = aiAnswerContent.querySelector('.ai-answer-box');
+                if (answerBox) {
+                    answerBox.classList.add('reviewed');
+                }
+            }
         }
 
         /**
@@ -2610,6 +2718,10 @@
                     selectedFiles = []; // Clear selected files
                     document.getElementById('attachmentPreview').innerHTML = ''; // Clear preview
                     document.getElementById('verifyCommentBtn').style.display = 'none';
+                    
+                    // Update decision badge immediately in UI
+                    updateDecisionBadgeUI('accepted');
+                    
                     // Reload everything to refresh verification status
                     await loadComments();
                     await loadVerifications(); // Reload verifications to update modal data
