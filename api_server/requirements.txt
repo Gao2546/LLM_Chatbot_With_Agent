@@ -50,6 +50,7 @@ sentence-transformers
 bitsandbytes
 accelerate
 einops
+modelscope
 
 # LangChain Ecosystem
 langchain-core

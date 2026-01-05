@@ -1,17 +1,16 @@
 FROM ollama/ollama:latest
 
-# Add Google DNS configuration
+# Add Google DNS configuration (Note: This may be overwritten by Docker/OpenShift at runtime)
 RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
     echo "nameserver 8.8.4.4" >> /etc/resolv.conf && \
     echo "nameserver 1.1.1.1" >> /etc/resolv.conf
 
-RUN cat /etc/resolv.conf
-
 ENV OLLAMA_MODELS=/.ollama/models
 ENV HOME=/home/ollama
+# Add your Google Drive File ID here
+ENV GDRIVE_FILE_ID="YOUR_FILE_ID_HERE"
 
 # Create directories with OpenShift-compatible permissions
-# chmod g=u allows any UID in group 0 (root group) to access
 RUN mkdir -p /.ollama \
              /.ollama/models \
              /home/ollama/.ollama && \
@@ -19,12 +18,36 @@ RUN mkdir -p /.ollama \
     chmod -R g=u /.ollama /home/ollama && \
     chmod -R 775 /.ollama /home/ollama
 
-RUN apt update && \
-    apt install curl -y
+# Fixed apt install syntax and added --break-system-packages for gdown
+RUN apt-get update && \
+    apt-get install -y curl zip unzip python3-pip && \
+    pip3 install --break-system-packages gdown && \
+    rm -rf /var/lib/apt/lists/*
 
-# 2. Create startup script using printf (Fixes the "SET" error)
+# Update startup script
+# 1. Downloads from GDrive if GDRIVE_FILE_ID is provided
+# 2. Extracts to /.ollama/
+# 3. Pulls other models via Ollama API
 RUN printf '#!/bin/bash\n\
 set -e\n\
+\n\
+# --- GDrive Download Logic ---\n\
+if [ ! -z "$GDRIVE_FILE_ID" ]; then\n\
+    echo "Downloading additional models from Google Drive (ID: $GDRIVE_FILE_ID)..."\n\
+    gdown --id "$GDRIVE_FILE_ID" -O /.ollama/extra_models.zip\n\
+    if [ -f /.ollama/extra_models.zip ]; then\n\
+        echo "Extracting models..."\n\
+        unzip -o /.ollama/extra_models.zip -d /.ollama/\n\
+        rm /.ollama/extra_models.zip\n\
+        echo "Extraction complete."\n\
+        # Ensure permissions remain correct after extraction\n\
+        chgrp -R 0 /.ollama && chmod -R g=u /.ollama\n\
+    else\n\
+        echo "GDrive download failed."\n\
+    fi\n\
+fi\n\
+\n\
+# --- Standard Ollama Startup ---\n\
 ollama serve &\n\
 OLLAMA_PID=$!\n\
 echo "Waiting for Ollama to start..."\n\
