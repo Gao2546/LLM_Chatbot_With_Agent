@@ -49,6 +49,7 @@ transformers
 sentence-transformers
 bitsandbytes
 accelerate
+einops
 
 # LangChain Ecosystem
 langchain-core
@@ -59,6 +60,9 @@ langchain-text-splitters
 # Document Processing & OCR
 pymupdf
 Pillow
+docling
+docling-core
+unstructured[pdf]
 beautifulsoup4
 
 # Search & Web Scraping
