@@ -8,7 +8,7 @@ RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
 ENV OLLAMA_MODELS=/.ollama/models
 ENV HOME=/home/ollama
 # Add your Google Drive File ID here
-ENV GDRIVE_FILE_ID="YOUR_FILE_ID_HERE"
+ENV GDRIVE_FILE_ID="1eu3ijHWphzcNnNsAx3054LQD_k3Z0_Hg"
 
 # Create directories with OpenShift-compatible permissions
 RUN mkdir -p /.ollama \
