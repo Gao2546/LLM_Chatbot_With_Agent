@@ -85,14 +85,13 @@ def clear_gpu():
 # ==============================================================================
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# This model remains for text embedding (Legacy Mode), unchanged.
-# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
-# model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
+
+# Initialize model variable (will be set below if LOCAL=True)
+model = None
 
 # Quantization model
-
 if LOCAL:
+    print("🚀 Loading Jina embedding model (LOCAL mode)...")
     # 1. Define the 4-bit configuration
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -102,23 +101,25 @@ if LOCAL:
     )
 
     # 2. Load the model with the config
-    model = SentenceTransformer(
-        "jinaai/jina-embeddings-v4",
-        trust_remote_code=True,
-        model_kwargs={
-            "default_task": "retrieval",
-            "quantization_config": bnb_config,
-            "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
-        },
-    )
-    clear_gpu()
-
-    print(model)
-
-    uses_mem = get_model_memory(model)
-
-# Now move to GPU
-# model.to(device)
+    try:
+        model = SentenceTransformer(
+            "jinaai/jina-embeddings-v4",
+            trust_remote_code=True,
+            model_kwargs={
+                "default_task": "retrieval",
+                "quantization_config": bnb_config,
+                "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
+            },
+        )
+        clear_gpu()
+        print("✅ Jina model loaded successfully")
+        print(model)
+        uses_mem = get_model_memory(model)
+    except Exception as e:
+        print(f"❌ Failed to load Jina model: {e}")
+        model = None
+else:
+    print("📡 Running in REMOTE mode (will use Ollama/API for embeddings)")
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
@@ -2589,42 +2590,48 @@ Output only the descriptive paragraph.
     
 def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[float]:
     """
-    Convert text into an embedding vector.
+    Convert text into an embedding vector using pre-loaded model (FAST).
+    Falls back to Ollama if pre-loaded model unavailable.
     
     Args:
         text: ข้อความที่ต้องการ embedding
         target_dimensions: จำนวน dimensions ที่ต้องการ (default: 1024 สำหรับ verified_answers)
-                          - 384: ใช้ sentence-transformers/all-MiniLM-L6-v2 (เร็ว, RAG เก่า)
-                          - 1024: ใช้ jinaai/jina-embeddings-v4 (ดี, verified_answers)
     
     Returns:
-        list[float]: embedding vector
+        list[float]: embedding vector (1024 dims)
     """
+    global model  # Use the pre-loaded model
+    
     # ตรวจสอบว่า text ว่างหรือไม่
     if not text or not text.strip():
         print(f"❌ ERROR: Empty text provided!")
         raise ValueError("Cannot create embedding from empty text")
     
-    # --- NEW: Use DeepInfra for embeddings ---
-    if os.getenv("DEEPINFRA_API_KEY"):
-        if not LOCAL:
-            embeddings_list = DeepInfraEmbedding(inputs=[text],model_name="Qwen/Qwen3-Embedding-4B")
-            if embeddings_list and len(embeddings_list) > 0:
-                print("✅ Generated embedding using DeepInfra.")
-                return embeddings_list[0]
-            else:
-                print("⚠️ DeepInfra embedding failed. Falling back to local model.")
+    try:
+        # Use the pre-loaded Jina embedding model (FAST - no reload)
+        if model is not None:
+            print(f"⚡ Using PRE-LOADED Jina model for embedding (instant)...")
+            embedding = model.encode(text, task='retrieval')
+            return embedding.tolist()
         else:
-            embeddings_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
-            # embeddings_list = model.encode(text,device='cpu',task='retrieval').tolist()
-            return embeddings_list
-    
-    # --- FALLBACK: Original SentenceTransformer logic ---
-    print("Generating embedding using local SentenceTransformer model.")
-    # model.to(device)
-    embedding = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
-    # model.to("cpu")
-    return embedding
+            print("⚠️ Model not initialized (model=None). Using Ollama fallback (slower, 3-5 seconds)...")
+            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+            if embedding_list and len(embedding_list) > 0:
+                return embedding_list[0]
+            else:
+                raise ValueError("Ollama returned empty embedding")
+            
+    except Exception as e:
+        print(f"❌ Jina embedding error: {e}. Trying Ollama fallback...")
+        try:
+            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+            if embedding_list and len(embedding_list) > 0:
+                return embedding_list[0]
+            else:
+                raise ValueError("Ollama returned empty embedding")
+        except Exception as ollama_error:
+            print(f"❌ ALL embedding methods failed: {ollama_error}")
+            raise ValueError(f"Embedding failed: {ollama_error}")
 
 def clean_text(input_text: str) -> str:
     """
@@ -2758,6 +2765,7 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
 
         # Step 2: Search within same user and same chat
         # JOIN with uploaded_files to filter by chat_history_id
+        print(f"🔍 Searching legacy documents for chat_id={chat_history_id}, threshold={threshold_text}, top_k={top_k}...")
         query = """
             SELECT 
                 t1.id AS page_embedding_id, 
@@ -2779,11 +2787,13 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
         cur.close()
 
         # Step 3: Return results
-
+        print(f"✅ Found {len(results)} legacy document matches")
+        
         # Show search results for debugging
-        print("Search Results:")
-        for row in results:
-            print(row[1] + " ==> " + str(row[5]))
+        if results:
+            print("Search Results:")
+            for row in results:
+                print(f"  - {row[1]} (distance: {row[5]:.4f})")
 
         return [
             {'id': row[0], 'file_name': row[1],'object_name' : row[2],'page_number' : row[3], 'text': row[4], 'distance': row[5]}
@@ -2880,31 +2890,34 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
             
             # Handle division by zero if all distances are identical (dist_range == 0)
             if dist_range == 0:
-                normalized_distance = 0.0
+                # If all distances are the same, all results are equally good
+                similarity_score = 1.0
             else:
                 # Min-Max normalization: (value - min) / (max - min)
                 normalized_distance = (original_distance - min_dist) / dist_range
+                # Convert distance to similarity: lower distance = higher similarity
+                similarity_score = 1.0 - normalized_distance
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'  # Show full precision
+            })
         
         print(f"processed_results : {processed_results}")
 
-        # Now, filter based on the *new* normalized threshold
-        final_normalized_threshold = 1.0
+        # Now, filter based on the *new* similarity threshold (higher is better)
+        similarity_threshold = 0.5  # Keep results with similarity >= 0.5
         final_filtered_results = [
             item for item in processed_results 
-            if item['normalized_distance'] <= final_normalized_threshold
+            if item['similarity_score'] >= similarity_threshold
         ]
         
-        print(f"ℹ️ Filtered to {len(final_filtered_results)} pages (normalized distance <= {final_normalized_threshold}).")
+        print(f"ℹ️ Filtered to {len(final_filtered_results)} pages (similarity_score >= {similarity_threshold}).")
         # --- END: New logic ---
 
         # Step 3: Return *final filtered* results
@@ -3030,22 +3043,28 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
         processed_results = []
         for row in results:
             original_distance = row[4]
-            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            if dist_range == 0:
+                similarity_score = 1.0
+            else:
+                normalized_distance = (original_distance - min_dist) / dist_range
+                similarity_score = 1.0 - normalized_distance
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'
+            })
 
         print(f"processed_results : {processed_results}")
         
-        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
-        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        # Filter by similarity threshold (higher is better)
+        similarity_threshold = 0.5
+        final_filtered_results = [item for item in processed_results if item['similarity_score'] >= similarity_threshold]
         
         return final_filtered_results
 
@@ -3160,22 +3179,28 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
         processed_results = []
         for row in results:
             original_distance = row[4]
-            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            if dist_range == 0:
+                similarity_score = 1.0
+            else:
+                normalized_distance = (original_distance - min_dist) / dist_range
+                similarity_score = 1.0 - normalized_distance
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'
+            })
 
         print(f"processed_results : {processed_results}")
         
-        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
-        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        # Filter by similarity threshold (higher is better)
+        similarity_threshold = 0.5
+        final_filtered_results = [item for item in processed_results if item['similarity_score'] >= similarity_threshold]
         return final_filtered_results
     except Exception as e:
         print(f"Error in search_similar_pages_by_active_user_all: {e}")

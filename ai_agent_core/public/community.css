@@ -868,6 +868,35 @@ body {
     color: #0a8276;
 }
 
+/* Dashboard Button */
+.btn-dashboard {
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: linear-gradient(135deg, #009374, #00b894);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+}
+
+.btn-dashboard:hover {
+    background: linear-gradient(135deg, #00b894, #00d4aa);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 147, 116, 0.3);
+}
+
+.btn-dashboard:active {
+    transform: translateY(0);
+}
+
 /* ========== LOADING & EMPTY STATES ========== */
 .loading-state {
     text-align: center;
@@ -1217,6 +1246,15 @@ body[data-theme="light"] .time {
 body[data-theme="light"] .right-sidebar .info-box {
     background: #fff;
     border-color: #e0e0e0;
+}
+
+body[data-theme="light"] .btn-dashboard {
+    background: linear-gradient(135deg, #009374, #00b894);
+    color: white;
+}
+
+body[data-theme="light"] .btn-dashboard:hover {
+    background: linear-gradient(135deg, #00b894, #00d4aa);
 }
 
 body[data-theme="light"] .box-title {

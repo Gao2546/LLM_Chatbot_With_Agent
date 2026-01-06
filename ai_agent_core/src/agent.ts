@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution } from './db.js';
 
 dotenv.config();
 
@@ -749,23 +749,37 @@ router.post('/message', async (req : Request, res : Response) => {
         // 1. Generate embedding for the question
         let embedding: number[] = [];
         try {
+          const userQuestion = userMessage || '';
+          
+          console.log('⏳ Requesting embedding from Python API...');
+          socket?.emit('StreamText', '⏳ กำลังประมวลผลคำถาม (loading embeddings)...\n');
+          
           const embeddingRes = await axios.post(
             `${API_SERVER_URL}/encode_embedding`,
             { text: userQuestion, dimensions: 1024 },
-            { timeout: 30000 }
+            { timeout: 120000 }  // ⬅️ INCREASED from 30s to 120s (2 minutes)
           );
           
           if (embeddingRes.data && embeddingRes.data.embedding) {
             embedding = embeddingRes.data.embedding;
-            console.log(`AI Suggests: Got embedding with ${embedding.length} dimensions`);
+            console.log(`✅ AI Suggests: Got embedding with ${embedding.length} dimensions`);
+            socket?.emit('StreamText', '✅ Embedding ready. Searching knowledge base...\n');
+          } else {
+            throw new Error('No embedding in response');
           }
         } catch (apiError: any) {
-          console.error('AI Suggests: Failed to get embedding:', apiError.message);
-          socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
-          return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+          console.error('❌ AI Suggests: Failed to get embedding:', apiError.message);
+          socket?.emit('StreamText', '❌ Failed to generate embeddings. Please try again.');
+          return res.json({ response: '❌ Embedding service unavailable' });
         }
         
         // 2. Search verified answers from knowledge base
+        if (embedding.length === 0) {
+          console.warn('⚠️ AI Suggests: Embedding is empty, cannot search knowledge base');
+          socket?.emit('StreamText', '❌ Could not generate embedding for query');
+          return res.json({ response: '❌ Embedding generation failed' });
+        }
+        
         const results = await searchVerifiedAnswers(embedding, 0.5, 5);
         
         let context = '';
@@ -773,6 +787,7 @@ router.post('/message', async (req : Request, res : Response) => {
         let totalSources = 0;
         
         if (results && results.length > 0) {
+          console.log(`✅ AI Suggests: Found ${results.length} verified answers to reference`);
           context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
           results.forEach((result: any, idx: number) => {
             const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
@@ -4065,6 +4080,97 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             errorTags.push('ai_failed');
           }
           
+          // ========== AI Knowledge Group Classification ==========
+          // Classify the question into a knowledge group for analytics
+          let predictedGroup: string | null = null;
+          let groupConfidence: number | null = null;
+          
+          try {
+            // Get full context for better classification
+            const aiAnswerText = aiSuggestion.ai_generated_answer || '';
+            
+            const classificationPrompt = `
+You are a semiconductor packaging domain expert. Classify this Q&A into ONE knowledge group.
+
+**Knowledge Groups:**
+1. **Electrical Pad** - PCB pad design, trace routing, electrical connections, contact points
+2. **Wire Bonding** - Wire connection processes, bonding techniques, wire materials, ball/wedge bonding
+3. **Die Attach** - Die attachment methods, substrate connection, die bonding, epoxy, adhesives
+4. **Package Design** - Overall package architecture, encapsulation, form factor, molding, substrate design
+5. **Testing & QC** - Test procedures, quality control, inspection, defect analysis, probing, measurement
+6. **Process Optimization** - Manufacturing improvements, yield enhancement, cycle time reduction
+7. **Material Science** - Material properties, selection, compatibility, chemical properties, substrates
+8. **Thermal Management** - Heat dissipation, thermal design, cooling solutions, temperature control
+9. **Reliability** - Product lifetime, failure analysis, stress testing, MTBF, durability
+10. **Equipment & Tools** - Machine operation, maintenance, calibration, tooling, prober, bonder
+11. **Other** - Does not clearly fit above categories
+
+**Question:**
+${originalQuestion}
+
+**AI Answer:**
+${aiAnswerText.substring(0, 600)}
+
+**Expert Verification:**
+${expertComments || humanAnswer.substring(0, 300)}
+
+**Instructions:**
+- Analyze the TECHNICAL DOMAIN and MAIN PURPOSE of the Q&A
+- Equipment questions (prober, bonder, etc.) → "Equipment & Tools"
+- Inspection/testing procedures → "Testing & QC"
+- Material selection/properties → "Material Science"
+- If multiple groups apply, choose the PRIMARY domain
+- If truly uncertain or general, use "Other" with confidence < 0.5
+
+Return ONLY this JSON format (no markdown, no explanation):
+{"group": "Testing & QC", "confidence": 0.85}
+`;
+
+            // Use Llama3 for better classification accuracy
+            console.log('🔍 Calling Ollama for knowledge group classification...');
+            const classifyResponse = await fetch(process.env.API_OLLAMA!, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'llama3:latest',
+                prompt: classificationPrompt,
+                stream: false,
+                options: { 
+                  temperature: 0.2,
+                  num_predict: 100
+                }
+              })
+            });
+            
+            console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+            
+            if (classifyResponse.ok) {
+              const classifyData = await classifyResponse.json() as { response?: string };
+              const classifyText = classifyData.response || '';
+              
+              console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+              
+              // Try to extract JSON from response
+              const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+              if (jsonMatch) {
+                try {
+                  const classification = JSON.parse(jsonMatch[0]);
+                  predictedGroup = classification.group || null;
+                  groupConfidence = typeof classification.confidence === 'number' 
+                    ? Math.min(1, Math.max(0, classification.confidence)) 
+                    : null;
+                  
+                  console.log(`📁 Knowledge Group: ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                } catch (parseErr) {
+                  console.warn('Could not parse classification JSON:', parseErr);
+                }
+              }
+            }
+          } catch (classifyError) {
+            console.warn('Knowledge group classification failed (non-critical):', classifyError);
+          }
+          // ========== END AI Knowledge Group Classification ==========
+          
           await saveAILearningAnalysis(aiSuggestion.id, {
             conflictType: judgeResult.conflictType || 'none',
             conflictDetails: judgeResult.analysis || '',
@@ -4074,7 +4180,9 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             suggestedPromptFix: judgeResult.suggestedImprovement || '',
             suggestedRouting: suggestedRouting,
             errorTags: errorTags,
-            analyzedBy: 'llm-judge'
+            analyzedBy: 'llm-judge',
+            predictedGroup: predictedGroup || undefined,
+            groupConfidence: groupConfidence || undefined
           });
           
           // Store judge result to return in response
@@ -5105,6 +5213,50 @@ router.post('/ai-learning-analysis', async (req: Request, res: Response) => {
 
   } catch (error) {
     console.error('Error saving AI learning analysis:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get Knowledge Group Analytics
+ * GET /api/knowledge-group-analytics
+ */
+router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
+  try {
+    const [groupAnalytics, confidenceDistribution] = await Promise.all([
+      getKnowledgeGroupAnalytics(),
+      getConfidenceDistribution()
+    ]);
+
+    // Calculate summary stats
+    const totalQuestions = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.total_questions || 0), 0);
+    const totalRejected = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.rejected_count || 0), 0);
+    const totalAccepted = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.accepted_count || 0), 0);
+    const totalPending = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.pending_count || 0), 0);
+    const totalHighConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.high_conf_count || 0), 0);
+    const totalLowConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.low_conf_count || 0), 0);
+    const totalDecisions = totalRejected + totalAccepted;
+    
+    res.json({
+      success: true,
+      data: {
+        groupDistribution: groupAnalytics,
+        confidenceDistribution,
+        summary: {
+          totalQuestions,
+          totalPending,
+          totalRejected,
+          totalAccepted,
+          rejectionRate: totalDecisions > 0 ? Math.round(100 * totalRejected / totalDecisions) : 0,
+          highConfidenceCount: totalHighConf,
+          lowConfidenceCount: totalLowConf,
+          uniqueGroups: groupAnalytics.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting knowledge group analytics:', error);
     res.status(500).json({ success: false, error: String(error) });
   }
 });

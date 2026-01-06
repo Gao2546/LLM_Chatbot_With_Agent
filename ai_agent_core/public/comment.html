@@ -1047,44 +1047,6 @@
         }
 
         /**
-         * Update decision badge directly in UI without refresh
-         */
-        function updateDecisionBadgeUI(decision) {
-            const aiAnswerContent = document.getElementById('aiAnswerContent');
-            if (!aiAnswerContent) return;
-            
-            // Find existing decision badge or create container for it
-            const headerDiv = aiAnswerContent.querySelector('.ai-answer-header');
-            if (!headerDiv) return;
-            
-            // Remove existing decision badge if any
-            const existingBadge = headerDiv.querySelector('.decision-badge');
-            if (existingBadge) {
-                existingBadge.remove();
-            }
-            
-            // Create new decision badge
-            let badgeHtml = '';
-            if (decision === 'accepted') {
-                badgeHtml = '<span class="decision-badge accepted"><i class="fas fa-check"></i> Accepted</span>';
-            } else if (decision === 'modified') {
-                badgeHtml = '<span class="decision-badge modified"><i class="fas fa-edit"></i> Modified</span>';
-            } else if (decision === 'rejected') {
-                badgeHtml = '<span class="decision-badge rejected"><i class="fas fa-times"></i> Rejected</span>';
-            }
-            
-            if (badgeHtml) {
-                headerDiv.insertAdjacentHTML('beforeend', badgeHtml);
-                
-                // Also add 'reviewed' class to ai-answer-box
-                const answerBox = aiAnswerContent.querySelector('.ai-answer-box');
-                if (answerBox) {
-                    answerBox.classList.add('reviewed');
-                }
-            }
-        }
-
-        /**
          * Toggle sources details visibility
          */
         function toggleSourcesDetails() {
@@ -2718,14 +2680,14 @@
                     selectedFiles = []; // Clear selected files
                     document.getElementById('attachmentPreview').innerHTML = ''; // Clear preview
                     document.getElementById('verifyCommentBtn').style.display = 'none';
-                    
-                    // Update decision badge immediately in UI
-                    updateDecisionBadgeUI('accepted');
-                    
                     // Reload everything to refresh verification status
                     await loadComments();
                     await loadVerifications(); // Reload verifications to update modal data
                     await loadQuestionDetail(); // Reload question to get updated status
+                    // Reload AI answer with question ID and answer to update decision badge
+                    if (currentQuestion) {
+                        await loadAISuggestion(currentQuestionId, currentQuestion.answer);
+                    }
                 } else {
                     const error = await res.json();
                     showMessage(error.error || 'Failed to submit verification', 'error');

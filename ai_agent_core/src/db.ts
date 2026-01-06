@@ -2024,9 +2024,24 @@ async function initializeAISuggestionsTables() {
         suggested_prompt_fix TEXT,
         suggested_routing TEXT,
         error_tags TEXT[],
+        predicted_group VARCHAR(255),
+        group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1),
         analyzed_at TIMESTAMP DEFAULT NOW(),
         analyzed_by VARCHAR(100) DEFAULT 'auto'
       );
+    `);
+
+    // Migration: Add new columns if they don't exist (for existing tables)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='predicted_group') THEN
+          ALTER TABLE ai_learning_analysis ADD COLUMN predicted_group VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='group_confidence') THEN
+          ALTER TABLE ai_learning_analysis ADD COLUMN group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1);
+        END IF;
+      END $$;
     `);
 
     // Create indexes
@@ -2035,6 +2050,10 @@ async function initializeAISuggestionsTables() {
       CREATE INDEX IF NOT EXISTS idx_ai_suggestions_decision ON ai_suggestions(decision);
       CREATE INDEX IF NOT EXISTS idx_ai_learning_analysis_suggestion ON ai_learning_analysis(ai_suggestion_id);
     `);
+    
+    // Create indexes for new columns (separate to handle existing table)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_learning_predicted_group ON ai_learning_analysis(predicted_group);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_learning_group_confidence ON ai_learning_analysis(group_confidence);`);
 
     console.log('✅ AI Suggestions tables initialized');
   } catch (error) {
@@ -2157,6 +2176,8 @@ async function saveAILearningAnalysis(
     suggestedRouting?: string;
     errorTags?: string[];
     analyzedBy?: string;
+    predictedGroup?: string;
+    groupConfidence?: number;
   }
 ) {
   try {
@@ -2164,9 +2185,9 @@ async function saveAILearningAnalysis(
       `INSERT INTO ai_learning_analysis (
         ai_suggestion_id, conflict_type, conflict_details, severity,
         similarity_score, key_differences, suggested_prompt_fix,
-        suggested_routing, error_tags, analyzed_by
+        suggested_routing, error_tags, analyzed_by, predicted_group, group_confidence
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING id`,
       [
         suggestionId,
@@ -2178,7 +2199,9 @@ async function saveAILearningAnalysis(
         analysis.suggestedPromptFix || null,
         analysis.suggestedRouting || null,
         analysis.errorTags || [],
-        analysis.analyzedBy || 'auto'
+        analysis.analyzedBy || 'auto',
+        analysis.predictedGroup || null,
+        analysis.groupConfidence || null
       ]
     );
     
@@ -2234,6 +2257,75 @@ async function getAIConflictPatterns() {
     return result.rows;
   } catch (error) {
     console.error('Error getting AI conflict patterns:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get Knowledge Group distribution and confidence analysis
+ * For AI classification analytics - with Pending/Rejected stats
+ */
+async function getKnowledgeGroupAnalytics() {
+  try {
+    // First, ensure we have the necessary indexes for performance
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_learning_predicted_group_confidence 
+      ON ai_learning_analysis(predicted_group, group_confidence);
+      
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_decision 
+      ON ai_suggestions(decision);
+      
+      CREATE INDEX IF NOT EXISTS idx_verified_answers_tags 
+      ON verified_answers USING GIN(tags);
+    `);
+    
+    const result = await pool.query(`
+      SELECT 
+        ala.predicted_group,
+        COUNT(DISTINCT va.id) as total_questions,
+        COUNT(*) as total_predictions,
+        ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'pending' THEN va.id END) as pending_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'accepted' THEN va.id END) as accepted_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'rejected' THEN va.id END) as rejected_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence >= 0.80) as high_conf_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence < 0.50) as low_conf_count
+      FROM ai_learning_analysis ala
+      INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
+      INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
+      WHERE ala.predicted_group IS NOT NULL
+      GROUP BY ala.predicted_group
+      ORDER BY total_questions DESC, rejected_count DESC
+      LIMIT 100
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting knowledge group analytics:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get confidence distribution histogram
+ */
+async function getConfidenceDistribution() {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        CASE 
+          WHEN group_confidence >= 0.80 THEN 'High (≥0.80)'
+          WHEN group_confidence >= 0.60 THEN 'Medium (0.60-0.79)'
+          ELSE 'Low (<0.60)'
+        END as range,
+        COUNT(*) as count
+      FROM ai_learning_analysis
+      WHERE predicted_group IS NOT NULL
+      GROUP BY range
+      ORDER BY range DESC
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting confidence distribution:', error);
     throw error;
   }
 }
@@ -2310,6 +2402,8 @@ export {
   saveAILearningAnalysis,
   getAIPerformanceSummary,
   getAIConflictPatterns,
+  getKnowledgeGroupAnalytics,
+  getConfidenceDistribution,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,
