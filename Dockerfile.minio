@@ -1,0 +1,27 @@
+# Stage 1: Get the MinIO Client (mc) binary
+FROM minio/mc:latest AS mc-container
+
+# Stage 2: Main MinIO Server
+FROM minio/minio:latest
+
+# Set environment variables
+ENV MINIO_ROOT_USER=minioadmin
+ENV MINIO_ROOT_PASSWORD=minioadmin
+
+# Copy mc binary from the first stage
+COPY --from=mc-container /usr/bin/mc /usr/bin/mc
+
+# Create the data directory
+RUN mkdir -p /data && chmod -R 777 /data
+
+# Expose ports
+EXPOSE 9000
+EXPOSE 9090
+
+# Embed the startup logic directly in the ENTRYPOINT
+# This starts the server in the background, waits for it, creates the bucket, and brings the server to the foreground.
+ENTRYPOINT ["/bin/sh", "-c", \
+    "minio server /data --console-address :9090 & \
+    until (mc alias set myminio http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD); do echo 'Waiting for MinIO...'; sleep 1; done; \
+    mc mb myminio/user-files || true; \
+    wait"]
