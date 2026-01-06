@@ -34,7 +34,7 @@ set -e\n\
 # --- GDrive Download Logic ---\n\
 if [ ! -z "$GDRIVE_FILE_ID" ]; then\n\
     echo "Downloading additional models from Google Drive (ID: $GDRIVE_FILE_ID)..."\n\
-    gdown --id "$GDRIVE_FILE_ID" -O /.ollama/extra_models.zip\n\
+    gdown "$GDRIVE_FILE_ID" -O /.ollama/extra_models.zip\n\
     if [ -f /.ollama/extra_models.zip ]; then\n\
         echo "Extracting models..."\n\
         unzip -o /.ollama/extra_models.zip -d /.ollama/\n\
