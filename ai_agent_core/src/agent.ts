@@ -67,6 +67,7 @@ const ai = new GoogleGenAI({apiKey:process.env.Google_API_KEY});
 import fs = require('fs');
 import { get } from 'http';
 import { json } from 'stream/consumers';
+import { error } from 'console';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -2326,6 +2327,28 @@ router.get('/get_current_user', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     res.json({ userId: userId });
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.get('/isGuest', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    else {
+      const isGuest = req.session?.user?.isGuest;
+      if (isGuest) {
+        return res.status(401).json({error : 'Unauthorized' })
+      }
+      else {
+        res.json({ userId: userId });
+      }
+    }
+    
   } catch (error) {
     console.error('Error getting current user:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
