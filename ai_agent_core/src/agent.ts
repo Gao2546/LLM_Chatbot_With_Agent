@@ -780,31 +780,48 @@ router.post('/message', async (req : Request, res : Response) => {
           return res.json({ response: '❌ Embedding generation failed' });
         }
         
-        const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+        // Use threshold 0.6 (60%) to find relevant matches only
+        // Higher threshold prevents irrelevant answers from being used
+        const SIMILARITY_THRESHOLD = 0.6;
+        console.log(`🔍 AI Suggests: Searching with embedding length=${embedding.length}, threshold=${SIMILARITY_THRESHOLD}`);
+        const results = await searchVerifiedAnswers(embedding, SIMILARITY_THRESHOLD, 5);
+        console.log(`🔍 AI Suggests: Search returned ${results?.length || 0} results`);
         
         let context = '';
         let sourcesUsed: any[] = [];
         let totalSources = 0;
         
         if (results && results.length > 0) {
-          console.log(`✅ AI Suggests: Found ${results.length} verified answers to reference`);
-          context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
-          results.forEach((result: any, idx: number) => {
-            const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
-            context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
-            context += `[คำตอบ]: ${result.answer}\n`;
-            if (result.tags && result.tags.length > 0) {
-              context += `[แท็ก]: ${result.tags.join(', ')}\n`;
-            }
-            context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
-            
-            sourcesUsed.push({
-              type: 'verified_answer',
-              question: result.question,
-              similarity: result.similarity
+          // Filter out results with low similarity even if they passed threshold
+          const relevantResults = results.filter((r: any) => r.similarity >= SIMILARITY_THRESHOLD);
+          
+          if (relevantResults.length > 0) {
+            console.log(`✅ AI Suggests: Found ${relevantResults.length} relevant verified answers`);
+            relevantResults.forEach((r: any, i: number) => {
+              console.log(`   ${i+1}. Q${r.id} (${r.verification_type}): similarity=${r.similarity?.toFixed(3)} - "${r.question?.substring(0, 60)}..."`);
             });
-            totalSources++;
-          });
+            context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+            relevantResults.forEach((result: any, idx: number) => {
+              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+              context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
+              context += `[คำตอบ]: ${result.answer}\n`;
+              if (result.tags && result.tags.length > 0) {
+                context += `[แท็ก]: ${result.tags.join(', ')}\n`;
+              }
+              context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+              
+              sourcesUsed.push({
+                type: 'verified_answer',
+                question: result.question,
+                similarity: result.similarity
+              });
+              totalSources++;
+            });
+          } else {
+            console.log(`⚠️ AI Suggests: No relevant answers found (all below ${SIMILARITY_THRESHOLD * 100}% threshold)`);
+          }
+        } else {
+          console.log(`📚 AI Suggests: No verified answers found in knowledge base`);
         }
         
         console.log(`📚 Total verified sources found: ${totalSources}`);
@@ -3860,23 +3877,33 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
         // Check if verification is complete
         let isVerificationComplete = false;
         
+        console.log(`🔍 Q${questionId} - Type: ${verificationType}, Requested: [${requestedDepartments.join(', ')}]`);
+        
         if (verificationType === 'self') {
           // Self-verified questions are always complete
           isVerificationComplete = true;
+          console.log(`✅ Self-verified question - no synthesis needed`);
         } else if (verificationType === 'request' && requestedDepartments.length > 0) {
-          // Check how many departments have verified
+          // Check how many UNIQUE departments have verified
           const verificationCountResult = await pool.query(
-            `SELECT COUNT(DISTINCT requested_departments[1]) as verified_count
+            `SELECT ARRAY_AGG(DISTINCT requested_departments[1]) as verified_depts, 
+                    COUNT(DISTINCT requested_departments[1]) as verified_count
              FROM answer_verifications 
              WHERE verified_answer_id = $1 
-             AND verification_type = 'verification'`,
+             AND verification_type = 'verification'
+             AND commenter_name IS NOT NULL`,
             [questionId]
           );
+          
+          const verifiedDepts = verificationCountResult.rows[0]?.verified_depts || [];
           const verifiedCount = parseInt(verificationCountResult.rows[0]?.verified_count || '0');
           const requestedCount = requestedDepartments.length;
           
           isVerificationComplete = verifiedCount >= requestedCount;
-          console.log(`📋 Verification status: ${verifiedCount}/${requestedCount} departments verified`);
+          console.log(`📋 Q${questionId} Verification status: ${verifiedCount}/${requestedCount} departments`);
+          console.log(`   Requested: [${requestedDepartments.join(', ')}]`);
+          console.log(`   Verified:  [${verifiedDepts.join(', ')}]`);
+          console.log(`   Complete:  ${isVerificationComplete ? 'YES ✅' : 'NO ⏳'}`);
         } else {
           // No specific request, consider complete after first verification
           isVerificationComplete = true;
@@ -3901,6 +3928,142 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
           const expertComments = allVerifications.rows
             .map(v => `- ${v.commenter_name} (${v.requested_departments?.[0] || 'General'}): ${v.comment || 'ยืนยันแล้ว'}`)
             .join('\n');
+        
+          // ========== ⭐ NEW: SYNTHESIZE ANSWER FROM ALL VERIFICATIONS ==========
+          console.log(`🔄 Synthesizing final answer from ${allVerifications.rows.length} verifications...`);
+          
+          const expertCommentsForSynthesis = allVerifications.rows
+            .map(v => `**${v.commenter_name}** (${v.requested_departments?.[0] || 'General'}, ${new Date(v.created_at || Date.now()).toLocaleDateString('th-TH')}):\n${v.comment || 'ยืนยันแล้ว'}`)
+            .join('\n\n---\n\n');
+        
+          // Use LLM to synthesize the final answer
+          const synthesisPrompt = `คุณเป็นผู้เชี่ยวชาญด้าน Semiconductor Packaging กำลังรวบรวมความรู้จากผู้เชี่ยวชาญหลายแผนกเป็นคำตอบเดียวที่ครบถ้วน
+
+**คำถามต้นฉบับ:**
+${originalQuestion}
+
+**คำตอบจากผู้เชี่ยวชาญแต่ละแผนก:**
+${expertCommentsForSynthesis}
+
+**ภารกิจของคุณ:**
+โปรดสังเคราะห์คำตอบจากผู้เชี่ยวชาญทั้งหมดเป็นคำตอบเดียวที่:
+1. **ครบถ้วน** - รวมข้อมูลสำคัญจากทุกแผนก
+2. **กระชับ** - ตัดข้อมูลซ้ำซ้อนออก
+3. **เป็นระบบ** - จัดโครงสร้างเป็นหัวข้อชัดเจน
+4. **ตอบโจทย์** - ตอบคำถามตรงประเด็น
+5. **ระบุแหล่งที่มา** - อ้างอิงผู้เชี่ยวชาญที่ให้ข้อมูล
+
+**รูปแบบคำตอบ:**
+- ใช้ Markdown เพื่อจัดรูปแบบ
+- แบ่งเป็นหัวข้อย่อย (##) หากมีหลายประเด็น
+- ใช้ bullet points (•) เมื่อมีรายการ
+- หากมีความขัดแย้งระหว่างแผนก ให้ระบุทั้งสองมุมมองและอธิบาย
+- สรุปด้วย **Key Takeaways** (สั้นๆ 2-3 ข้อ) ถ้าคำตอบยาว
+
+**ห้ามเพิ่มข้อมูลที่ไม่มีในคำตอบผู้เชี่ยวชาญ - ใช้เฉพาะข้อมูลที่มีให้เท่านั้น**
+
+ตอบเป็นภาษาไทย ชัดเจน เข้าใจง่าย:`;
+
+          let synthesizedAnswer = '';
+          
+          // Try using Google Gemini for synthesis
+          try {
+            console.log('🤖 Calling Gemini for answer synthesis...');
+            const geminiResult = await ai.models.generateContent({
+              model: 'gemini-2.0-flash-exp',
+              contents: synthesisPrompt,
+              config: {
+                maxOutputTokens: 2000,
+                temperature: 0.3,
+              },
+            });
+            
+            synthesizedAnswer = geminiResult.text || '';
+            console.log(`✅ Gemini synthesis complete: ${synthesizedAnswer.length} characters`);
+          } catch (llmError) {
+            console.warn('Gemini synthesis failed, trying Ollama:', llmError);
+            
+            // Fallback to Ollama
+            try {
+              const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'llama3:latest',
+                  prompt: synthesisPrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.3,
+                    num_predict: 2000
+                  }
+                })
+              });
+              
+              if (ollamaResponse.ok) {
+                const ollamaData = await ollamaResponse.json() as { response?: string };
+                synthesizedAnswer = ollamaData.response || '';
+                console.log(`✅ Ollama synthesis complete: ${synthesizedAnswer.length} characters`);
+              }
+            } catch (ollamaError) {
+              console.error('Both Gemini and Ollama synthesis failed:', ollamaError);
+            }
+          }
+          
+          // If synthesis succeeded, create embedding and save to sum_verified_answer
+          if (synthesizedAnswer && synthesizedAnswer.length > 50) {
+            try {
+              // Add synthesis metadata footer
+              const verifierNames = allVerifications.rows
+                .map(v => `${v.commenter_name} (${v.requested_departments?.[0] || 'General'})`)
+                .join(', ');
+              
+              const finalAnswer = `${synthesizedAnswer}\n\n---\n\n*คำตอบนี้ถูกสังเคราะห์จากความเห็นของผู้เชี่ยวชาญ ${allVerifications.rows.length} ท่าน: ${verifierNames}*`;
+              
+              // Get embedding for synthesized answer
+              let sumAnswerEmbedding: number[] = [];
+              try {
+                const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+                const embeddingRes = await fetch(`${API_SERVER_URL}/encode_embedding`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    text: synthesizedAnswer,
+                    dimensions: 1024
+                  })
+                });
+                
+                if (embeddingRes.ok) {
+                  const embData = await embeddingRes.json() as { embedding?: number[] };
+                  sumAnswerEmbedding = embData.embedding || [];
+                  console.log(`✅ Created embedding for synthesized answer (${sumAnswerEmbedding.length} dims)`);
+                }
+              } catch (embErr) {
+                console.warn('Failed to create embedding for synthesized answer:', embErr);
+              }
+              
+              // Update sum_verified_answer and sum_verified_answer_embedding (NOT the original answer)
+              if (sumAnswerEmbedding.length === 1024) {
+                await pool.query(
+                  `UPDATE verified_answers 
+                   SET sum_verified_answer = $1, 
+                       sum_verified_answer_embedding = $2,
+                       last_updated_at = NOW()
+                   WHERE id = $3`,
+                  [finalAnswer, JSON.stringify(sumAnswerEmbedding), questionId]
+                );
+                
+                console.log(`✅ ⭐ SYNTHESIZED ANSWER SAVED to sum_verified_answer for Q${questionId} (${finalAnswer.length} chars)`);
+              } else {
+                console.warn('⚠️ Invalid embedding size, not saving synthesized answer');
+              }
+              
+            } catch (updateError) {
+              console.error('Failed to update synthesized answer:', updateError);
+            }
+          } else {
+            console.warn('⚠️ Synthesis failed or too short, not saving synthesized answer');
+          }
+          // ========== END ANSWER SYNTHESIS ==========
         
           // Use LLM to judge the difference
           const judgePrompt = `คุณเป็นผู้ตรวจสอบคุณภาพคำตอบ AI โปรดวิเคราะห์ความแตกต่างระหว่างคำตอบ AI กับคำตอบจากผู้เชี่ยวชาญ
@@ -3965,11 +4128,41 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
               judgeResult = JSON.parse(jsonMatch[0]);
             }
           } catch (llmError) {
-            console.warn('LLM Judge (Gemini) failed, using fallback:', llmError);
+            console.warn('LLM Judge (Gemini) failed, trying Ollama:', llmError);
+            
+            // Fallback to Ollama for LLM Judge
+            try {
+              const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'llama3:latest',
+                  prompt: judgePrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.1,
+                    num_predict: 1000
+                  }
+                })
+              });
+              
+              if (ollamaJudgeResponse.ok) {
+                const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
+                const responseText = ollamaData.response || '';
+                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  judgeResult = JSON.parse(jsonMatch[0]);
+                  console.log('✅ LLM Judge (Ollama) succeeded');
+                }
+              }
+            } catch (ollamaJudgeError) {
+              console.warn('LLM Judge (Ollama) also failed:', ollamaJudgeError);
+            }
           }
           
-          // Fallback: Smarter text comparison if LLM fails
+          // Fallback: Smarter text comparison if both LLMs fail
           if (!judgeResult) {
+            console.log('⚠️ Both LLMs failed, using text analysis fallback');
             const normalizeText = (text: string) => 
               text.toLowerCase().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
             
@@ -3983,44 +4176,53 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             const union = new Set([...humanWords, ...aiWords]);
             const jaccardSimilarity = union.size > 0 ? (intersection.length / union.size) * 100 : 0;
             
-            // Check if AI mentions the same key technical terms
-            const keyTerms = ['digital core', 'analog block', 'i/o ring', 'power distribution', 
-                             'die', 'wafer', 'pad', 'specification', 'design'];
-            const aiHasKeyTerms = keyTerms.filter(term => aiNorm.includes(term));
-            const humanHasKeyTerms = keyTerms.filter(term => humanNorm.includes(term));
+            // Check if AI mentions the same key technical terms (English + Thai)
+            const keyTerms = [
+              // English terms
+              'digital core', 'analog block', 'i/o ring', 'power distribution', 
+              'die', 'wafer', 'pad', 'specification', 'design', 'working capital',
+              'liquidity', 'profitability', 'cash flow', 'inventory', 'accounts receivable',
+              // Thai terms
+              'เงินทุนหมุนเวียน', 'สภาพคล่อง', 'กำไร', 'เงินสด', 'สินค้าคงคลัง',
+              'ลูกหนี้การค้า', 'เจ้าหนี้การค้า', 'ธุรกิจ', 'การเติบโต', 'ความเสี่ยง',
+              'การบริหาร', 'ต้นทุน', 'รายได้', 'ค่าใช้จ่าย', 'หนี้สิน', 'สินทรัพย์',
+              'process window', 'defect', 'yield', 'wire bonding', 'die attach'
+            ];
+            const aiHasKeyTerms = keyTerms.filter(term => aiNorm.includes(term.toLowerCase()));
+            const humanHasKeyTerms = keyTerms.filter(term => humanNorm.includes(term.toLowerCase()));
             const keyTermOverlap = aiHasKeyTerms.filter(t => humanHasKeyTerms.includes(t));
             const keyTermScore = humanHasKeyTerms.length > 0 ? 
               (keyTermOverlap.length / humanHasKeyTerms.length) * 100 : 0;
             
-            // Combined score: 50% Jaccard + 50% key terms
+            // Combined score: 40% Jaccard + 60% key terms
             const combinedScore = (jaccardSimilarity * 0.4) + (keyTermScore * 0.6);
             
             // More lenient decision criteria for fallback
-            // Since we can't use LLM to understand context, we should be conservative
-            // and use "modified" instead of "rejected" when there's some overlap
+            // Since we can't use LLM to understand context, be MORE lenient
             let decision: 'accepted' | 'modified' | 'rejected';
             let conflictType: string;
             let severity: string;
             
-            if (combinedScore > 60) {
+            // If both AI and human have similar key terms, they're likely on the same topic
+            if (combinedScore > 50 || keyTermOverlap.length >= 3) {
               decision = 'accepted';
               conflictType = 'none';
               severity = 'none';
-            } else if (combinedScore > 25 || keyTermOverlap.length >= 2) {
-              // If AI mentions at least 2 key terms correctly, it's not completely wrong
+            } else if (combinedScore > 20 || keyTermOverlap.length >= 1 || jaccardSimilarity > 15) {
+              // If there's ANY overlap, don't reject - use modified instead
               decision = 'modified';
               conflictType = 'incomplete_answer';
               severity = 'minor';
             } else if (keyTermOverlap.length === 0 && humanHasKeyTerms.length > 0) {
               // AI missed all key terms - likely off topic or wrong context
-              decision = 'rejected';
+              decision = 'modified'; // Changed from 'rejected' to be more lenient
               conflictType = 'off_topic';
-              severity = 'major';
+              severity = 'minor';
             } else {
-              // Low similarity but has some overlap - likely factual differences
-              decision = 'rejected';
-              conflictType = 'factual_error';
-              severity = 'major';
+              // Low similarity but unknown - default to modified, not rejected
+              decision = 'modified';
+              conflictType = 'style_difference';
+              severity = 'minor';
             }
             
             console.log(`📊 Fallback analysis: Jaccard=${jaccardSimilarity.toFixed(1)}%, KeyTerms=${keyTermScore.toFixed(1)}%, Combined=${combinedScore.toFixed(1)}%`);
@@ -4402,23 +4604,29 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
     }
 
     // 2. Get total count of related questions (same criteria as main query)
-    // Increased threshold to 0.70 for better relevance
-    // Also filter out very short questions (< 10 chars) as they tend to be low quality
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Lower threshold to 0.50 for better coverage
     const countResult = await pool.query(
       `SELECT COUNT(*) as total
       FROM verified_answers va
       WHERE va.id != $1
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type = 'self'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
         AND LENGTH(va.question) >= 10
-        AND (1 - (va.question_embedding <=> $2::vector)) > 0.70`,
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $2::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $2::vector)) > 0.50)
+        )`,
       [qId, question_embedding]
     );
     
     const totalRelated = parseInt(countResult.rows[0]?.total) || 0;
 
     // 3. Search for similar questions using vector similarity
-    // Improved filtering: higher threshold (0.70) and minimum question length
+    // Include both self-verified and request-verified (with synthesized answer) questions
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -4428,18 +4636,32 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
         va.tags,
         va.verification_type,
         va.created_at,
-        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
+        va.sum_verified_answer IS NOT NULL as is_fully_verified,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
         COALESCE(COUNT(av.id), 0) as verification_count
       FROM verified_answers va
       LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
       WHERE va.id != $2
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type = 'self'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
         AND LENGTH(va.question) >= 10
-        AND (1 - (va.question_embedding <=> $1::vector)) > 0.70
-      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding, va.sum_verified_answer
       ORDER BY 
-        (1 - (va.question_embedding <=> $1::vector)) DESC
+        similarity_score DESC
       LIMIT 5`,
       [question_embedding, qId]
     );
@@ -4451,6 +4673,7 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
       views: parseInt(row.views) || 0,
       tags: row.tags || [],
       verification_type: row.verification_type,
+      is_fully_verified: row.is_fully_verified || row.verification_type === 'self',
       created_at: row.created_at,
       similarity: parseFloat(row.similarity_score),
       verification_count: parseInt(row.verification_count) || 0
@@ -4493,7 +4716,8 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
     }
 
     // 2. Search for ALL similar questions - improved filtering
-    // Higher threshold (0.70) and minimum question length for better relevance
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Lower threshold to 0.50 for better coverage
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -4503,17 +4727,30 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
         va.tags,
         va.verification_type,
         va.created_at,
-        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
         COALESCE(COUNT(av.id), 0) as verification_count
       FROM verified_answers va
       LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
       WHERE va.id != $2
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type = 'self'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
         AND LENGTH(va.question) >= 10
-        AND (1 - (va.question_embedding <=> $1::vector)) > 0.70
-      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
-      ORDER BY (1 - (va.question_embedding <=> $1::vector)) DESC`,
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding
+      ORDER BY similarity_score DESC`,
       [question_embedding, qId]
     );
 
@@ -4651,33 +4888,63 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     if (!isCurrentSelfVerified || totalSources === 0) {
       console.log('🔍 Searching similar verified questions from knowledge base...');
       
+      // Search for:
+      // 1. Self-verified questions (verification_type = 'self')
+      // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
+      // Use higher threshold (0.6) to avoid irrelevant results
+      const SIMILARITY_THRESHOLD = 0.6;
+      
       const similarQuestions = await pool.query(
-        `SELECT va.id, va.question, va.answer, va.verification_type, va.created_by,
-                (1 - (va.question_embedding <=> $1::vector)) as similarity
+        `SELECT va.id, va.question, 
+                CASE 
+                  WHEN va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL 
+                  THEN va.sum_verified_answer
+                  ELSE va.answer
+                END as answer,
+                va.verification_type, va.created_by,
+                GREATEST(
+                  COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+                  CASE 
+                    WHEN va.sum_verified_answer_embedding IS NOT NULL 
+                    THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+                    ELSE 0
+                  END
+                ) as similarity
          FROM verified_answers va
          WHERE va.id != $2
-           AND va.question_embedding IS NOT NULL
-           AND va.verification_type = 'self'
-           AND (1 - (va.question_embedding <=> $1::vector)) > 0.5
+           AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+           AND (
+             (va.verification_type = 'self')
+             OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+           )
+           AND (
+             (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > $3)
+             OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > $3)
+           )
          ORDER BY similarity DESC
          LIMIT 3`,
-        [JSON.stringify(questionEmbedding), questionId]
+        [JSON.stringify(questionEmbedding), questionId, SIMILARITY_THRESHOLD]
       );
 
       if (similarQuestions.rows.length > 0) {
-        console.log(`📚 Found ${similarQuestions.rows.length} similar verified questions`);
+        console.log(`📚 Found ${similarQuestions.rows.length} similar verified questions:`);
+        similarQuestions.rows.forEach((q, idx) => {
+          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): similarity=${(parseFloat(q.similarity) * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
+        });
         
         context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
         similarQuestions.rows.forEach((q, idx) => {
           const similarity = (parseFloat(q.similarity) * 100).toFixed(1);
           context += `\n[${idx + 1}] คำถาม: ${q.question}\n`;
           context += `    ความคล้าย: ${similarity}%\n`;
-          context += `    คำตอบ (โดย ${q.created_by}): ${q.answer}\n`;
+          context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 500)}${q.answer.length > 500 ? '...' : ''}\n`;
           
           sourcesUsed.push({
             type: 'similar_verified',
             questionId: q.id,
             question: q.question,
+            verificationType: q.verification_type,
             verifiedBy: q.created_by,
             similarity: parseFloat(q.similarity)
           });
