@@ -2327,6 +2327,9 @@ router.get('/isGuest', async (req, res) => {
       if (isGuest) {
         return res.status(401).json({error : 'Unauthorized' })
       }
+      else {
+        res.json({ userId: userId });
+      }
     }
     
   } catch (error) {
