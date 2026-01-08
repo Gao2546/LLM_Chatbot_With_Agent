@@ -169,10 +169,12 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     id SERIAL PRIMARY KEY,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
+    sum_verified_answer TEXT,
     tags TEXT[],
     verification_type VARCHAR(50) DEFAULT 'staging',
     question_embedding VECTOR(1024),
     answer_embedding VECTOR(1024),
+    sum_verified_answer_embedding VECTOR(1024),
     views INT DEFAULT 0,
     requested_departments TEXT[],
     notify_me BOOLEAN DEFAULT FALSE,
@@ -188,6 +190,9 @@ ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS idx_verified_answers_answer_embedding 
 ON verified_answers USING ivfflat (answer_embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_sum_embedding 
+ON verified_answers USING ivfflat (sum_verified_answer_embedding vector_cosine_ops);
 `;
 
 const createAnswerVerificationsTableQuery = `
@@ -340,6 +345,29 @@ END
 $$;
 `;
 
+// ALTER TABLE to add sum_verified_answer columns
+const alterVerifiedAnswersAddSumColumnsQuery = `
+DO $$
+BEGIN
+    -- Add sum_verified_answer column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='sum_verified_answer'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer TEXT;
+    END IF;
+    
+    -- Add sum_verified_answer_embedding column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='sum_verified_answer_embedding'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer_embedding VECTOR(1024);
+    END IF;
+END
+$$;
+`;
+
 const alterAnswerVerificationsAddUniqueConstraint = `
 DO $$
 BEGIN
@@ -485,6 +513,10 @@ async function initializeDatabase() {
     // === VERIFIED ANSWERS INITIALIZATION ===
     await pool.query(createVerifiedAnswersTableQuery);
     console.log('DB: Verified answers table created or already exists');
+
+    // ⭐ ADD COLUMNS FIRST BEFORE CREATING INDEXES
+    await pool.query(alterVerifiedAnswersAddSumColumnsQuery);
+    console.log('DB: sum_verified_answer columns added to verified_answers');
 
     await pool.query(createVerifiedAnswersIndexQuery);
     console.log('DB: Verified answers index created or already exists');
@@ -1361,27 +1393,59 @@ async function searchVerifiedAnswers(
     // Format embedding as PostgreSQL vector string
     const embeddingStr = `[${questionEmbedding.join(',')}]`;
 
-    // Search using BOTH question and answer embeddings, take the best match
+    // First, check how many verified answers have embeddings
+    const countResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total,
+        COUNT(question_embedding) as with_q_emb,
+        COUNT(sum_verified_answer_embedding) as with_sum_emb,
+        COUNT(CASE WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL THEN 1 END) as request_with_sum
+      FROM verified_answers
+    `);
+    console.log('📊 Verified Answers Stats:', countResult.rows[0]);
+
+    // Search using question and answer embeddings, prioritize sum_verified_answer for request type
+    // For 'request' type with sum_verified_answer, use it; otherwise use regular answer
+    // IMPORTANT: Include questions that have sum_verified_answer_embedding even if question_embedding is NULL
     const result = await pool.query(
       `SELECT 
         id,
         question,
-        answer,
+        CASE 
+          WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL 
+          THEN sum_verified_answer
+          ELSE answer
+        END as answer,
+        verification_type,
         created_by,
+        tags,
         GREATEST(
-          COALESCE(1 - (question_embedding <-> $1), 0),
-          COALESCE(1 - (answer_embedding <-> $1), 0)
+          COALESCE(1 - (question_embedding <-> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <-> $1::vector), 0),
+          CASE 
+            WHEN sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (sum_verified_answer_embedding <-> $1::vector), 0)
+            ELSE 0
+          END
         ) as similarity
        FROM verified_answers
-       WHERE question_embedding IS NOT NULL
+       WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
          AND (
-           1 - (question_embedding <-> $1) > $2
-           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1) > $2)
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <-> $1::vector) > $2)
          )
        ORDER BY similarity DESC
        LIMIT $3`,
       [embeddingStr, threshold, limit]
     );
+
+    console.log(`🔍 searchVerifiedAnswers: threshold=${threshold}, found ${result.rows.length} results`);
+    if (result.rows.length > 0) {
+      result.rows.forEach((row, idx) => {
+        console.log(`  ${idx + 1}. Q${row.id} (${row.verification_type}): similarity=${row.similarity.toFixed(3)} - "${row.question.substring(0, 80)}..."`);
+      });
+    }
 
     return result.rows;
   } catch (error) {

@@ -477,8 +477,8 @@
                             <div class="related-question-views">
                                 <i class="fas fa-eye"></i> ${q.views} views
                             </div>
-                            <span class="related-question-status ${q.verification_type === 'request' ? 'pending' : 'verified'}">
-                                ${q.verification_type === 'request' ? '⏳ Pending' : '✓ Verified'}
+                            <span class="related-question-status ${q.is_fully_verified ? 'verified' : 'pending'}">
+                                ${q.is_fully_verified ? '✓ Verified' : '⏳ Pending'}
                             </span>
                         </div>
                     </a>
@@ -600,8 +600,8 @@
                         <div class="related-question-views">
                             <i class="fas fa-eye"></i> ${q.views} views
                         </div>
-                        <span class="related-question-status ${q.verification_type === 'request' ? 'pending' : 'verified'}">
-                            ${q.verification_type === 'request' ? '⏳ Pending' : '✓ Verified'}
+                        <span class="related-question-status ${q.is_fully_verified ? 'verified' : 'pending'}">
+                            ${q.is_fully_verified ? '✓ Verified' : '⏳ Pending'}
                         </span>
                     </div>
                 </a>
