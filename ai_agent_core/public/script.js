@@ -479,30 +479,29 @@ function initTheme() {
     const themeBtn = document.getElementById('themeToggleBtn');
     if (!themeBtn) return;
 
-    // 1. Check localStorage or default to 'dark'
-    const storedTheme = localStorage.getItem('theme') || 'dark';
+    // 1. Get current theme from document (already set by inline script in HTML)
+    const currentTheme = document.documentElement.getAttribute('data-theme') || localStorage.getItem('theme') || 'dark';
     
-    // 2. Apply the theme
-    applyTheme(storedTheme);
+    // 2. Ensure localStorage is synced
+    localStorage.setItem('theme', currentTheme);
+    
+    // 3. Update button to match current theme
+    updateThemeButton(currentTheme);
 
-    // 3. Add Click Event Listener
+    // 4. Add Click Event Listener
     themeBtn.addEventListener('click', () => {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        const current = document.documentElement.getAttribute('data-theme');
+        const newTheme = current === 'light' ? 'dark' : 'light';
         
         applyTheme(newTheme);
         
-        // 4. Save to localStorage
+        // Save to localStorage
         localStorage.setItem('theme', newTheme);
     });
 }
 
-// Helper to Apply Theme and Update Icon
-function applyTheme(theme) {
-    // Set attribute on <html> element
-    document.documentElement.setAttribute('data-theme', theme);
-    
-    // Update Button Text/Icon
+// Helper to Update Theme Button Text/Icon
+function updateThemeButton(theme) {
     const themeBtn = document.getElementById('themeToggleBtn');
     if (themeBtn) {
         if (theme === 'light') {
@@ -511,6 +510,16 @@ function applyTheme(theme) {
             themeBtn.innerHTML = '<i class="fas fa-moon"></i> <span>Dark Mode</span>';
         }
     }
+}
+
+// Helper to Apply Theme and Update Icon
+function applyTheme(theme) {
+    // Set attribute on BOTH <html> and <body> elements for CSS compatibility
+    document.documentElement.setAttribute('data-theme', theme);
+    document.body.setAttribute('data-theme', theme);
+    
+    // Update Button
+    updateThemeButton(theme);
 }
 
 
@@ -858,6 +867,7 @@ async function handleResize() {
         console.log("Responsive: Applying small screen layout (< 868px)");
         chatList.style.zIndex = '1000'; // Bring sidebar to front
         chatList.style.float = 'left'; // Float sidebar to the left
+        usernameDisplay.style = "margin: 10px auto 10px auto; padding: 3px 0; text-align: center; font-size: 0.8em; display: block !important;  border-bottom: 2px solid var(--border-color);"
 
         // Move auth elements into the sidebar
         if (usernameDisplay.parentElement !== chatList) {
@@ -896,6 +906,7 @@ async function handleResize() {
 
     } else {
         // Large screen layout
+        usernameDisplay.style = "color: var(--text-muted); font-weight: 500; font-size: 0.9em; margin-bottom: 15px; margin-right: 10px; display: inline-block; padding: 8px 0; font-style: italic; white-space: nowrap; /* overflow-x: hidden; */ text-overflow: ellipsis; width: 100px; max-width: 100px;"
         console.log("Responsive: Applying large screen layout (>= 868px)");
         chatList.style.zIndex = ''; // Reset z-index
 
@@ -1368,7 +1379,7 @@ function displayMessage(text, className) {
         messageElement.appendChild(editButton);
     }
     
-    // Add Verify + Community buttons for AI messages
+    // Add Verify button for AI messages
     if (className === 'ai-message') {
         const buttonsDiv = document.createElement('div');
         buttonsDiv.className = 'message-buttons';
@@ -1381,25 +1392,13 @@ function displayMessage(text, className) {
         verifyBtn.style.display = 'none';
         verifyBtn.onclick = () => verifyAnswer(text);
         
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = () => goToCommunity(text);
-        communityBtn.onclick = () => window.open('/communities');
-        
         buttonsDiv.appendChild(verifyBtn);
-        buttonsDiv.appendChild(communityBtn);
         
         messageElement.addEventListener('mouseenter', () => {
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         messageElement.appendChild(buttonsDiv);
@@ -1543,27 +1542,14 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         verifyBtn.style.display = 'none';
         verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
         
-        // Community button
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = () => goToCommunity(messageElement.dataset.fullText || text);
-        // communityBtn.onclick = () => fetch('/community');
-        communityBtn.onclick = () => window.open('/communities');
-        
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
             copyButton.style.display = 'inline-flex';
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             copyButton.style.display = 'none';
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         // Copy button click handler
@@ -1581,7 +1567,6 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         
         messageElement.appendChild(copyButton);
         messageElement.appendChild(verifyBtn);
-        messageElement.appendChild(communityBtn);
     }
 
     // Add edit button for user messages
@@ -1703,35 +1688,18 @@ function displayMarkdownMessageStream(text, messageElement) {
             verifyAnswer(answer, this); 
         };
         
-        // Community button
-        const communityBtn = document.createElement('button');
-        communityBtn.innerHTML = '🌐';
-        communityBtn.className = 'action-button community-button';
-        communityBtn.title = 'View community';
-        communityBtn.style.display = 'none';
-        // communityBtn.href = '/community';
-        // communityBtn.onclick = function() { 
-        //     const answer = messageElement.dataset.fullText || messageElement.dataset.streamingText || text;
-        //     goToCommunity(answer); 
-        // };
-        // communityBtn.onclick = () => fetch('/community');
-        communityBtn.onclick = () => window.open('/communities');
-        
         // Add buttons directly to messageElement
         messageElement.appendChild(copyButton);
         messageElement.appendChild(verifyBtn);
-        messageElement.appendChild(communityBtn);
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
             copyButton.style.display = 'inline-flex';
             verifyBtn.style.display = 'inline-flex';
-            communityBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
             copyButton.style.display = 'none';
             verifyBtn.style.display = 'none';
-            communityBtn.style.display = 'none';
         });
         
         // Copy button click handler
@@ -1945,7 +1913,8 @@ function populateModes(returnDefault = false) {
         { id: 'code', name: 'Code' },
         { id: 'ask', name: 'Ask' },
         { id: 'architect', name: 'Architect' },
-        { id: 'debug', name: 'Debug' }
+        { id: 'debug', name: 'Debug' },
+        { id: 'ai_suggests', name: 'AI Suggests' }
     ];
     const defaultValue = modes.length > 0 ? modes[1].id : null;
 
@@ -2795,6 +2764,13 @@ async function showVerifyModal(question, answer, verifyBtn) {
     const existingModal = document.getElementById('verifyModal');
     if (existingModal) existingModal.remove();
     
+    // Clean answer: remove AI source reference footer (📚 อ้างอิงจาก... | 🤖 สร้างโดย...)
+    let cleanAnswer = answer;
+    // Remove the AI reference line at the end
+    cleanAnswer = cleanAnswer.replace(/\n*---\n*📚.*อ้างอิงจาก.*คำตอบที่ยืนยันแล้ว.*\|.*สร้างโดย.*$/s, '');
+    cleanAnswer = cleanAnswer.replace(/\n*---\n*⚠️.*ไม่พบข้อมูลในฐานความรู้.*\|.*$/s, '');
+    cleanAnswer = cleanAnswer.trim();
+    
     // Fetch hot tags from API
     let availableTags = ['PRVX 4', 'D1', 'Handler', 'V9300']; // fallback
     try {
@@ -2808,7 +2784,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
     }
     
     // Available departments
-    const departments = ['WT', 'FT', 'PE', 'QA', 'IT', 'MFG', 'ENG', 'RnD'];
+    const departments = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
     
     // Fetch template from external file
     let templateHTML = '';
@@ -2833,7 +2809,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
     // Replace placeholders in template
     let modalHTML = templateHTML
         .replace('{{QUESTION}}', escapeHtml(question))
-        .replace('{{ANSWER}}', escapeHtml(answer.substring(0, 500)) + (answer.length > 500 ? '...' : ''))
+        .replace('{{ANSWER}}', escapeHtml(cleanAnswer.substring(0, 500)) + (cleanAnswer.length > 500 ? '...' : ''))
         .replace('{{TAGS}}', tagsHTML)
         .replace('{{DEPARTMENTS}}', departmentsHTML);
     
@@ -2856,14 +2832,39 @@ async function showVerifyModal(question, answer, verifyBtn) {
     
     // Radio button toggle handler - show/hide dropdown based on verification type
     const radioButtons = document.querySelectorAll('input[name="verificationType"]');
+    const notifySection = document.getElementById('notifyCheckbox')?.closest('.verify-checkbox-section');
+    const verifyTypeSection = document.querySelector('.verify-type-section');
+    
+    // Hide notify checkbox and border by default (only show when request verification is selected)
+    if (notifySection) {
+        notifySection.style.display = 'none';
+    }
+    if (verifyTypeSection) {
+        verifyTypeSection.style.borderBottom = 'none';
+    }
+    
     radioButtons.forEach(radio => {
         radio.addEventListener('change', (e) => {
             if (e.target.value === 'self') {
                 myDeptSelectWrapper.style.display = 'block';
                 requestDeptSelectWrapper.style.display = 'none';
+                // Hide notify checkbox and border for self verification
+                if (notifySection) {
+                    notifySection.style.display = 'none';
+                }
+                if (verifyTypeSection) {
+                    verifyTypeSection.style.borderBottom = 'none';
+                }
             } else {
                 myDeptSelectWrapper.style.display = 'none';
                 requestDeptSelectWrapper.style.display = 'block';
+                // Show notify checkbox and border for request verification
+                if (notifySection) {
+                    notifySection.style.display = 'block';
+                }
+                if (verifyTypeSection) {
+                    verifyTypeSection.style.borderBottom = '1px solid var(--border-color)';
+                }
             }
         });
     });
@@ -3085,7 +3086,7 @@ async function showVerifyModal(question, answer, verifyBtn) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question: question,
-                    answer: answer,
+                    answer: cleanAnswer,
                     comment: comment || '',
                     userName: userName,
                     tags: [...selectedTags, ...customTags],
