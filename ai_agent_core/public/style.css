@@ -207,10 +207,10 @@ thinking {
     border-color: var(--accent-color);
 }
 
-#modeSelector option {
+/* #modeSelector option {
     background-color: var(--input-bg);
     color: var(--text-color);
-}
+} */
 
 /* Model Selector Styles (similar to mode selector) */
 .model-selector-container {
@@ -253,10 +253,10 @@ thinking {
     border-color: var(--accent-color);
 }
 
-#modelSelector option {
+/* #modelSelector option {
     background-color: var(--input-bg);
     color: var(--text-color);
-}
+} */
 
 #chatListEle h3 {
     margin-top: 0;
@@ -1841,6 +1841,117 @@ strong {
     background-color: var(--input-bg);
 }
 
+
+select,
+::picker(select) {
+  appearance: base-select;
+}
+
+html {
+  font-family: "Helvetica", "Arial", sans-serif;
+}
+
+label {
+  width: fit-content;
+  align-self: center;
+}
+
+select {
+  flex: 1;
+}
+select {
+  border: 2px solid #dddddd;
+  background: #eeeeee;
+  padding: 10px;
+  transition: 0.4s;
+  overflow-x: hidden;
+  max-width: 219px;
+  width: 219px;
+}
+
+select:hover,
+select:focus {
+  background: #dddddd;
+}
+select::picker-icon {
+  color: #999999;
+  transition: 0.4s rotate;
+}
+select:open::picker-icon {
+  rotate: 180deg;
+}
+::picker(select) {
+  border: none;
+}
+option {
+  display: flex;
+  justify-content: flex-start;
+  gap: 20px;
+  overflow-x: hidden;
+  max-width: 219px;
+  width: 219px;
+
+  border: 2px solid #dddddd;
+  background: #eeeeee;
+  padding: 10px;
+  transition: 0.4s;
+}
+option:first-of-type {
+  border-radius: 8px 8px 0 0;
+}
+
+option:last-of-type {
+  border-radius: 0 0 8px 8px;
+}
+
+::picker(select) {
+  border-radius: 8px;
+}
+
+option:not(option:last-of-type) {
+  border-bottom: none;
+}
+option:nth-of-type(odd) {
+  background: white;
+}
+
+option:hover,
+option:focus {
+  background: plum;
+}
+option .icon {
+  font-size: 1.6rem;
+  text-box: trim-both cap alphabetic;
+}
+selectedcontent .icon {
+  display: none;
+}
+option:checked {
+  font-weight: bold;
+}
+option::checkmark {
+  order: 1;
+  margin-left: auto;
+  content: "☑️";
+}
+::picker(select) {
+  opacity: 0;
+  transition: all 0.4s allow-discrete;
+}
+::picker(select):popover-open {
+  opacity: 1;
+}
+@starting-style {
+  ::picker(select):popover-open {
+    opacity: 0;
+  }
+}
+::picker(select) {
+  top: calc(anchor(bottom) + 1px);
+  left: anchor(10%);
+}
+
+
 @media (max-width: 868px) {
     #preprocessButton {
         width: 100%;
@@ -1964,20 +2075,20 @@ strong {
     }
 
     #chatListEle {
-        overflow-y: auto; 
-        overflow-x: hidden; 
         display: flex;
-        flex-grow: 1; 
         flex-direction: column;
-        align-items: center;
-        white-space: normal; 
-        height: fit-content; 
-        max-height: calc(100% - 221px - 60px - 80px);
-        width: calc(100% - 15px); 
-        scrollbar-width: none;
+        width: calc(100% - 15px); /* Adjust width to account for padding */
+        max-height: calc(100% - 210px - 65px - 64px - 5px - 57px - 57px - 46px - 45px);
+        min-height: calc(100% - 210px - 65px - 64px - 5px - 57px - 57px - 46px - 45px);
+        overflow-y: auto; /* Allow scrolling for chat list */
+        flex-grow: 1; /* Allow list to take available space */
+        overflow-x: hidden; /* Hide content when collapsed */
+        white-space: nowrap;
         text-overflow: clip;
+        scrollbar-width: none;
         margin: auto;
-        padding: auto
+        padding: auto;
+        margin-bottom: 5px;
     }
 
     #chathishead {

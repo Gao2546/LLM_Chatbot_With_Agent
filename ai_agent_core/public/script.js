@@ -849,6 +849,7 @@ async function handleResize() {
     const chatList = document.getElementById('chatList');
     const loginBtn = document.getElementById('loginBtn');
     const usernameDisplay = document.getElementById('usernameDisplay');
+    usernameDisplay.style = "margin: 10px auto 10px auto; padding: 3px 0; text-align: center; font-size: 0.8em; display: block !important;  border-bottom: 2px solid var(--border-color);"
     const toggleSidebarButton = document.getElementById('toggleSidebarButton');
     // Re-fetch containers inside in case they weren't ready on initial load
     const authContainer = document.querySelector('.auth-container');
