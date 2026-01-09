@@ -1722,7 +1722,10 @@
                                 day: '2-digit',
                                 month: 'short'
                             });
-                            const comment = v.comment || v.text || '';
+                            const comment = (v.comment || v.text || '')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;')
+                                .replace(/\n/g, '<br>');
                             const attachments = v.attachments || [];
                             console.log('🔎 Verification attachments:', 'id:', v.id, 'count:', attachments.length, 'data:', attachments);
                             
@@ -2092,7 +2095,10 @@
                 });
                 
                 const deptLabel = comment.department || 'General';
-                const safeText = (comment.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const safeText = (comment.text || '')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\n/g, '<br>');
                 
                 // Parse attachments if it's a JSON string
                 let attachmentsList = [];
@@ -2134,22 +2140,17 @@
                                     const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
                                     return `
                                     <div class="comment-attachment-item">
-                                        <div class="comment-attachment-info">
-                                            <i class="fas ${(() => {
-                                                if (mimeType.startsWith('image/')) return 'fa-image';
-                                                if (mimeType === 'application/pdf') return 'fa-file-pdf';
-                                                if (mimeType.includes('word')) return 'fa-file-word';
-                                                if (mimeType.includes('sheet')) return 'fa-file-excel';
-                                                return 'fa-file';
-                                            })()}"></i>
-                                            <div class="comment-attachment-details">
-                                                <div class="comment-attachment-name">${att.name}</div>
-                                                <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
-                                            </div>
-                                        </div>
-                                        <button class="comment-attachment-preview-btn" onclick="window.open('${att.url}', '_blank')" title="Preview file">
-                                            <i class="fas fa-eye"></i> Preview
-                                        </button>
+                                        <i class="fas ${(() => {
+                                            if (mimeType.startsWith('image/')) return 'fa-image';
+                                            if (mimeType === 'application/pdf') return 'fa-file-pdf';
+                                            if (mimeType.includes('word')) return 'fa-file-word';
+                                            if (mimeType.includes('sheet')) return 'fa-file-excel';
+                                            return 'fa-file';
+                                        })()}"></i>
+                                        <a href="${att.url}" target="_blank" class="comment-attachment-link">
+                                            ${att.name}
+                                        </a>
+                                        <span class="comment-attachment-size">${sizeKB > 0 ? sizeKB + ' KB' : ''}</span>
                                     </div>
                                 `}).join('')}
                             </div>
@@ -2190,6 +2191,27 @@
 
             // Handle file upload
             fileInput.addEventListener('change', handleFileSelect);
+
+            // Auto-expand textarea
+            setupAutoExpandTextarea(commentInput);
+        }
+
+        // Auto-expand textarea function
+        function setupAutoExpandTextarea(textarea) {
+            if (!textarea) return;
+            
+            const autoExpand = () => {
+                textarea.style.height = 'auto';
+                textarea.style.height = textarea.scrollHeight + 'px';
+            };
+            
+            textarea.addEventListener('input', autoExpand);
+            textarea.addEventListener('focus', autoExpand);
+            
+            // Initial expansion if there's content
+            if (textarea.value) {
+                autoExpand();
+            }
         }
 
         let selectedFiles = [];

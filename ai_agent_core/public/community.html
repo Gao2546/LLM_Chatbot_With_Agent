@@ -261,7 +261,29 @@
             setupNotificationBell();
             await loadNotifications(); // Load notifications immediately on page load
             initTheme();
+            setupAutoExpandTextareas(); // Setup auto-expand for textareas
         });
+
+        // Auto-expand textarea function
+        function setupAutoExpandTextareas() {
+            const textareas = document.querySelectorAll('#questionBody, #answerBody');
+            textareas.forEach(textarea => {
+                if (!textarea) return;
+                
+                const autoExpand = () => {
+                    textarea.style.height = 'auto';
+                    textarea.style.height = Math.max(textarea.scrollHeight, 100) + 'px';
+                };
+                
+                textarea.addEventListener('input', autoExpand);
+                textarea.addEventListener('focus', autoExpand);
+                
+                // Initial expansion if there's content
+                if (textarea.value) {
+                    autoExpand();
+                }
+            });
+        }
 
         // Refresh data when user returns to this page from detail page
         function setupPageRefresh() {

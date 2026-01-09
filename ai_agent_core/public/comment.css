@@ -662,6 +662,8 @@ body[data-theme="dark"] .ai-sources i {
     line-height: 1.5;
     margin-top: 10px;
     padding: 8px 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .verification-attachments-list {
@@ -1595,6 +1597,8 @@ body[data-theme="dark"] .ai-sources i {
     line-height: 1.5;
     background: transparent;
     border-radius: 4px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .comment-attachments-list {
@@ -1605,67 +1609,38 @@ body[data-theme="dark"] .ai-sources i {
 .comment-attachment-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 6px 8px;
+    gap: 8px;
+    padding: 4px 0;
     margin: 4px 0;
-    background: rgba(0, 121, 107, 0.15);
-    border: 1px solid rgba(0, 121, 107, 0.4);
-    border-radius: 4px;
-    color: #f0f0f0;
-    font-size: 11px;
-}
-
-.comment-attachment-info {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
-}
-
-.comment-attachment-info i {
     font-size: 13px;
-    color: #4fc3f7;
+}
+
+.comment-attachment-item i {
+    font-size: 14px;
+    color: #666;
     flex-shrink: 0;
 }
 
-.comment-attachment-details {
+.comment-attachment-link {
+    color: #0066cc;
+    text-decoration: underline;
+    cursor: pointer;
     flex: 1;
     min-width: 0;
-}
-
-.comment-attachment-name {
-    color: #000000;
-    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.comment-attachment-meta {
-    font-size: 10px;
-    color: #aaa;
-    margin-top: 1px;
+.comment-attachment-link:hover {
+    color: #004499;
 }
 
-.comment-attachment-preview-btn {
-    background: #0066cc;
-    color: white;
-    border: none;
-    padding: 4px 8px;
-    border-radius: 3px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 4px;
+.comment-attachment-size {
     font-size: 11px;
-    transition: background 0.2s;
+    color: #999;
+    margin-left: auto;
     flex-shrink: 0;
-    margin-left: 6px;
-}
-
-.comment-attachment-preview-btn:hover {
-    background: #0052a3;
 }
 
 .empty-comments {
@@ -2084,8 +2059,24 @@ body[data-theme="dark"] .ai-sources i {
 
 [data-theme="dark"] .comment-attachment-item,
 [data-theme="dark"] .verification-attachment-item {
-    background: #333;
-    border-color: #404040;
+    background: transparent;
+    border: none;
+}
+
+[data-theme="dark"] .comment-attachment-item i {
+    color: #999;
+}
+
+[data-theme="dark"] .comment-attachment-link {
+    color: #64b5f6;
+}
+
+[data-theme="dark"] .comment-attachment-link:hover {
+    color: #90caf9;
+}
+
+[data-theme="dark"] .comment-attachment-size {
+    color: #777;
 }
 
 [data-theme="dark"] .load-more-btn {
@@ -2128,16 +2119,6 @@ body[data-theme="dark"] .ai-sources i {
 [data-theme="dark"] .verification-type {
     background: rgba(10, 130, 118, 0.3);
     color: #64b5f6;
-}
-
-[data-theme="dark"] .verification-attachment-name,
-[data-theme="dark"] .comment-attachment-name {
-    color: #e0e0e0;
-}
-
-[data-theme="dark"] .verification-attachment-meta,
-[data-theme="dark"] .comment-attachment-meta {
-    color: #999;
 }
 
 [data-theme="dark"] .related-questions-header {
