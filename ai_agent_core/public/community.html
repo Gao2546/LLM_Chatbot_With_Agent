@@ -831,24 +831,24 @@
                 // Determine badge based on verification status
                 let badgeHtml = '';
                 
+                // Check if question is fully verified using backend calculation
+                const isFullyVerified = q.is_fully_verified;
+                
                 // Check if question is waiting for verification (request type questions)
                 if (q.verification_type === 'request') {
                     // Use total_requested_depts from backend query
                     const deptCount = q.total_requested_depts || 0;
                     const verifiedCount = q.verification_count || 0;
                     
-                    if (deptCount > 0) {
-                        // Has departments to verify from
-                        if (verifiedCount >= deptCount) {
-                            // All verified - show green badge
-                            badgeHtml = `<span class="vote-badge verified-badge">✓ Verified (${verifiedCount}/${deptCount})</span>`;
-                        } else {
-                            // Pending verification - show yellow badge
-                            badgeHtml = `<span class="vote-badge pending-badge">⏳ ${verifiedCount}/${deptCount} Pending</span>`;
-                        }
+                    if (isFullyVerified) {
+                        // All verified - show green badge
+                        badgeHtml = `<span class="vote-badge verified-badge">✓ Verified (${verifiedCount}/${deptCount})</span>`;
+                    } else {
+                        // Pending verification - show yellow badge
+                        badgeHtml = `<span class="vote-badge pending-badge">⏳ ${verifiedCount}/${deptCount} Pending</span>`;
                     }
                 } else if (q.verification_type === 'self') {
-                    // For self verification, show department names
+                    // For self verification, always show verified (self-verified is always fully verified)
                     const deptsList = Array.isArray(q.requested_departments) 
                         ? q.requested_departments 
                         : (typeof q.requested_departments === 'string' ? q.requested_departments.split(',').map(d => d.trim()) : []);

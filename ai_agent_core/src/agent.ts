@@ -3577,7 +3577,36 @@ router.post('/request-verifications', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    // Create verification request for each department
+    // Get current requested_departments from question
+    const questionResult = await pool.query(
+      'SELECT requested_departments FROM verified_answers WHERE id = $1',
+      [questionId]
+    );
+
+    let currentDepts: string[] = [];
+    if (questionResult.rows.length > 0 && questionResult.rows[0].requested_departments) {
+      const deptsList = questionResult.rows[0].requested_departments;
+      if (Array.isArray(deptsList)) {
+        currentDepts = deptsList;
+      } else if (typeof deptsList === 'string') {
+        try {
+          currentDepts = JSON.parse(deptsList);
+        } catch (e) {
+          currentDepts = deptsList.split(',').map((d: string) => d.trim());
+        }
+      }
+    }
+
+    // Merge new departments with existing ones (avoid duplicates)
+    const updatedDepts = [...new Set([...currentDepts, ...departments])];
+
+    // Update requested_departments in verified_answers table
+    await pool.query(
+      'UPDATE verified_answers SET requested_departments = $1 WHERE id = $2',
+      [updatedDepts, questionId]
+    );
+
+    // Create verification request for each NEW department
     const promises = departments.map(dept => 
       pool.query(`
         INSERT INTO answer_verifications 
@@ -3588,6 +3617,8 @@ router.post('/request-verifications', async (req: Request, res: Response) => {
     );
 
     await Promise.all(promises);
+
+    console.log(`✅ Updated requested_departments_list for question ${questionId}:`, updatedDepts);
 
     res.json({ success: true, message: `Verification requested from ${departments.join(', ')}` });
   } catch (error) {
@@ -4103,13 +4134,12 @@ ${humanAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
 ${expertComments || 'ไม่มีความเห็นเพิ่มเติม'}
 
 **เกณฑ์การตัดสิน:**
-- "accepted" = AI ตอบถูกต้อง ครบถ้วน ตรงคำถาม (ใช้ได้เลย)
-- "modified" = AI ตอบถูกบางส่วน หรือ ตอบไม่ตรงคำถาม หรือ ข้อมูลไม่ครบ (ต้องแก้ไขเพิ่มเติม) ← ใช้กรณีนี้ถ้า AI ให้ข้อมูลที่ถูกต้องแต่ไม่ตอบคำถามโดยตรง
-- "rejected" = AI ให้ข้อมูลที่ผิดพลาด/เป็นเท็จ (ข้อมูลผิดจริงๆ ไม่ใช่แค่ไม่ครบ)
+- "accepted" = AI ตอบถูกต้อง ครบถ้วน ตรงคำถาม ใช้ได้
+- "rejected" = AI ตอบผิด/ไม่ครบ/ไม่ตรงคำถาม หรือข้อมูลผิดพลาด
 
 **conflictType:**
 - "none" = ไม่มีปัญหา
-- "off_topic" = ตอบไม่ตรงคำถาม (แต่ข้อมูลที่ให้ไม่ผิด)
+- "off_topic" = ตอบไม่ตรงคำถาม
 - "incomplete_answer" = ตอบไม่ครบถ้วน
 - "factual_error" = ข้อมูลผิดพลาดจริง
 - "wrong_context" = เข้าใจบริบทผิด
@@ -4118,7 +4148,7 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
 
 กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
 {
-  "decision": "accepted" หรือ "modified" หรือ "rejected",
+  "decision": "accepted" หรือ "rejected",
   "similarityPercent": ตัวเลข 0-100,
   "conflictType": "none/off_topic/incomplete_answer/factual_error/wrong_context/outdated_info/style_difference",
   "severity": "none" หรือ "minor" หรือ "major" หรือ "critical",
@@ -4220,9 +4250,8 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             // Combined score: 40% Jaccard + 60% key terms
             const combinedScore = (jaccardSimilarity * 0.4) + (keyTermScore * 0.6);
             
-            // More lenient decision criteria for fallback
-            // Since we can't use LLM to understand context, be MORE lenient
-            let decision: 'accepted' | 'modified' | 'rejected';
+            // Decision criteria for fallback: accepted or rejected only
+            let decision: 'accepted' | 'rejected';
             let conflictType: string;
             let severity: string;
             
@@ -4231,21 +4260,19 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
               decision = 'accepted';
               conflictType = 'none';
               severity = 'none';
-            } else if (combinedScore > 20 || keyTermOverlap.length >= 1 || jaccardSimilarity > 15) {
-              // If there's ANY overlap, don't reject - use modified instead
-              decision = 'modified';
-              conflictType = 'incomplete_answer';
-              severity = 'minor';
-            } else if (keyTermOverlap.length === 0 && humanHasKeyTerms.length > 0) {
-              // AI missed all key terms - likely off topic or wrong context
-              decision = 'modified'; // Changed from 'rejected' to be more lenient
-              conflictType = 'off_topic';
-              severity = 'minor';
             } else {
-              // Low similarity but unknown - default to modified, not rejected
-              decision = 'modified';
-              conflictType = 'style_difference';
-              severity = 'minor';
+              // Any other case = rejected (incomplete, off-topic, wrong, etc.)
+              decision = 'rejected';
+              if (keyTermOverlap.length === 0 && humanHasKeyTerms.length > 0) {
+                conflictType = 'off_topic';
+                severity = 'major';
+              } else if (combinedScore > 20) {
+                conflictType = 'incomplete_answer';
+                severity = 'minor';
+              } else {
+                conflictType = 'wrong_answer';
+                severity = 'major';
+              }
             }
             
             console.log(`📊 Fallback analysis: Jaccard=${jaccardSimilarity.toFixed(1)}%, KeyTerms=${keyTermScore.toFixed(1)}%, Combined=${combinedScore.toFixed(1)}%`);
@@ -4279,7 +4306,7 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
           // Update AI suggestion decision
           await updateAISuggestionDecision(
             aiSuggestion.id,
-            judgeResult.decision as 'accepted' | 'modified' | 'rejected',
+            judgeResult.decision as 'accepted' | 'rejected',
             humanAnswer,
             commenterName || 'LLM-Judge'
           );
@@ -4315,40 +4342,37 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             const aiAnswerText = aiSuggestion.ai_generated_answer || '';
             
             const classificationPrompt = `
-You are a semiconductor packaging domain expert. Classify this Q&A into ONE knowledge group.
-
-**Knowledge Groups:**
-1. **Electrical Pad** - PCB pad design, trace routing, electrical connections, contact points
-2. **Wire Bonding** - Wire connection processes, bonding techniques, wire materials, ball/wedge bonding
-3. **Die Attach** - Die attachment methods, substrate connection, die bonding, epoxy, adhesives
-4. **Package Design** - Overall package architecture, encapsulation, form factor, molding, substrate design
-5. **Testing & QC** - Test procedures, quality control, inspection, defect analysis, probing, measurement
-6. **Process Optimization** - Manufacturing improvements, yield enhancement, cycle time reduction
-7. **Material Science** - Material properties, selection, compatibility, chemical properties, substrates
-8. **Thermal Management** - Heat dissipation, thermal design, cooling solutions, temperature control
-9. **Reliability** - Product lifetime, failure analysis, stress testing, MTBF, durability
-10. **Equipment & Tools** - Machine operation, maintenance, calibration, tooling, prober, bonder
-11. **Other** - Does not clearly fit above categories
+Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
 
 **Question:**
 ${originalQuestion}
 
-**AI Answer:**
-${aiAnswerText.substring(0, 600)}
+**Answer:**
+${aiAnswerText.substring(0, 600) || humanAnswer.substring(0, 600)}
 
-**Expert Verification:**
-${expertComments || humanAnswer.substring(0, 300)}
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
 
 **Instructions:**
-- Analyze the TECHNICAL DOMAIN and MAIN PURPOSE of the Q&A
-- Equipment questions (prober, bonder, etc.) → "Equipment & Tools"
-- Inspection/testing procedures → "Testing & QC"
-- Material selection/properties → "Material Science"
-- If multiple groups apply, choose the PRIMARY domain
-- If truly uncertain or general, use "Other" with confidence < 0.5
+1. Read the Q&A and determine which predefined category fits BEST
+2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
 
-Return ONLY this JSON format (no markdown, no explanation):
-{"group": "Testing & QC", "confidence": 0.85}
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "Wire Bonding", "confidence": 0.9}
 `;
 
             // Use Llama3 for better classification accuracy
@@ -5315,6 +5339,278 @@ Create a summary answer from the knowledge base:
 
     console.log(`✅ AI suggestion generated for question ${verifiedAnswerId} with ${totalSources} sources`);
 
+    // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
+    if (totalSources === 0 && saveResult.suggestionId) {
+      console.log('🔄 No knowledge found - classifying topic group for analytics...');
+      setImmediate(async () => {
+        try {
+          let predictedGroup: string | null = null;
+          let groupConfidence: number | null = null;
+          
+          // Use AI to classify the question topic
+          const classificationPrompt = `
+Classify this question into one of the predefined categories. If none fit well, create a new category.
+
+**Question:**
+${question}
+
+${questionBody ? `**Question Details:**\n${questionBody.substring(0, 500)}` : ''}
+
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
+
+**Instructions:**
+1. Read the question and determine which predefined category fits BEST
+2. If the question clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "IT & Computer", "confidence": 0.9}
+`;
+
+          const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+          console.log('🔍 Calling Ollama for knowledge group classification (no KB data)...');
+          
+          const classifyResponse = await fetch(ollamaUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'llama3:latest',
+              prompt: classificationPrompt,
+              stream: false,
+              options: { 
+                temperature: 0.2,
+                num_predict: 100
+              }
+            })
+          });
+          
+          if (classifyResponse.ok) {
+            const classifyData = await classifyResponse.json() as { response?: string };
+            const classifyText = classifyData.response || '';
+            
+            console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+            
+            const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+            if (jsonMatch) {
+              try {
+                const classification = JSON.parse(jsonMatch[0]);
+                predictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Knowledge Group (no KB): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+              } catch (parseErr) {
+                console.warn('Could not parse classification JSON:', parseErr);
+              }
+            }
+          }
+          
+          // Auto-reject since no knowledge available
+          await updateAISuggestionDecision(
+            saveResult.suggestionId!,
+            'rejected',
+            'No verified answer in knowledge base',
+            'auto-system'
+          );
+          
+          // Save to ai_learning_analysis with group classification
+          await saveAILearningAnalysis(saveResult.suggestionId!, {
+            conflictType: 'incomplete_answer',
+            conflictDetails: 'No verified answer found in knowledge base for this topic',
+            severity: 'major',
+            similarityScore: 0,
+            keyDifferences: ['Missing knowledge topic'],
+            suggestedPromptFix: 'Add verified answers for this topic to knowledge base',
+            suggestedRouting: 'knowledge_expansion',
+            errorTags: ['missing_knowledge', 'no_kb_data'],
+            analyzedBy: 'auto-system',
+            predictedGroup: predictedGroup || 'Uncategorized',
+            groupConfidence: groupConfidence || 0.5
+          });
+          
+          console.log(`✅ Missing knowledge topic classified: ${predictedGroup || 'Uncategorized'}`);
+          
+        } catch (err) {
+          console.warn('Classification for no-KB question failed:', err);
+        }
+      });
+    }
+
+    // For self-verified questions, create a verification record automatically to trigger LLM Judge
+    if (isCurrentSelfVerified && saveResult.suggestionId) {
+      console.log('🔄 Creating auto-verification record for self-verified question...');
+      setImmediate(async () => {
+        try {
+          // Check if verification record already exists
+          const existingVerif = await pool.query(
+            `SELECT id FROM answer_verifications 
+             WHERE verified_answer_id = $1 AND verification_type = 'verification'`,
+            [verifiedAnswerId]
+          );
+          
+          if (existingVerif.rows.length === 0) {
+            // Create auto-verification record
+            await pool.query(`
+              INSERT INTO answer_verifications 
+              (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+              VALUES ($1, $2, $3, $4, 'verification', $5, NOW())
+            `, [
+              verifiedAnswerId, 
+              1, // system user
+              currentCreatedBy, 
+              'Self-verified by author',
+              ['Self']
+            ]);
+            
+            console.log('✅ Auto-verification record created, LLM Judge will run now...');
+            
+            // Now run LLM Judge analysis (copy the logic from submit-verification)
+            const aiSuggestion = await getAISuggestion(parseInt(verifiedAnswerId));
+            if (aiSuggestion && aiSuggestion.decision === 'pending') {
+              // Get question data
+              const questionResult = await pool.query(
+                `SELECT question, answer FROM verified_answers WHERE id = $1`,
+                [verifiedAnswerId]
+              );
+              const questionData = questionResult.rows[0];
+              const originalQuestion = questionData?.question || '';
+              const humanAnswer = questionData?.answer || '';
+              const aiAnswer = aiSuggestion.ai_generated_answer || '';
+              
+              // ========== AI Knowledge Group Classification for Self-Verified ==========
+              let predictedGroup: string | null = null;
+              let groupConfidence: number | null = null;
+              
+              try {
+                const classificationPrompt = `
+Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+
+**Question:**
+${originalQuestion}
+
+**Answer:**
+${humanAnswer.substring(0, 600)}
+
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
+
+**Instructions:**
+1. Read the Q&A and determine which predefined category fits BEST
+2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "Wire Bonding", "confidence": 0.9}
+`;
+
+                const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+                console.log('🔍 Calling Ollama for knowledge group classification (self-verified)...');
+                console.log('🔍 Ollama URL:', ollamaUrl);
+                console.log('🔍 Question:', originalQuestion.substring(0, 100));
+                
+                const classifyResponse = await fetch(ollamaUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'llama3:latest',
+                    prompt: classificationPrompt,
+                    stream: false,
+                    options: { 
+                      temperature: 0.2,
+                      num_predict: 100
+                    }
+                  })
+                });
+                
+                console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+                
+                if (classifyResponse.ok) {
+                  const classifyData = await classifyResponse.json() as { response?: string };
+                  const classifyText = classifyData.response || '';
+                  
+                  console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+                  
+                  const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                  if (jsonMatch) {
+                    try {
+                      const classification = JSON.parse(jsonMatch[0]);
+                      predictedGroup = classification.group || null;
+                      groupConfidence = typeof classification.confidence === 'number' 
+                        ? Math.min(1, Math.max(0, classification.confidence)) 
+                        : null;
+                      
+                      console.log(`📁 Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                    } catch (parseErr) {
+                      console.warn('Could not parse classification JSON:', parseErr);
+                    }
+                  }
+                }
+              } catch (classifyError) {
+                console.warn('Knowledge group classification failed (non-critical):', classifyError);
+              }
+              // ========== END AI Knowledge Group Classification ==========
+              
+              // Simplified LLM Judge for self-verified (always accept)
+              await updateAISuggestionDecision(
+                aiSuggestion.id,
+                'accepted',
+                humanAnswer,
+                currentCreatedBy
+              );
+              
+              await saveAILearningAnalysis(aiSuggestion.id, {
+                conflictType: 'none',
+                conflictDetails: 'Self-verified question - auto-accepted',
+                severity: undefined,
+                similarityScore: 1.0,
+                keyDifferences: [],
+                suggestedPromptFix: '',
+                suggestedRouting: 'none',
+                errorTags: [],
+                analyzedBy: 'auto-accept',
+                predictedGroup: predictedGroup || undefined,
+                groupConfidence: groupConfidence || undefined
+              });
+              
+              console.log('✅ LLM Judge auto-accept completed for self-verified question');
+            }
+          } else {
+            console.log('ℹ️ Verification record already exists, skipping');
+          }
+        } catch (err) {
+          console.warn('Auto-verification failed (non-critical):', err);
+        }
+      });
+    }
+
     res.json({
       success: true,
       suggestion: {
@@ -5396,10 +5692,10 @@ router.post('/ai-suggestion-decision', async (req: Request, res: Response) => {
       });
     }
 
-    if (!['accepted', 'modified', 'rejected'].includes(decision)) {
+    if (!['accepted', 'rejected'].includes(decision)) {
       return res.status(400).json({ 
         success: false, 
-        error: 'decision must be: accepted, modified, or rejected' 
+        error: 'decision must be: accepted or rejected' 
       });
     }
 
@@ -5411,12 +5707,12 @@ router.post('/ai-suggestion-decision', async (req: Request, res: Response) => {
       reviewedBy || 'Anonymous'
     );
 
-    // If decision is modified or rejected, save learning analysis
-    if (decision !== 'accepted' && (conflictType || conflictDetails)) {
+    // If decision is rejected, save learning analysis
+    if (decision === 'rejected' && (conflictType || conflictDetails)) {
       await saveAILearningAnalysis(suggestionId, {
-        conflictType: conflictType || (decision === 'rejected' ? 'incorrect_answer' : 'partial_error'),
+        conflictType: conflictType || 'incorrect_answer',
         conflictDetails,
-        severity: severity || (decision === 'rejected' ? 'major' : 'minor'),
+        severity: severity || 'major',
         analyzedBy: reviewedBy || 'user'
       });
     }

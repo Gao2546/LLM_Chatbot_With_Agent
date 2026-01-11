@@ -1617,21 +1617,43 @@ async function filterQuestionsByType(
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
-      id: row.id,
-      question: row.question,
-      answer: row.answer,
-      created_at: row.created_at,
-      created_by: row.created_by,
-      views: parseInt(row.views) || 0,
-      verification_type: row.verification_type,
-      requested_departments: row.requested_departments_list || [],
-      tags: row.tags || [],
-      verification_count: parseInt(row.verification_count) || 0,
-      total_requested_depts: parseInt(row.total_requested_depts) || 0,
-      vote_score: parseInt(row.vote_score) || 0,
-      user_has_answered: parseInt(row.user_comment_count) > 0
-    }));
+    return result.rows.map(row => {
+      const verificationType = row.verification_type;
+      const verificationCount = parseInt(row.verification_count) || 0;
+      const totalRequestedDepts = parseInt(row.total_requested_depts) || 0;
+      
+      // Determine if fully verified
+      let isFullyVerified = false;
+      if (verificationType === 'self') {
+        // Self-verified is always considered verified
+        isFullyVerified = true;
+      } else if (verificationType === 'request') {
+        // Request type: check if all requested departments have verified
+        if (totalRequestedDepts > 0) {
+          isFullyVerified = verificationCount >= totalRequestedDepts;
+        } else {
+          // No departments requested, consider verified if has any verification
+          isFullyVerified = verificationCount > 0;
+        }
+      }
+      
+      return {
+        id: row.id,
+        question: row.question,
+        answer: row.answer,
+        created_at: row.created_at,
+        created_by: row.created_by,
+        views: parseInt(row.views) || 0,
+        verification_type: verificationType,
+        requested_departments: row.requested_departments_list || [],
+        tags: row.tags || [],
+        verification_count: verificationCount,
+        total_requested_depts: totalRequestedDepts,
+        vote_score: parseInt(row.vote_score) || 0,
+        user_has_answered: parseInt(row.user_comment_count) > 0,
+        is_fully_verified: isFullyVerified
+      };
+    });
   } catch (error) {
     console.error('Error filtering questions:', error);
     throw error;
@@ -2198,13 +2220,13 @@ async function getAISuggestion(verifiedAnswerId: number) {
 /**
  * Update AI suggestion decision after human review
  * @param suggestionId The AI suggestion ID
- * @param decision 'accepted' | 'modified' | 'rejected'
+ * @param decision 'accepted' | 'rejected'
  * @param humanFinalAnswer The final answer after human review
  * @param reviewedBy Username of the reviewer
  */
 async function updateAISuggestionDecision(
   suggestionId: number,
-  decision: 'accepted' | 'modified' | 'rejected',
+  decision: 'accepted' | 'rejected',
   humanFinalAnswer: string,
   reviewedBy: string
 ) {
@@ -2287,7 +2309,6 @@ async function getAIPerformanceSummary(days: number = 30) {
         ai_model_used,
         COUNT(*) as total_suggestions,
         COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
-        COUNT(CASE WHEN decision = 'modified' THEN 1 END) as modified_count,
         COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count,
         COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count
        FROM ai_suggestions

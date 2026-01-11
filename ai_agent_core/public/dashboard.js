@@ -114,10 +114,12 @@ async function loadSummaryMetrics() {
         // Calculate summary stats from AI analytics
         let totalQuestions = 0;
         let totalRejected = 0;
+        let totalAccepted = 0;
         
         groups.forEach(group => {
             totalQuestions += parseInt(group.total_questions) || 0;
             totalRejected += parseInt(group.rejected_count) || 0;
+            totalAccepted += parseInt(group.accepted_count) || 0;
         });
         
         // Get pending count from verified_answers (pending-review + unverified)
@@ -134,6 +136,7 @@ async function loadSummaryMetrics() {
         // Update main stats
         document.getElementById('totalQuestions').textContent = totalQuestions;
         document.getElementById('pendingQuestions').textContent = totalPending;
+        document.getElementById('acceptedAnswers').textContent = totalAccepted;
         document.getElementById('rejectedAnswers').textContent = totalRejected;
         
         // Render knowledge coverage progress
@@ -143,6 +146,7 @@ async function loadSummaryMetrics() {
         console.error('Error loading summary metrics:', error);
         document.getElementById('totalQuestions').textContent = '-';
         document.getElementById('pendingQuestions').textContent = '-';
+        document.getElementById('acceptedAnswers').textContent = '-';
         document.getElementById('rejectedAnswers').textContent = '-';
     }
 }
@@ -191,7 +195,7 @@ async function loadKnowledgeGapHeatmap() {
         
         const data = result.data.groupDistribution || [];
         
-        // Sort by reject percentage (low to high) and show top 5
+        // Sort by rejected count (high to low) and show top 5
         const sortedData = data
             .filter(item => item.predicted_group && item.predicted_group !== 'Other')
             .map(item => {
@@ -201,7 +205,7 @@ async function loadKnowledgeGapHeatmap() {
                 const rejectPct = totalDecisions > 0 ? rejected / totalDecisions : 0;
                 return { ...item, rejectPct };
             })
-            .sort((a, b) => a.rejectPct - b.rejectPct) // น้อยไปมาก
+            .sort((a, b) => (parseInt(b.rejected_count) || 0) - (parseInt(a.rejected_count) || 0)) // มากไปน้อย
             .slice(0, 5); // เอา 5 อันดับแรก
         
         renderHeatmapTable(sortedData);
@@ -236,14 +240,6 @@ function renderHeatmapTable(data) {
         const avgConf = parseFloat(item.avg_confidence) || 0;
         const confPct = Math.round(avgConf * 100);
         
-        // Determine severity badge
-        let badge = '';
-        if (rejectPct >= 35) {
-            badge = '<span class="topic-badge badge-critical">Critical</span>';
-        } else if (rejectPct >= 25) {
-            badge = '<span class="topic-badge badge-warning">Watch</span>';
-        }
-        
         // Color coding for cells
         const acceptedColor = accepted > 5 ? '#d4edda' : accepted > 2 ? '#e8f5e9' : accepted > 0 ? '#f1f8f6' : 'transparent';
         const rejectedColor = rejected > 5 ? '#f8d7da' : rejected > 2 ? '#ffcccb' : rejected > 0 ? '#ffe8e8' : 'transparent';
@@ -252,10 +248,7 @@ function renderHeatmapTable(data) {
         return `
             <tr>
                 <td>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span class="topic-name">${item.predicted_group}</span>
-                        ${badge}
-                    </div>
+                    <span class="topic-name">${item.predicted_group}</span>
                 </td>
                 <td><strong>${totalQ}</strong></td>
                 <td style="background: ${acceptedColor}; color: ${accepted > 0 ? '#155724' : 'inherit'};">
@@ -290,25 +283,21 @@ async function loadRiskZone() {
         
         const data = result.data.groupDistribution || [];
         
-        // Find items with high rejection rate (knowledge gaps)
+        // Get top 5 groups with most rejected answers
         const riskItems = data
             .filter(item => {
                 const rejected = parseInt(item.rejected_count) || 0;
-                const accepted = parseInt(item.accepted_count) || 0;
-                const totalDecisions = rejected + accepted;
-                const rejectRate = totalDecisions > 0 ? rejected / totalDecisions : 0;
-                
                 return item.predicted_group && 
                        item.predicted_group !== 'Other' &&
-                       totalDecisions > 0 &&
-                       rejectRate >= 0.20; // 20%+ rejection rate
+                       rejected > 0; // At least 1 rejection
             })
             .sort((a, b) => {
-                const rejectA = (parseInt(a.rejected_count) || 0) / Math.max(1, (parseInt(a.rejected_count) || 0) + (parseInt(a.accepted_count) || 0));
-                const rejectB = (parseInt(b.rejected_count) || 0) / Math.max(1, (parseInt(b.rejected_count) || 0) + (parseInt(b.accepted_count) || 0));
-                return rejectB - rejectA;
+                // Sort by rejected count (descending)
+                const rejectedA = parseInt(a.rejected_count) || 0;
+                const rejectedB = parseInt(b.rejected_count) || 0;
+                return rejectedB - rejectedA;
             })
-            .slice(0, 3);
+            .slice(0, 5);
         
         renderRiskZone(riskItems);
         
@@ -344,13 +333,12 @@ function renderRiskZone(items) {
         const percentageDisplay = rejectRate === 100 ? '' : `${rejectRate}%`;
         
         html += `
-            <div class="risk-item ${riskClass}">
-                <div class="risk-header">
-                    <div class="risk-title">${item.predicted_group}</div>
-                    <div class="risk-percentage" style="font-size: 0.9rem;">${percentageDisplay}</div>
+            <div class="risk-item ${riskClass}" style="padding: 8px 12px; margin-bottom: 6px;">
+                <div class="risk-header" style="margin-bottom: 2px;">
+                    <div class="risk-title" style="font-size: 0.85rem;">${item.predicted_group}</div>
                 </div>
-                <div class="risk-detail" style="font-size: 0.8rem;">
-                    <strong>Rejection Rate:</strong> ${rejected}/${totalDecisions} | <strong>AI Confidence:</strong> ${avgConf}%
+                <div class="risk-detail" style="font-size: 0.75rem; color: #666;">
+                    Rejected: ${rejected}/${totalDecisions} | Conf: ${avgConf}%
                 </div>
             </div>
         `;
@@ -372,56 +360,85 @@ async function loadRetrainingZone() {
         
         const data = result.data.groupDistribution || [];
         
-        // Find items with low confidence
-        const lowConfItems = data
-            .filter(item => {
-                const avgConf = parseFloat(item.avg_confidence) || 0;
-                return item.predicted_group && 
-                       item.predicted_group !== 'Other' &&
-                       (parseInt(item.total_questions) || 0) > 0 &&
-                       avgConf < 0.70; // Less than 70% confidence
-            })
-            .sort((a, b) => {
-                const confA = parseFloat(a.avg_confidence) || 0;
-                const confB = parseFloat(b.avg_confidence) || 0;
-                return confA - confB;
-            })
-            .slice(0, 3);
+        // Calculate total accepted and rejected
+        let totalAccepted = 0;
+        let totalRejected = 0;
         
-        renderRetrainingZone(lowConfItems);
+        data.forEach(group => {
+            totalAccepted += parseInt(group.accepted_count) || 0;
+            totalRejected += parseInt(group.rejected_count) || 0;
+        });
+        
+        renderRetrainingZone({ accepted: totalAccepted, rejected: totalRejected });
         
     } catch (error) {
         console.error('Error loading retraining zone:', error);
-        renderRetrainingZone([]);
+        renderRetrainingZone({ accepted: 0, rejected: 0 });
     }
 }
 
-// Render retraining zone
-function renderRetrainingZone(items) {
+// Render retraining zone as donut chart
+function renderRetrainingZone(data) {
     const container = document.getElementById('retrainingZone');
     
-    if (!items || items.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-star"></i> All topics have good confidence</div>';
+    const { accepted, rejected } = data;
+    const total = accepted + rejected;
+    
+    if (total === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-chart-pie"></i> No AI decisions yet</div>';
         return;
     }
     
-    let html = '';
-    items.forEach(item => {
-        const avgConf = Math.round((parseFloat(item.avg_confidence) || 0) * 100);
-        const total = parseInt(item.total_questions) || 0;
-        
-        html += `
-            <div class="risk-item good">
-                <div class="risk-header">
-                    <div class="risk-title">${item.predicted_group}</div>
-                    <div class="risk-percentage">${avgConf}%</div>
-                </div>
-                <div class="risk-detail">
-                    <strong>Questions:</strong> ${total} | <strong>Action:</strong> Increase training data
+    const acceptedPercent = Math.round((accepted / total) * 100);
+    const rejectedPercent = Math.round((rejected / total) * 100);
+    
+    // Create donut chart using conic-gradient
+    const acceptedDeg = (accepted / total) * 360;
+    
+    const html = `
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 20px 0;">
+            <div style="position: relative; width: 180px; height: 180px;">
+                <div style="
+                    width: 100%;
+                    height: 100%;
+                    border-radius: 50%;
+                    background: conic-gradient(
+                        #009374 0deg ${acceptedDeg}deg,
+                        #dc3545 ${acceptedDeg}deg 360deg
+                    );
+                    position: relative;
+                ">
+                    <div style="
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 120px;
+                        height: 120px;
+                        border-radius: 50%;
+                        background: white;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                    ">
+                        <div style="font-size: 2rem; font-weight: bold; color: #333;">${total}</div>
+                        <div style="font-size: 0.8rem; color: #999;">Total Decisions</div>
+                    </div>
                 </div>
             </div>
-        `;
-    });
+            <div style="display: flex; gap: 30px; font-size: 0.9rem;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 16px; height: 16px; background: #009374; border-radius: 3px;"></div>
+                    <span><strong>Accepted:</strong> ${accepted} (${acceptedPercent}%)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 16px; height: 16px; background: #dc3545; border-radius: 3px;"></div>
+                    <span><strong>Rejected:</strong> ${rejected} (${rejectedPercent}%)</span>
+                </div>
+            </div>
+        </div>
+    `;
     
     container.innerHTML = html;
 }

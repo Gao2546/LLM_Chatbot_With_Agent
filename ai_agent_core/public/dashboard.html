@@ -389,7 +389,7 @@
                     <div class="questions-section">
 
                 <!-- Stats Grid -->
-                <div class="stats-grid">
+                <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <div class="stat-box">
                         <div class="stat-label"><i class="fas fa-list"></i> Total Questions</div>
                         <div class="stat-value" id="totalQuestions">-</div>
@@ -399,6 +399,11 @@
                         <div class="stat-label"><i class="fas fa-hourglass"></i> Pending</div>
                         <div class="stat-value" id="pendingQuestions">-</div>
                         <div class="stat-detail">Awaiting verification</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label"><i class="fas fa-check-circle"></i> Accepted</div>
+                        <div class="stat-value" id="acceptedAnswers">-</div>
+                        <div class="stat-detail">AI answers accepted</div>
                     </div>
                     <div class="stat-box">
                         <div class="stat-label"><i class="fas fa-times-circle"></i> Rejected</div>
@@ -453,11 +458,11 @@
                         </div>
                     </div>
 
-                    <!-- Opportunity for Retraining (Right) -->
+                    <!-- AI Performance (Right) -->
                     <div class="dashboard-panel">
                         <div class="panel-title" style="color: #009374;">
-                            <i class="fas fa-lightbulb"></i>
-                            Opportunity for Retraining
+                            <i class="fas fa-chart-pie"></i>
+                            AI Performance Overview
                         </div>
                         <div id="retrainingZone"></div>
                     </div>

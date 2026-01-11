@@ -1675,7 +1675,21 @@
                 const verifiedDepartments = {};
                 
                 // Extract verified departments from verifications
-                verifications.forEach(v => {
+                // Filter out auto-generated "Self" verifications for self-verified questions
+                const realVerifications = verifications.filter(v => {
+                    const depts = v.requestedDepartments || v.requested_departments || [];
+                    const dept = typeof depts === 'string' ? depts : (Array.isArray(depts) ? depts[0] : depts);
+                    const comment = v.comment || v.text || '';
+                    
+                    // Skip auto-generated "Self" verifications (from auto-verification for self-verified)
+                    if (dept === 'Self' && comment === 'Self-verified by author') {
+                        console.log('⏭️ Skipping auto-generated Self verification');
+                        return false;
+                    }
+                    return true;
+                });
+                
+                realVerifications.forEach(v => {
                     // Log all properties to understand the structure
                     console.log('📋 Full verification object:', JSON.stringify(v, null, 2));
                     
@@ -1707,7 +1721,7 @@
                 // Display verified departments
                 console.log('📊 Verified departments found:', Object.keys(verifiedDepartments).length);
                 if (Object.keys(verifiedDepartments).length > 0) {
-                    verificationItemsHTML = verifications
+                    verificationItemsHTML = realVerifications
                         .filter(v => {
                             const depts = v.requestedDepartments || v.requested_departments || [];
                             return v.verification_type === 'verification' || 
@@ -1760,11 +1774,15 @@
                                 attachmentsHtml = `<div class="verification-attachments-list">${attachmentItems}</div>`;
                             }
                             
+                            // Don't show "Request:" prefix for self-verified questions
+                            const isSelfVerified = currentQuestion.verification_type === 'self';
+                            const prefix = isSelfVerified ? '' : 'Request: ';
+                            
                             return `
                                 <div class="verification-item verified">
                                     <div class="verification-item-header">
                                         <div class="verification-item-text">
-                                            Request: ✓ Verified from ${dept} - ${username} (${date})
+                                            ${prefix}✓ Verified from ${dept} - ${username} (${date})
                                         </div>
                                     </div>
                                     ${comment ? `<div class="verification-item-comment">${comment}</div>` : ''}
@@ -2140,17 +2158,22 @@
                                     const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
                                     return `
                                     <div class="comment-attachment-item">
-                                        <i class="fas ${(() => {
-                                            if (mimeType.startsWith('image/')) return 'fa-image';
-                                            if (mimeType === 'application/pdf') return 'fa-file-pdf';
-                                            if (mimeType.includes('word')) return 'fa-file-word';
-                                            if (mimeType.includes('sheet')) return 'fa-file-excel';
-                                            return 'fa-file';
-                                        })()}"></i>
-                                        <a href="${att.url}" target="_blank" class="comment-attachment-link">
-                                            ${att.name}
-                                        </a>
-                                        <span class="comment-attachment-size">${sizeKB > 0 ? sizeKB + ' KB' : ''}</span>
+                                        <div class="comment-attachment-info">
+                                            <i class="fas ${(() => {
+                                                if (mimeType.startsWith('image/')) return 'fa-image';
+                                                if (mimeType === 'application/pdf') return 'fa-file-pdf';
+                                                if (mimeType.includes('word')) return 'fa-file-word';
+                                                if (mimeType.includes('sheet')) return 'fa-file-excel';
+                                                return 'fa-file';
+                                            })()}"></i>
+                                            <div class="comment-attachment-details">
+                                                <div class="comment-attachment-name">${att.name}</div>
+                                                <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
+                                            </div>
+                                        </div>
+                                        <button class="comment-attachment-preview-btn" onclick="window.open('${att.url}', '_blank')" title="Preview file">
+                                            <i class="fas fa-eye"></i> Preview
+                                        </button>
                                     </div>
                                 `}).join('')}
                             </div>
@@ -2486,10 +2509,31 @@
         // Verification Modal Functions
         const allDepartments = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
 
+        async function refreshCurrentQuestion() {
+            try {
+                // Fetch the latest question data from API
+                const res = await fetch('/api/get-all-verified-answers');
+                const data = await res.json();
+                const questions = data.results || data.answers || [];
+                const question = questions.find(q => q.id === parseInt(currentQuestionId));
+                
+                if (question) {
+                    currentQuestion = question;
+                    console.log('✅ Question data refreshed:', currentQuestion);
+                    console.log('✅ Updated requested_departments_list:', currentQuestion.requested_departments_list);
+                } else {
+                    console.warn('⚠️ Question not found in refresh');
+                }
+            } catch (e) {
+                console.error('Error refreshing question:', e);
+            }
+        }
+
         async function showVerificationStatus() {
             try {
-                // Reload verifications data first
+                // Reload verifications data AND refresh current question
                 await loadVerifications();
+                await refreshCurrentQuestion();
                 
                 console.log('🔍 Current Question:', currentQuestion);
                 console.log('🔍 Requested Departments:', currentQuestion?.requested_departments_list);
@@ -2624,6 +2668,8 @@
                     closeRequestReviewersModal();
                     // Reload question detail to show updated status
                     await loadQuestionDetail();
+                    // Show updated verification status modal
+                    await showVerificationStatus();
                 } else {
                     const error = await res.json();
                     alert(error.error || 'Failed to send request');
