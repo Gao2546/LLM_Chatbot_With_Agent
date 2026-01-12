@@ -2415,6 +2415,74 @@ async function getConfidenceDistribution() {
   }
 }
 
+/**
+ * Get Department Request & Verification Statistics
+ * Shows request count and verified count per department
+ * - Request = จำนวนคำถามที่ request ไปยังแต่ละแผนก (จาก verified_answers.requested_departments)
+ * - Verified = จำนวนการ verify ที่แต่ละแผนกทำ (จาก answer_verifications WHERE verification_type = 'verification')
+ */
+async function getDepartmentUserStatistics() {
+  try {
+    // Requests: นับจาก verified_answers WHERE verification_type = 'request'
+    // Verifications: นับจาก answer_verifications WHERE verification_type = 'verification' (ไม่เอา 'self')
+    const result = await pool.query(`
+      WITH 
+      -- นับ Requests จาก verified_answers WHERE verification_type = 'request'
+      request_counts AS (
+        SELECT 
+          TRIM(dept) as department,
+          COUNT(*) as cnt
+        FROM verified_answers va,
+        LATERAL UNNEST(va.requested_departments) as dept
+        WHERE va.verification_type = 'request'
+          AND TRIM(dept) IS NOT NULL 
+          AND TRIM(dept) != ''
+          AND LOWER(TRIM(dept)) != 'self'
+        GROUP BY TRIM(dept)
+      ),
+      -- นับ Verifications จาก answer_verifications WHERE verification_type = 'verification' (ไม่เอา 'self')
+      verify_counts AS (
+        SELECT 
+          TRIM(dept) as department,
+          COUNT(*) as cnt
+        FROM answer_verifications av,
+        LATERAL UNNEST(av.requested_departments) as dept
+        WHERE av.verification_type = 'verification'
+          AND TRIM(dept) IS NOT NULL 
+          AND TRIM(dept) != ''
+          AND LOWER(TRIM(dept)) != 'self'
+        GROUP BY TRIM(dept)
+      ),
+      -- รวม departments ทั้งหมด
+      all_depts AS (
+        SELECT department FROM request_counts
+        UNION
+        SELECT department FROM verify_counts
+      )
+      SELECT 
+        ad.department,
+        COALESCE(rc.cnt, 0)::int as requests,
+        COALESCE(vc.cnt, 0)::int as verifications
+      FROM all_depts ad
+      LEFT JOIN request_counts rc ON ad.department = rc.department
+      LEFT JOIN verify_counts vc ON ad.department = vc.department
+      ORDER BY requests DESC, verifications DESC
+    `);
+    
+    console.log('Department stats result:', result.rows);
+    
+    return result.rows.map(row => ({
+      department: row.department,
+      request_users: parseInt(row.requests) || 0,
+      verify_users: parseInt(row.verifications) || 0,
+      total_active_users: (parseInt(row.requests) || 0) + (parseInt(row.verifications) || 0)
+    }));
+  } catch (error) {
+    console.error('Error getting department user statistics:', error);
+    throw error;
+  }
+}
+
 // =====================================================
 // ========== END AI SUGGESTIONS FUNCTIONS ==========
 // =====================================================
@@ -2489,6 +2557,7 @@ export {
   getAIConflictPatterns,
   getKnowledgeGroupAnalytics,
   getConfidenceDistribution,
+  getDepartmentUserStatistics,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,

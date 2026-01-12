@@ -78,9 +78,8 @@ async function loadDashboard() {
         await Promise.all([
             loadSummaryMetrics(),
             loadKnowledgeGapHeatmap(),
-            loadRiskZone(),
             loadRetrainingZone(),
-            loadRecommendedActions()
+            loadDepartmentChart()
         ]);
     } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -223,7 +222,7 @@ function renderHeatmapTable(data) {
     if (!data || data.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">
                     No classification data available yet. Data will appear after verifications are processed.
                 </td>
             </tr>
@@ -237,13 +236,18 @@ function renderHeatmapTable(data) {
         const accepted = parseInt(item.accepted_count) || 0;
         const totalDecisions = rejected + accepted;
         const rejectPct = totalDecisions > 0 ? Math.round(100 * rejected / totalDecisions) : 0;
-        const avgConf = parseFloat(item.avg_confidence) || 0;
-        const confPct = Math.round(avgConf * 100);
+        const avgConf = Math.round((parseFloat(item.avg_confidence) || 0) * 100);
         
-        // Color coding for cells
-        const acceptedColor = accepted > 5 ? '#d4edda' : accepted > 2 ? '#e8f5e9' : accepted > 0 ? '#f1f8f6' : 'transparent';
-        const rejectedColor = rejected > 5 ? '#f8d7da' : rejected > 2 ? '#ffcccb' : rejected > 0 ? '#ffe8e8' : 'transparent';
-        const confColor = confPct >= 85 ? '#d4edda' : confPct >= 70 ? '#fff3cd' : '#f8d7da';
+        // Determine severity based on reject percentage
+        let severityClass = 'severity-low';
+        let severityLabel = 'Low';
+        if (rejectPct >= 50) {
+            severityClass = 'severity-critical';
+            severityLabel = 'Critical';
+        } else if (rejectPct >= 25) {
+            severityClass = 'severity-warning';
+            severityLabel = 'Warning';
+        }
         
         return `
             <tr>
@@ -251,18 +255,14 @@ function renderHeatmapTable(data) {
                     <span class="topic-name">${item.predicted_group}</span>
                 </td>
                 <td><strong>${totalQ}</strong></td>
-                <td style="background: ${acceptedColor}; color: ${accepted > 0 ? '#155724' : 'inherit'};">
-                    <strong>${accepted}</strong>
-                </td>
-                <td style="background: ${rejectedColor}; color: ${rejected > 0 ? '#721c24' : 'inherit'};">
-                    <strong>${rejected}</strong>
-                </td>
+                <td>${accepted}</td>
+                <td>${rejected}</td>
+                <td>${rejectPct}%</td>
+                <td><span class="badge badge-high">${avgConf}%</span></td>
                 <td>
-                    ${rejectPct}%
-                </td>
-                <td>
-                    <span class="confidence-badge" style="background: ${confColor}; color: ${confPct >= 70 ? '#155724' : '#721c24'};">
-                        ${confPct}%
+                    <span class="severity-badge ${severityClass}">
+                        <span class="status-dot ${severityClass === 'severity-critical' ? 'status-critical' : severityClass === 'severity-warning' ? 'status-warning' : 'status-good'}"></span>
+                        ${severityLabel}
                     </span>
                 </td>
             </tr>
@@ -337,7 +337,7 @@ function renderRiskZone(items) {
                 <div class="risk-header" style="margin-bottom: 2px;">
                     <div class="risk-title" style="font-size: 0.85rem;">${item.predicted_group}</div>
                 </div>
-                <div class="risk-detail" style="font-size: 0.75rem; color: #666;">
+                <div class="risk-detail" style="font-size: 0.75rem;">
                     Rejected: ${rejected}/${totalDecisions} | Conf: ${avgConf}%
                 </div>
             </div>
@@ -396,44 +396,27 @@ function renderRetrainingZone(data) {
     const acceptedDeg = (accepted / total) * 360;
     
     const html = `
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 20px 0;">
-            <div style="position: relative; width: 180px; height: 180px;">
-                <div style="
-                    width: 100%;
-                    height: 100%;
-                    border-radius: 50%;
+        <div class="donut-chart-container">
+            <div class="donut-chart-wrapper">
+                <div class="donut-chart" style="
                     background: conic-gradient(
                         #009374 0deg ${acceptedDeg}deg,
                         #dc3545 ${acceptedDeg}deg 360deg
                     );
-                    position: relative;
                 ">
-                    <div style="
-                        position: absolute;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
-                        width: 120px;
-                        height: 120px;
-                        border-radius: 50%;
-                        background: white;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        justify-content: center;
-                    ">
-                        <div style="font-size: 2rem; font-weight: bold; color: #333;">${total}</div>
-                        <div style="font-size: 0.8rem; color: #999;">Total Decisions</div>
+                    <div class="donut-center">
+                        <div class="donut-value">${total}</div>
+                        <div class="donut-label">Total Decisions</div>
                     </div>
                 </div>
             </div>
-            <div style="display: flex; gap: 30px; font-size: 0.9rem;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 16px; height: 16px; background: #009374; border-radius: 3px;"></div>
+            <div class="chart-legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #009374;"></div>
                     <span><strong>Accepted:</strong> ${accepted} (${acceptedPercent}%)</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 16px; height: 16px; background: #dc3545; border-radius: 3px;"></div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #dc3545;"></div>
                     <span><strong>Rejected:</strong> ${rejected} (${rejectedPercent}%)</span>
                 </div>
             </div>
@@ -542,8 +525,8 @@ function renderRecommendedActions(actions) {
             <li>
                 <div class="action-icon ${iconColor}"><i class="fas fa-check"></i></div>
                 <div style="flex: 1;">
-                    <div style="font-weight: 600; color: #333;">${action.title}</div>
-                    <div style="font-size: 0.85rem; color: #666;">${action.description}</div>
+                    <div class="action-title">${action.title}</div>
+                    <div class="action-desc">${action.description}</div>
                 </div>
             </li>
         `;
@@ -554,6 +537,9 @@ function renderRecommendedActions(actions) {
 
 // Update last updated time
 function updateLastUpdatedTime() {
+    const element = document.getElementById('lastUpdated');
+    if (!element) return; // Exit gracefully if element not found
+    
     const now = new Date();
     const formatted = now.toLocaleString('th-TH', {
         year: 'numeric',
@@ -562,7 +548,7 @@ function updateLastUpdatedTime() {
         hour: '2-digit',
         minute: '2-digit'
     });
-    document.getElementById('lastUpdated').textContent = formatted;
+    element.textContent = 'Last updated: ' + formatted;
 }
 
 // Error handlers
@@ -614,4 +600,99 @@ async function loadHotTags() {
             tagsListDiv.innerHTML = '<span class="tags-loading">Failed to load tags</span>';
         }
     }
+}
+
+// Load Department Request Comparison Chart
+async function loadDepartmentChart() {
+    try {
+        const response = await fetch('/api/department-user-stats');
+        if (!response.ok) throw new Error('Failed to fetch user stats');
+        
+        const result = await response.json();
+        console.log('Department user stats response:', result); // Debug log
+        
+        if (!result.success || !result.data) {
+            throw new Error('Invalid user stats response');
+        }
+        
+        const data = result.data || [];
+        console.log('Department data:', data); // Debug log
+        
+        // Get top 5 departments by total active users (include all departments)
+        const topDepartments = data
+            .filter(item => item.department)
+            .map(item => ({
+                department: item.department,
+                requestUsers: parseInt(item.request_users) || 0,
+                verifyUsers: parseInt(item.verify_users) || 0,
+                total: parseInt(item.total_active_users) || 0
+            }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 10);
+        
+        console.log('Top departments:', topDepartments); // Debug log
+        renderDepartmentChart(topDepartments);
+        
+    } catch (error) {
+        console.error('Error loading department chart:', error);
+        const container = document.getElementById('departmentChart');
+        if (container) {
+            container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i> Failed to load chart<br><small>${error.message}</small></div>`;
+        }
+    }
+}
+
+// Render Department Comparison Chart
+function renderDepartmentChart(data) {
+    const container = document.getElementById('departmentChart');
+    if (!container) return;
+    
+    if (!data || data.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i> No data available</div>';
+        return;
+    }
+    
+    // Find max value for scaling
+    const maxValue = Math.max(...data.map(d => Math.max(d.requestUsers, d.verifyUsers)));
+    const maxHeight = 200; // pixels
+    
+    // Create chart HTML
+    let chartHtml = '<div class="bar-chart-container">';
+    
+    data.forEach(item => {
+        const requestHeight = maxValue > 0 ? (item.requestUsers / maxValue) * maxHeight : 0;
+        const verifyHeight = maxValue > 0 ? (item.verifyUsers / maxValue) * maxHeight : 0;
+        
+        chartHtml += `
+            <div class="bar-group">
+                <div class="bars-wrapper">
+                    <div class="bar bar-accepted" style="height: ${requestHeight}px;" title="Requests: ${item.requestUsers}">
+                        ${item.requestUsers > 0 ? `<span class="bar-label">${item.requestUsers}</span>` : ''}
+                    </div>
+                    <div class="bar bar-rejected" style="height: ${verifyHeight}px;" title="Verifications: ${item.verifyUsers}">
+                        ${item.verifyUsers > 0 ? `<span class="bar-label">${item.verifyUsers}</span>` : ''}
+                    </div>
+                </div>
+                <div class="bar-group-label">${item.department}</div>
+            </div>
+        `;
+    });
+    
+    chartHtml += '</div>';
+    
+    // Add legend
+    chartHtml += `
+        <div class="chart-legend">
+            <div class="legend-item">
+                <div class="legend-color legend-accepted"></div>
+                <span>Requests</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color legend-rejected"></div>
+                <span>Verifications</span>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = chartHtml;
 }
