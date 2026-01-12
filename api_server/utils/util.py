@@ -1234,7 +1234,6 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 ### Relevance Filter
 If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
 """)
-
     # Add context about the images
     page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
     reference_text = "\n".join(page_references)
@@ -1247,10 +1246,10 @@ If a specific user question is provided and this page contains no relevant infor
     Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
 
     # --- Step 4: Call OpenRouterInference ---
-    print(f"Sending {len(image_bytes_list)} images to OpenRouter VLM...")
+    print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
 
     vlm_response = ""
-    batch_size = 15
+    batch_size = 10
     for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
         print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
         if (i)*batch_size >= len(image_bytes_list):
@@ -1261,8 +1260,9 @@ If a specific user question is provided and this page contains no relevant infor
                 prompt=final_user_prompt,
                 system_prompt=vlm_system_prompt, # The user's detailed instructions go here
                 image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                model_name="Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+                model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
             ) + "\n\n"
+            print(vlm_response)
         else :
              # System prompt for OpenRouter VLM
             vlm_system_prompt = ("You're an image expert."
@@ -1277,6 +1277,7 @@ If a specific user question is provided and this page contains no relevant infor
                 )
             vlm_response = "\n\n".join(vlm_response) + "\n\n"
 
+    print(vlm_response)
     print("✅ VLM processing complete.")
 
     # --- Step 5: Handle "summarize" option ---
@@ -1357,6 +1358,23 @@ def OllamaInference(prompt: str, system_prompt: str = "", image_bytes_list: List
 #  DEEPINFRA FUNCTION (Updated)
 # ==============================================================================
 
+parameter_option = {
+                'normal' : {
+                    'temperature': 0.1,
+                    'top_p': 0.95,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                },
+
+                'deepseek-ai/DeepSeek-OCR' : {
+                    'temperature': 0.1,
+                    'top_p': 0.9,
+                    'min_p': 0.0,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                },
+            }
+
 def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "deepseek-ai/DeepSeek-OCR") -> str:
     """
     Perform inference using DeepInfra's OpenAI-compatible API.
@@ -1391,8 +1409,8 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
                 img = Image.open(io.BytesIO(image_bytes))
                 
                 # --- START: RESIZING SECTION ---
-                max_size = (1028, 1028)  # Max width and height of 1028 pixels
-                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                # max_size = (1028, 1028)  # Max width and height of 1028 pixels
+                # img.thumbnail(max_size, Image.Resampling.LANCZOS)
                 
                 output_buffer = io.BytesIO()
                 image_format = img.format or 'JPEG' 
@@ -1418,6 +1436,12 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
 
     # --- API Call Section (Modified for DeepInfra) ---
     try:
+        if model_name in parameter_option.keys():
+            parameter = parameter_option[model_name]
+        else:
+            parameter = parameter_option['normal']
+        parameter['model'] = model_name
+        parameter['messages'] = messages
         response = requests.post(
             # Use DeepInfra's OpenAI-compatible endpoint
             url="https://api.deepinfra.com/v1/chat/completions",
@@ -1425,17 +1449,12 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": model_name,
-                "messages": messages,
-                'temperature': 0.1,
-                'top_p': 0.95,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-            }
+            json=parameter
         )
         response.raise_for_status()
         data = response.json()
+        print("ddddddd:")
+        print(data['choices'][0]['message']['content'])
         # Parse the response in the same way as OpenRouter
         return data['choices'][0]['message']['content']
 
