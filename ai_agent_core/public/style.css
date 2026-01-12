@@ -1535,9 +1535,9 @@ strong {
 /* The Main Dialog Box */
 .pp-dialog {
     width: 80%;
-    max-width: 900px;
-    /* height: 650px; */
-    height: fit-content;
+    max-width: 1000px;
+    height: 80%;
+    /* height: fit-content; */
     max-height: 700px;
     background-color: var(--bg-color); 
     border: 1px solid var(--border-color);
