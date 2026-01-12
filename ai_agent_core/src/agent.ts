@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics } from './db.js';
 
 dotenv.config();
 
@@ -3572,6 +3572,7 @@ router.post('/request-verifications', async (req: Request, res: Response) => {
   try {
     const { questionId, departments } = req.body;
     const userId = req.session.user?.id;
+    const username = req.session.user?.username || 'Anonymous';
 
     if (!questionId || !departments || !Array.isArray(departments)) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
@@ -3613,7 +3614,7 @@ router.post('/request-verifications', async (req: Request, res: Response) => {
         (verified_answer_id, user_id, commenter_name, verification_type, requested_departments, created_at)
         VALUES ($1, $2, $3, 'request', $4, NOW())
         ON CONFLICT DO NOTHING
-      `, [questionId, userId, `Request-${new Date().getTime()}`, [dept]])
+      `, [questionId, userId, username, [dept]])
     );
 
     await Promise.all(promises);
@@ -3966,6 +3967,8 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
         // Only run LLM Judge when verification is complete
         if (!isVerificationComplete) {
           console.log(`⏳ Waiting for more verifications (${requestedDepartments.length} requested)`);
+          console.log(`⏳ Skipping LLM Judge - verification not complete yet`);
+          return; // Exit early - don't run LLM Judge yet
         } else {
           console.log(`✅ All verifications complete! Running LLM Judge analysis...`);
           
@@ -5804,6 +5807,42 @@ router.post('/ai-learning-analysis', async (req: Request, res: Response) => {
 });
 
 /**
+ * Get Missing Knowledge Topics (No KB Data)
+ * GET /api/missing-knowledge-topics
+ * Returns topics where AI said "no data in knowledge base"
+ */
+router.get('/missing-knowledge-topics', async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        ala.predicted_group,
+        COUNT(DISTINCT va.id) as total_questions,
+        COUNT(DISTINCT CASE WHEN ala.user_decision = 'accepted' THEN va.id END) as accepted_count,
+        COUNT(DISTINCT CASE WHEN ala.user_decision = 'rejected' THEN va.id END) as rejected_count,
+        ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
+        STRING_AGG(DISTINCT va.question, ' | ' ORDER BY va.question) as sample_questions
+      FROM ai_learning_analysis ala
+      INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
+      INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
+      WHERE ala.predicted_group IS NOT NULL
+        AND ala.conflict_type = 'incomplete_answer'
+        AND ('missing_knowledge' = ANY(ala.error_tags) OR 'no_kb_data' = ANY(ala.error_tags))
+      GROUP BY ala.predicted_group
+      ORDER BY total_questions DESC
+      LIMIT 20
+    `);
+    
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error getting missing knowledge topics:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
  * Get Knowledge Group Analytics
  * GET /api/knowledge-group-analytics
  */
@@ -5844,6 +5883,28 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
   } catch (error) {
     console.error('Error getting knowledge group analytics:', error);
     res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get Department User Statistics
+ * GET /api/department-user-stats
+ */
+router.get('/department-user-stats', async (req: Request, res: Response) => {
+  try {
+    const stats = await getDepartmentUserStatistics();
+
+    res.json({
+      success: true,
+      data: stats
+    });
+
+  } catch (error) {
+    console.error('Error fetching department user statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch department user statistics'
+    });
   }
 });
 
