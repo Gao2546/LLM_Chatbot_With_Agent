@@ -1601,17 +1601,60 @@ def get_image_embedding_jinna_api(
 # """
 
 
+#     create_search_prompt = f"""
+# Act as a document search engine (PDF document search by vector similarity). 
+# Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
+# Include likely keywords and factual phrasing.
+
+# User Query: {text}
+# Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
+# Prompt Language: English
+
+# Output only the simulated excerpt.
+# """ #*****************
+    
+
+
+
+
+
+
+
     create_search_prompt = f"""
-Act as a document search engine (PDF document search by vector similarity). 
-Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
-Include likely keywords and factual phrasing.
+Act as a high-precision OCR and document retrieval system.
+Generate a single, dense excerpt that mimics a direct "hit" from a technical manual or datasheet answering the query: "{text}".
+Requirements:
+    1. Use high-density technical language (e.g., "nominal operating range," "tolerance ±5%," "hex-head bolt," "thermal conductivity").
+    2. Include specific identifiers like model numbers (e.g., Series-X1), section headers (e.g., Section 4.2.1), or units (e.g., mV, PSI, Nm).
+    3. Structure the output as a standalone technical fact or a row from a specification table.
+    4. Do not use introductory filler; start immediately with the data.
+    """
+    
+    # create_search_prompt = f"""
+# Act as a document search engine. Simulate a raw text extraction from a table or diagram within a PDF datasheet to answer: "{text}".
+# Style Guidelines:
+#     # Format the response as a condensed data string (e.g., [Parameter] | [Value] | [Conditions]).
+#     # Use "telegraphic" writing style (no unnecessary articles like 'the' or 'a').
+#     # Ensure the text contains a specific numerical value or a direct instruction found in a "Notes" column.
+#     # Example format: "Table 3: Max Load Capacity; Model A: 500kg; Model B: 750kg; Note: Ensure surface is level."
+# """
 
-User Query: {text}
-Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
-Prompt Language: English
+    # create_search_prompt = f"""
+# Act as a semantic search engine retrieving a snippet from a field service manual.
+# Generate one concise, authoritative sentence that answers the query "{text}" as it would appear in a printed instruction set.
+# Instructions:
+#     # Use imperative verbs (e.g., "Calibrate," "Verify," "Torque," "Connect").
+#     # Include a page or figure reference (e.g., "See Fig. 12-B").
+#     # Use specific technical terminology relevant to the query to ensure high vector similarity.
+#     # Output only the excerpt.
+# """
 
-Output only the simulated excerpt.
-""" #*****************
+
+
+
+
+
+
 
 
 #     create_search_prompt = f"""
