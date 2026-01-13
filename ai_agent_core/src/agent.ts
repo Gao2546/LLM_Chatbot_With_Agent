@@ -646,7 +646,7 @@ router.post('/message', async (req : Request, res : Response) => {
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
-          threshold_page: 0.8,
+          threshold_page: 0.5,
           threshold_text: 0.8,
           documentSearchMethod: documentSearchMethod,
         }),
@@ -703,13 +703,13 @@ router.post('/message', async (req : Request, res : Response) => {
     let question : string = "";
     let question_backup
     if ((currentChatMode) && (serch_doc != "")){
-      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
-      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
+      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
     else{
       console.log("No document")
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = chatContent
+      question_backup = chatContent + "\n\n" + "No Document" + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     const modelToUse = currentChatModel || initialModel;

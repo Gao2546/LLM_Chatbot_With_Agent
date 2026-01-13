@@ -1107,6 +1107,7 @@ Include likely keywords and factual phrasing.
 User Query: {queryT}
 Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
 Prompt Language: English
+Prompt Type: Markdown
 
 Output only the simulated excerpt.
 """ #*****************

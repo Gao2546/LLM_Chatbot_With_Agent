@@ -1453,8 +1453,6 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
         )
         response.raise_for_status()
         data = response.json()
-        print("ddddddd:")
-        print(data['choices'][0]['message']['content'])
         # Parse the response in the same way as OpenRouter
         return data['choices'][0]['message']['content']
 
