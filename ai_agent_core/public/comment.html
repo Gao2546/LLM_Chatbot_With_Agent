@@ -1083,87 +1083,31 @@
                 .replace(/^# (.+)$/gm, '<h2>$1</h2>');
             
             // Convert bold text with colon as section title (e.g., **หัวข้อ:**)
-            formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<span class="section-title">$1:</span>');
+            formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong>$1:</strong>');
             
             // Convert remaining bold
             formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             
-            // Convert italic
-            formatted = formatted.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
+            // Convert italic (but not bullet points)
+            formatted = formatted.replace(/(?<!\n)\*([^*\n]+?)\*/g, '<em>$1</em>');
             
-            // Convert special labels to bold
-            formatted = formatted
-                .replace(/ข้อจำกัด:/g, '<strong>ข้อจำกัด:</strong>')
-                .replace(/คำแนะนำ:/g, '<strong>คำแนะนำ:</strong>')
-                .replace(/หมายเหตุ:/g, '<strong>หมายเหตุ:</strong>')
-                .replace(/แหล่งข้อมูล:/g, '<strong>แหล่งข้อมูล:</strong>')
-                .replace(/วัตถุประสงค์:/g, '<strong>วัตถุประสงค์:</strong>')
-                .replace(/เงื่อนไข:/g, '<strong>เงื่อนไข:</strong>');
+            // Convert bullet points: lines starting with - or * followed by space
+            formatted = formatted.replace(/^[\-\*]\s+(.+)$/gm, '<li>$1</li>');
             
-            // Split into paragraphs and process
-            const paragraphs = formatted.split(/\n\n+/);
-            const processedParagraphs = [];
+            // Wrap consecutive <li> in <ul>
+            formatted = formatted.replace(/(<li>[\s\S]*?<\/li>)(\n<li>[\s\S]*?<\/li>)*/g, function(match) {
+                return '<ul>' + match.replace(/\n/g, '') + '</ul>';
+            });
             
-            for (let para of paragraphs) {
-                para = para.trim();
-                if (!para) continue;
-                
-                // Check if it's already HTML
-                if (para.startsWith('<h') || para.startsWith('<div')) {
-                    processedParagraphs.push(para);
-                    continue;
-                }
-                
-                // Check if paragraph contains bullet points
-                const lines = para.split('\n');
-                const bulletLines = [];
-                const normalLines = [];
-                let inList = false;
-                
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (/^[•\-\*]\s+/.test(trimmedLine)) {
-                        // Bullet point
-                        const content = trimmedLine.replace(/^[•\-\*]\s+/, '');
-                        if (!inList && normalLines.length > 0) {
-                            // Add normal lines as paragraph first
-                            processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
-                            normalLines.length = 0;
-                        }
-                        bulletLines.push('<li>' + content + '</li>');
-                        inList = true;
-                    } else if (/^\d+\.\s+/.test(trimmedLine)) {
-                        // Numbered list
-                        const content = trimmedLine.replace(/^\d+\.\s+/, '');
-                        if (!inList && normalLines.length > 0) {
-                            processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
-                            normalLines.length = 0;
-                        }
-                        bulletLines.push('<li>' + content + '</li>');
-                        inList = true;
-                    } else if (trimmedLine) {
-                        // Normal text
-                        if (inList && bulletLines.length > 0) {
-                            // Close previous list
-                            processedParagraphs.push('<ul>' + bulletLines.join('') + '</ul>');
-                            bulletLines.length = 0;
-                            inList = false;
-                        }
-                        normalLines.push(trimmedLine);
-                    }
-                }
-                
-                // Handle remaining content
-                if (bulletLines.length > 0) {
-                    processedParagraphs.push('<ul>' + bulletLines.join('') + '</ul>');
-                }
-                if (normalLines.length > 0) {
-                    processedParagraphs.push('<p>' + normalLines.join(' ') + '</p>');
-                }
-            }
+            // Convert numbered lists
+            formatted = formatted.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
             
-            const result = processedParagraphs.join('');
-            return result || '<p>' + text + '</p>';
+            // Convert line breaks to <br> (but not before/after block elements)
+            formatted = formatted.replace(/\n(?!<)/g, '<br>\n');
+            formatted = formatted.replace(/<br>\n(<ul>|<\/ul>|<li>|<\/li>|<h)/g, '\n$1');
+            formatted = formatted.replace(/(<\/ul>|<\/h\d>)<br>/g, '$1');
+            
+            return formatted;
         }
 
         /**
@@ -1267,7 +1211,7 @@
                         </div>
                     </div>
 
-                    <div class="detail-question-content">${q.answer || 'No content available'}</div>
+                    <div class="detail-question-content">${formatPlainTextAnswer(q.answer || 'No content available')}</div>
 
                     <!-- Tags hidden in detail view - only show in community list -->
                     <!-- <div class="detail-question-tags">

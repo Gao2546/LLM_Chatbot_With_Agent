@@ -4909,13 +4909,14 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     );
     
     const isCurrentSelfVerified = currentQuestionData.rows[0]?.verification_type === 'self';
+    const isCurrentRequestType = currentQuestionData.rows[0]?.verification_type === 'request';
     const currentAnswer = currentQuestionData.rows[0]?.answer || '';
     const currentCreatedBy = currentQuestionData.rows[0]?.created_by || 'Unknown';
 
     // ========== Approach 1: ใช้เฉพาะข้อมูลของคำถามปัจจุบันเท่านั้น ==========
     // ไม่ใช้ข้อมูลจากคำถามอื่นที่คล้ายกัน เพื่อป้องกันคำตอบปนกัน
 
-    console.log(`📚 Current question self-verified: ${isCurrentSelfVerified}`);
+    console.log(`📚 Current question self-verified: ${isCurrentSelfVerified}, request-type: ${isCurrentRequestType}`);
 
     // Build context from current question's verifications AND similar verified questions
     let context = '';
@@ -5343,8 +5344,11 @@ Create a summary answer from the knowledge base:
     console.log(`✅ AI suggestion generated for question ${verifiedAnswerId} with ${totalSources} sources`);
 
     // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
-    if (totalSources === 0 && saveResult.suggestionId) {
-      console.log('🔄 No knowledge found - classifying topic group for analytics...');
+    // Auto-reject ONLY when:
+    // 1. No knowledge base sources (totalSources === 0)
+    // 2. No attachments (wait for human verification if attachments exist)
+    if (totalSources === 0 && saveResult.suggestionId && !hasAttachments) {
+      console.log('🔄 No knowledge and no attachments - auto-rejecting and classifying topic group for analytics...');
       setImmediate(async () => {
         try {
           let predictedGroup: string | null = null;
@@ -5452,6 +5456,12 @@ Return ONLY this JSON format (no markdown, no extra text):
           console.warn('Classification for no-KB question failed:', err);
         }
       });
+    }
+
+    // For questions with attachments but no KB data - wait for human verification
+    // Don't auto-reject, let humans verify the attachment content first
+    if (totalSources === 0 && saveResult.suggestionId && hasAttachments) {
+      console.log('⏳ Question with attachments but no KB data - waiting for human verification before decision');
     }
 
     // For self-verified questions, create a verification record automatically to trigger LLM Judge
