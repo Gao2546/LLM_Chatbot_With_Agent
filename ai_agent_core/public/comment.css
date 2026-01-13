@@ -1012,6 +1012,23 @@ body[data-theme="dark"] .ai-sources i {
     font-size: 16px;
 }
 
+.detail-question-content ul {
+    margin: 12px 0 12px 20px;
+    padding-left: 20px;
+    list-style-type: disc;
+    list-style-position: outside;
+}
+
+.detail-question-content li {
+    margin-bottom: 8px;
+    padding-left: 4px;
+}
+
+.detail-question-content strong {
+    color: #333;
+    font-weight: 600;
+}
+
 .detail-question-tags {
     display: flex;
     flex-wrap: wrap;
@@ -1595,9 +1612,51 @@ body[data-theme="dark"] .ai-sources i {
     word-wrap: break-word;
 }
 
+.comment-attachments-section {
+    margin-top: 12px;
+}
+
+.comment-attachments-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0a8276;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.comment-attachments-header i {
+    font-size: 13px;
+}
+
+.comment-attachments-link {
+    margin-top: 8px;
+}
+
+.comment-attachments-link .attachment-link {
+    color: #0a8276;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.comment-attachments-link .attachment-link:hover {
+    color: #087a6a;
+    text-decoration: underline;
+}
+
+.comment-attachments-link .attachment-link i {
+    font-size: 13px;
+}
+
 .comment-attachments-list {
-    padding: 10px 0 0 0;
-    margin-top: 10px;
+    padding: 0;
+    margin: 0;
 }
 
 .comment-attachment-item {
@@ -2246,6 +2305,10 @@ body[data-theme="dark"] .ai-sources i {
     color: #e0e0e0 !important;
 }
 
+[data-theme="dark"] .detail-question-content strong {
+    color: #f0f0f0 !important;
+}
+
 [data-theme="dark"] .detail-question-meta,
 [data-theme="dark"] .detail-meta-item {
     color: #b0b0b0 !important;
@@ -2847,4 +2910,48 @@ body[data-theme="dark"] .source-question-link {
 
 [data-theme="dark"] .ai-source-verified-by {
     color: #999 !important;
+}
+
+/* ===== SIDEBAR TAGS (from community.css) ===== */
+.sidebar-tags-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 5px 0;
+}
+
+.sidebar-tag-item {
+    display: inline-block;
+    padding: 6px 10px;
+    background: rgba(10, 130, 118, 0.15);
+    color: #0a8276;
+    border-radius: 6px;
+    font-size: 0.8em;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid rgba(10, 130, 118, 0.25);
+    transition: all 0.2s;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-tag-item:hover {
+    background: rgba(10, 130, 118, 0.25);
+    border-color: rgba(10, 130, 118, 0.4);
+}
+
+.sidebar-tag-item.active {
+    background: #0a8276;
+    color: #fff;
+    border-color: #0a8276;
+}
+
+.tags-loading {
+    color: #888;
+    font-size: 12px;
+    padding: 8px;
+    text-align: center;
+    width: 100%;
 }

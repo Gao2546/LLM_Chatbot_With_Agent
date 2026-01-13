@@ -868,7 +868,7 @@
                     </div>
                     <div class="question-content">
                         <a href="comment.html?id=${q.id}" class="question-title" onclick="event.stopPropagation()">${esc(q.question || q.question_title || 'Untitled')}</a>
-                        <div class="question-excerpt">${esc(stripHtml((q.answer || q.summary || '')).substring(0, 120))}</div>
+                        <div class="question-excerpt">${esc(stripMarkdown(stripHtml(q.answer || q.summary || '')).substring(0, 120))}</div>
                         <div class="question-tags">${(q.tags || []).map(tag => `<span class="tag-badge">${esc(tag)}</span>`).join('')}</div>
                     </div>
                     <div class="question-meta">
@@ -1006,6 +1006,24 @@
             const temp = document.createElement('div');
             temp.innerHTML = html;
             return temp.textContent || temp.innerText || '';
+        }
+
+        // Strip markdown syntax from text (remove *, **, ___, etc.)
+        function stripMarkdown(text) {
+            if (!text) return '';
+            return text
+                .replace(/\*\*\*(.+?)\*\*\*/g, '$1')  // Bold italic ***text***
+                .replace(/\*\*(.+?)\*\*/g, '$1')      // Bold **text**
+                .replace(/__(.+?)__/g, '$1')          // Bold __text__
+                .replace(/\*(.+?)\*/g, '$1')          // Italic *text*
+                .replace(/_(.+?)_/g, '$1')            // Italic _text_
+                .replace(/~~(.+?)~~/g, '$1')          // Strikethrough ~~text~~
+                .replace(/`(.+?)`/g, '$1')            // Code `text`
+                .replace(/^#{1,6}\s+/gm, '')          // Headers # text
+                .replace(/^\s*[-*+]\s+/gm, '')        // Bullet points - item
+                .replace(/^\s*\d+\.\s+/gm, '')        // Numbered lists 1. item
+                .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')  // Links [text](url)
+                .trim();
         }
 
         // Theme Toggle Functionality
