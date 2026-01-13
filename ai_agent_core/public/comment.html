@@ -137,14 +137,6 @@
                 <a href="#" class="sidebar-link">Unverified</a>
             </div>
 
-            <!-- Tags Section -->
-            <div class="sidebar-section">
-                <div class="section-title">Tags</div>
-                <div id="tagsList" class="sidebar-tags-grid">
-                    <span class="tags-loading">Loading tags...</span>
-                </div>
-            </div>
-
             <!-- Theme Toggle Button -->
             <div class="theme-toggle-container">
                 <button id="themeToggleBtn" class="theme-toggle-btn" title="Change Theme">
@@ -382,8 +374,6 @@
             console.log('🏢 setupVerificationDepartments completed');
             setupFilterLinks();
             console.log('🔗 setupFilterLinks completed');
-            await loadHotTags();
-            console.log('🏷️ loadHotTags completed');
             setupTheme();
             console.log('🎨 setupTheme completed');
             setupNotificationBell();
@@ -412,6 +402,10 @@
         }
 
         // Load related questions using vector similarity
+        const INITIAL_DISPLAY_COUNT = 2; // Show only 2 questions initially
+        let allRelatedQuestionsData = []; // Store all fetched questions
+        let relatedQuestionsExpanded = false;
+
         async function loadRelatedQuestions() {
             try {
                 if (!currentQuestionId) return;
@@ -420,8 +414,8 @@
                 const sectionWrapper = container?.parentElement; // Get the parent section div
                 if (!container) return;
 
-                // Fetch related questions from API
-                const response = await fetch(`/api/related-questions/${currentQuestionId}`);
+                // Fetch ALL related questions from API
+                const response = await fetch(`/api/related-questions-all/${currentQuestionId}`);
                 const data = await response.json();
 
                 if (!data.success) {
@@ -433,10 +427,10 @@
                     return;
                 }
 
-                const results = data.results || [];
-                const totalRelated = data.total || results.length;
+                allRelatedQuestionsData = data.results || [];
+                const totalRelated = allRelatedQuestionsData.length;
 
-                if (results.length === 0) {
+                if (totalRelated === 0) {
                     // Hide the entire section if no related questions
                     if (sectionWrapper) {
                         sectionWrapper.style.display = 'none';
@@ -444,66 +438,15 @@
                     return;
                 }
 
-                // Helper function to escape HTML
-                const escapeHtml = (text) => {
-                    if (!text) return '';
-                    const map = {
-                        '&': '&amp;',
-                        '<': '&lt;',
-                        '>': '&gt;',
-                        '"': '&quot;',
-                        "'": '&#039;'
-                    };
-                    return text.toString().replace(/[&<>"']/g, m => map[m]);
-                };
-
-                // Render related questions
-                const html = results.map(q => `
-                    <a href="comment.html?id=${q.id}" class="related-question-item">
-                        <div class="related-question-title">${escapeHtml(q.question)}</div>
-                        <div class="related-question-meta">
-                            <div class="related-question-tags">
-                                ${(q.tags || []).length > 0 
-                                    ? q.tags.map(tag => `<span class="related-question-tag">${escapeHtml(tag)}</span>`).join('')
-                                    : ''}
-                            </div>
-                            <div class="related-question-views">
-                                <i class="fas fa-eye"></i> ${q.views} views
-                            </div>
-                            <span class="related-question-status ${q.is_fully_verified ? 'verified' : 'pending'}">
-                                ${q.is_fully_verified ? '✓ Verified' : '⏳ Pending'}
-                            </span>
-                        </div>
-                    </a>
-                `).join('');
-
-                // Add "Load more" button separately
-                const moreCount = totalRelated - results.length;
-                const loadMoreBtn = moreCount > 0 ? `
-                    <button class="load-more-btn" onclick="loadAllRelatedQuestions()">
-                        <i class="fas fa-chevron-down"></i> Load ${moreCount} more related questions
-                    </button>
-                ` : '';
-
-                container.innerHTML = html;
-                const loadMoreContainer = document.getElementById('relatedQuestionsLoadMore');
-                if (loadMoreContainer) {
-                    loadMoreContainer.innerHTML = loadMoreBtn;
-                }
+                // Render initial questions (show only 2)
+                renderRelatedQuestionsToggle(false);
                 
                 // Set grid layout based on result count
                 const wrapper = document.getElementById('relatedQuestionsWrapper');
                 if (wrapper) {
-                    if (results.length === 1) {
-                        wrapper.classList.add('single-item');
-                        wrapper.classList.remove('multi-item');
-                    } else {
-                        wrapper.classList.add('multi-item');
-                        wrapper.classList.remove('single-item');
-                    }
                     wrapper.style.display = 'block';
                 }
-                console.log(`✅ Loaded ${results.length} related questions (total: ${totalRelated})`);
+                console.log(`✅ Loaded ${totalRelated} related questions (showing ${Math.min(INITIAL_DISPLAY_COUNT, totalRelated)})`);
 
             } catch (error) {
                 console.error('Error loading related questions:', error);
@@ -514,55 +457,12 @@
             }
         }
 
-        // Load all related questions (no limit)
-        let relatedQuestionsExpanded = false;
-        let allRelatedQuestions = [];
-        let initialRelatedQuestionsCount = 0;
-
-        async function loadAllRelatedQuestions() {
-            try {
-                if (!currentQuestionId) return;
-
-                const container = document.getElementById('relatedQuestionsSection');
-                const loadMoreContainer = document.getElementById('relatedQuestionsLoadMore');
-                if (!container || !loadMoreContainer) return;
-
-                // If already expanded, collapse it
-                if (relatedQuestionsExpanded) {
-                    // Re-render only the initial questions
-                    renderRelatedQuestionsForToggle(allRelatedQuestions.slice(0, initialRelatedQuestionsCount), true);
-                    relatedQuestionsExpanded = false;
-                    return;
-                }
-
-                // If not loaded yet, fetch all
-                if (allRelatedQuestions.length === 0) {
-                    const response = await fetch(`/api/related-questions-all/${currentQuestionId}`);
-                    const data = await response.json();
-
-                    if (!data.success) {
-                        console.warn('Failed to load all related questions:', data.error);
-                        return;
-                    }
-
-                    allRelatedQuestions = data.results || [];
-                    initialRelatedQuestionsCount = container.querySelectorAll('.related-question-item').length;
-                    
-                    if (initialRelatedQuestionsCount === 0) {
-                        initialRelatedQuestionsCount = 3; // default initial count
-                    }
-                }
-
-                // Show all questions
-                renderRelatedQuestionsForToggle(allRelatedQuestions, false);
-                relatedQuestionsExpanded = true;
-
-            } catch (error) {
-                console.error('Error loading all related questions:', error);
-            }
+        function toggleRelatedQuestions() {
+            relatedQuestionsExpanded = !relatedQuestionsExpanded;
+            renderRelatedQuestionsToggle(relatedQuestionsExpanded);
         }
 
-        function renderRelatedQuestionsForToggle(questions, isCollapsed) {
+        function renderRelatedQuestionsToggle(showAll) {
             const container = document.getElementById('relatedQuestionsSection');
             const loadMoreContainer = document.getElementById('relatedQuestionsLoadMore');
             if (!container || !loadMoreContainer) return;
@@ -580,8 +480,13 @@
                 return text.toString().replace(/[&<>"']/g, m => map[m]);
             };
 
+            // Determine which questions to show
+            const questionsToShow = showAll 
+                ? allRelatedQuestionsData 
+                : allRelatedQuestionsData.slice(0, INITIAL_DISPLAY_COUNT);
+
             // Render related questions
-            const html = questions.map(q => `
+            const html = questionsToShow.map(q => `
                 <a href="comment.html?id=${q.id}" class="related-question-item">
                     <div class="related-question-title">${escapeHtml(q.question)}</div>
                     <div class="related-question-meta">
@@ -593,8 +498,8 @@
                         <div class="related-question-views">
                             <i class="fas fa-eye"></i> ${q.views} views
                         </div>
-                        <span class="related-question-status ${q.is_fully_verified ? 'verified' : 'pending'}">
-                            ${q.is_fully_verified ? '✓ Verified' : '⏳ Pending'}
+                        <span class="related-question-status verified">
+                            ✓ ${q.is_fully_verified ? 'Verified' : 'Verifying'}
                         </span>
                     </div>
                 </a>
@@ -602,24 +507,27 @@
 
             container.innerHTML = html;
 
-            // Update button text
-            if (isCollapsed) {
-                const moreCount = allRelatedQuestions.length - initialRelatedQuestionsCount;
-                const btnHtml = moreCount > 0 ? `
-                    <button class="load-more-btn" onclick="loadAllRelatedQuestions()">
-                        <i class="fas fa-chevron-down"></i> Load ${moreCount} more related questions
-                    </button>
-                ` : '';
-                loadMoreContainer.innerHTML = btnHtml;
+            // Show toggle button only if there are more than INITIAL_DISPLAY_COUNT questions
+            const hiddenCount = allRelatedQuestionsData.length - INITIAL_DISPLAY_COUNT;
+            if (hiddenCount > 0) {
+                if (showAll) {
+                    loadMoreContainer.innerHTML = `
+                        <button class="load-more-btn" onclick="toggleRelatedQuestions()">
+                            <i class="fas fa-chevron-up"></i> ซ่อนคำถาม
+                        </button>
+                    `;
+                } else {
+                    loadMoreContainer.innerHTML = `
+                        <button class="load-more-btn" onclick="toggleRelatedQuestions()">
+                            <i class="fas fa-chevron-down"></i> โหลด ${hiddenCount} คำถาม
+                        </button>
+                    `;
+                }
             } else {
-                loadMoreContainer.innerHTML = `
-                    <button class="load-more-btn" onclick="loadAllRelatedQuestions()">
-                        <i class="fas fa-chevron-up"></i> Hide related questions
-                    </button>
-                `;
+                loadMoreContainer.innerHTML = '';
             }
 
-            console.log(`✅ Rendered ${questions.length} related questions (expanded: ${!isCollapsed})`);
+            console.log(`✅ Rendered ${questionsToShow.length}/${allRelatedQuestionsData.length} related questions (expanded: ${showAll})`);
         }
 
         function setupFilterLinks() {
@@ -1205,11 +1113,6 @@
                     </div>
 
                     <div class="detail-question-content">${formatPlainTextAnswer(q.answer || 'No content available')}</div>
-
-                    <!-- Tags Section -->
-                    <div class="detail-question-tags">
-                        ${(q.tags || []).map(tag => `<span class="tag-badge">${tag}</span>`).join('')}
-                    </div>
 
                     <div id="attachmentsSection" class="detail-attachments-section"></div>
 
@@ -2070,46 +1973,20 @@
                             Comment by ${comment.username || 'Anonymous'} - (${formattedDate})
                         </div>
                         ${comment.text ? `<div class="comment-content">${safeText}</div>` : ''}
-                        ${attachmentsList.length > 0 ? `
-                            <div class="comment-attachments-list">
-                                ${attachmentsList.map(att => {
-                                    const ext = att.name.split('.').pop().toLowerCase();
-                                    const mimeType = att.type || (() => {
-                                        const mimeMap = {
-                                            'pdf': 'application/pdf',
-                                            'png': 'image/png',
-                                            'jpg': 'image/jpeg',
-                                            'jpeg': 'image/jpeg',
-                                            'gif': 'image/gif',
-                                            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                            'txt': 'text/plain',
-                                            'csv': 'text/csv'
-                                        };
-                                        return mimeMap[ext] || 'application/octet-stream';
-                                    })();
-                                    const sizeKB = att.size ? Math.round(att.size / 1024) : 0;
-                                    return `
-                                    <div class="comment-attachment-item">
-                                        <div class="comment-attachment-info">
-                                            <i class="fas ${(() => {
-                                                if (mimeType.startsWith('image/')) return 'fa-image';
-                                                if (mimeType === 'application/pdf') return 'fa-file-pdf';
-                                                if (mimeType.includes('word')) return 'fa-file-word';
-                                                if (mimeType.includes('sheet')) return 'fa-file-excel';
-                                                return 'fa-file';
-                                            })()}"></i>
-                                            <div class="comment-attachment-details">
-                                                <div class="comment-attachment-name">${att.name}</div>
-                                                <div class="comment-attachment-meta">${sizeKB > 0 ? sizeKB + ' KB' : ''}</div>
-                                            </div>
-                                        </div>
-                                        <button class="comment-attachment-preview-btn" onclick="window.open('${att.url}', '_blank')" title="Preview file">
-                                            <i class="fas fa-eye"></i> Preview
-                                        </button>
-                                    </div>
-                                `}).join('')}
+                        ${attachmentsList.length > 0 ? (() => {
+                            const firstFile = attachmentsList[0];
+                            const fileName = firstFile.name || 'Attachment';
+                            const displayText = attachmentsList.length > 1 
+                                ? `${fileName} and ${attachmentsList.length - 1} more`
+                                : fileName;
+                            return `
+                            <div class="comment-attachments-link">
+                                <a href="${firstFile.url}" target="_blank" class="attachment-link">
+                                    <i class="fas fa-paperclip"></i> ${displayText}
+                                </a>
                             </div>
-                        ` : ''}
+                            `;
+                        })() : ''}
                     </div>
                 `;
             });

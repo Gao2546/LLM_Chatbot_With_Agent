@@ -2767,6 +2767,15 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       } catch (notifError) {
         console.warn('Could not trigger notifications:', notifError);
       }
+
+      // 🤖 Pre-generate AI suggestion in the background (don't wait)
+      // This allows the AI suggestion to be ready when users view the question
+      if (verificationType === 'request') {
+        console.log(`🤖 Starting background AI suggestion generation for question ${result.answerId}`);
+        generateAISuggestionBackground(result.answerId, question, answer).catch(err => {
+          console.warn('Background AI suggestion generation failed:', err);
+        });
+      }
     }
 
     res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
@@ -4831,6 +4840,122 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
 // These endpoints handle AI-generated suggestions for Q&A
 // Separate from main chat flow - used in Q&A Detail page
 // =====================================================
+
+/**
+ * Background function to generate AI suggestion without blocking
+ * Called after a new question is created to pre-generate the suggestion
+ */
+async function generateAISuggestionBackground(questionId: number, questionText: string, answerText: string) {
+  try {
+    console.log(`🤖 [Background] Generating AI suggestion for question ${questionId}`);
+    
+    // Generate embedding for the question
+    const fullQuestionText = answerText 
+      ? `${questionText}\n\n${answerText}` 
+      : questionText;
+    
+    const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullQuestionText })
+    });
+
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to generate embedding');
+    }
+
+    const embeddingData = await embeddingResponse.json() as { embedding: number[] };
+    const questionEmbedding = embeddingData.embedding;
+
+    // Search for similar verified questions
+    const SIMILARITY_THRESHOLD = 0.6;
+    const similarQuestions = await pool.query(
+      `SELECT va.id, va.question, 
+              CASE 
+                WHEN va.verification_type = 'self' THEN va.answer
+                WHEN va.sum_verified_answer IS NOT NULL THEN va.sum_verified_answer
+                ELSE NULL
+              END as verified_answer,
+              va.verification_type,
+              1 - (va.question_embedding <=> $1::vector) as similarity
+       FROM verified_answers va
+       WHERE va.id != $2
+         AND va.question_embedding IS NOT NULL
+         AND (
+           (va.verification_type = 'self')
+           OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+         )
+         AND 1 - (va.question_embedding <=> $1::vector) > $3
+       ORDER BY similarity DESC
+       LIMIT 5`,
+      [`[${questionEmbedding.join(',')}]`, questionId, SIMILARITY_THRESHOLD]
+    );
+
+    // Build context from similar questions
+    let context = '';
+    const sourcesUsed: any[] = [];
+    
+    if (similarQuestions.rows.length > 0) {
+      console.log(`🤖 [Background] Found ${similarQuestions.rows.length} similar verified questions`);
+      
+      for (const sq of similarQuestions.rows) {
+        if (sq.verified_answer) {
+          context += `\n---\nคำถามที่คล้ายกัน: ${sq.question}\nคำตอบ: ${sq.verified_answer}\n`;
+          sourcesUsed.push({
+            type: sq.verification_type === 'self' ? 'self_verified' : 'synthesized',
+            questionId: sq.id,
+            question: sq.question,
+            similarity: sq.similarity
+          });
+        }
+      }
+    }
+
+    // Generate AI suggestion using the context
+    if (context) {
+      const systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้ที่ผ่านการยืนยันแล้ว
+กรุณาตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ต่อไปนี้ หากไม่มีข้อมูลที่เกี่ยวข้อง ให้แจ้งว่าไม่พบข้อมูลในฐานความรู้
+
+ฐานความรู้:
+${context}`;
+
+      const aiResponse = await fetch(`${process.env.API_SERVER_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: questionText,
+          system_prompt: systemPrompt,
+          model: 'llama3.2'
+        })
+      });
+
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json() as { response?: string };
+        const suggestion = aiData.response || '';
+        
+        if (suggestion) {
+          // Save to ai_suggestions table
+          await saveAISuggestion(
+            questionId,
+            suggestion,
+            'create_question',
+            {
+              aiModelUsed: 'llama3.2',
+              aiConfidence: 0.7,
+              sourcesUsed: sourcesUsed
+            }
+          );
+          console.log(`✅ [Background] AI suggestion saved for question ${questionId}`);
+        }
+      }
+    } else {
+      console.log(`🤖 [Background] No similar verified questions found for question ${questionId}`);
+    }
+  } catch (error) {
+    console.error(`❌ [Background] Error generating AI suggestion for question ${questionId}:`, error);
+    throw error;
+  }
+}
 
 /**
  * Generate AI suggestion for a question

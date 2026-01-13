@@ -1612,9 +1612,51 @@ body[data-theme="dark"] .ai-sources i {
     word-wrap: break-word;
 }
 
+.comment-attachments-section {
+    margin-top: 12px;
+}
+
+.comment-attachments-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0a8276;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.comment-attachments-header i {
+    font-size: 13px;
+}
+
+.comment-attachments-link {
+    margin-top: 8px;
+}
+
+.comment-attachments-link .attachment-link {
+    color: #0a8276;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.comment-attachments-link .attachment-link:hover {
+    color: #087a6a;
+    text-decoration: underline;
+}
+
+.comment-attachments-link .attachment-link i {
+    font-size: 13px;
+}
+
 .comment-attachments-list {
-    padding: 10px 0 0 0;
-    margin-top: 10px;
+    padding: 0;
+    margin: 0;
 }
 
 .comment-attachment-item {
