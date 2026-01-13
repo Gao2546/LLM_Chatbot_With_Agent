@@ -1869,10 +1869,10 @@ select {
   width: 219px;
 }
 
-select:hover,
+/* select:hover,
 select:focus {
   background: #dddddd;
-}
+} */
 select::picker-icon {
   color: #999999;
   transition: 0.4s rotate;
