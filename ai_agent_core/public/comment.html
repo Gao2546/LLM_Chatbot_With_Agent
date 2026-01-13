@@ -141,14 +141,7 @@
             <div class="sidebar-section">
                 <div class="section-title">Tags</div>
                 <div id="tagsList" class="sidebar-tags-grid">
-                    <span class="sidebar-tag-item" data-tag="PRVX 4">PRVX 4</span>
-                    <span class="sidebar-tag-item" data-tag="D1">D1</span>
-                    <span class="sidebar-tag-item" data-tag="Handler">Handler</span>
-                    <span class="sidebar-tag-item" data-tag="V9300">V9300</span>
-                    <span class="sidebar-tag-item" data-tag="Prober">Prober</span>
-                    <span class="sidebar-tag-item" data-tag="Tester">Tester</span>
-                    <span class="sidebar-tag-item" data-tag="AI">AI</span>
-                    <span class="sidebar-tag-item" data-tag="Sensor">Sensor</span>
+                    <span class="tags-loading">Loading tags...</span>
                 </div>
             </div>
 
@@ -1213,10 +1206,10 @@
 
                     <div class="detail-question-content">${formatPlainTextAnswer(q.answer || 'No content available')}</div>
 
-                    <!-- Tags hidden in detail view - only show in community list -->
-                    <!-- <div class="detail-question-tags">
+                    <!-- Tags Section -->
+                    <div class="detail-question-tags">
                         ${(q.tags || []).map(tag => `<span class="tag-badge">${tag}</span>`).join('')}
-                    </div> -->
+                    </div>
 
                     <div id="attachmentsSection" class="detail-attachments-section"></div>
 
@@ -1281,15 +1274,10 @@
                 loadAISuggestion(currentQuestionId, q.answer);
             }
 
-            // Render Verification Status (Right Column)
+            // Render Verification Status (Right Column) - Will be populated after loadVerifications()
             const verStatusContent = document.getElementById('verificationStatusContent');
             if (verStatusContent) {
-                verStatusContent.innerHTML = `<div class="verification-status-box">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; color: #999;">
-                        <div style="width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #0a8276; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                        <p>Loading verification status...</p>
-                    </div>
-                </div>`;
+                verStatusContent.innerHTML = ''; // Empty initially, will be filled by updateVerificationRightColumn
             }
 
             // Setup vote button event listeners

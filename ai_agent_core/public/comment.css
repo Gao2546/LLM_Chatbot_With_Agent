@@ -2869,3 +2869,47 @@ body[data-theme="dark"] .source-question-link {
 [data-theme="dark"] .ai-source-verified-by {
     color: #999 !important;
 }
+
+/* ===== SIDEBAR TAGS (from community.css) ===== */
+.sidebar-tags-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 5px 0;
+}
+
+.sidebar-tag-item {
+    display: inline-block;
+    padding: 6px 10px;
+    background: rgba(10, 130, 118, 0.15);
+    color: #0a8276;
+    border-radius: 6px;
+    font-size: 0.8em;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid rgba(10, 130, 118, 0.25);
+    transition: all 0.2s;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-tag-item:hover {
+    background: rgba(10, 130, 118, 0.25);
+    border-color: rgba(10, 130, 118, 0.4);
+}
+
+.sidebar-tag-item.active {
+    background: #0a8276;
+    color: #fff;
+    border-color: #0a8276;
+}
+
+.tags-loading {
+    color: #888;
+    font-size: 12px;
+    padding: 8px;
+    text-align: center;
+    width: 100%;
+}
