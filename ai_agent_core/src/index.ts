@@ -33,7 +33,8 @@ app.use(express.urlencoded({ extended: true })); // Middleware to parse URL-enco
 const port = Number(process.env.PORT) || 3000;
 // const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// NOTE: express.static moved after session middleware for protected files auth check
+// app.use(express.static(path.join(__dirname, '..', 'public')));
 // app.use(express.static(path.join(__dirname, "..",'user_files')));
 // Serve static files
 // app.use("/user_files", express.static(path.join(__dirname, ".." ,"user_files")));
@@ -74,6 +75,23 @@ const sessionConfig: SessionOptions = {
 const sessionMiddleware = session(sessionConfig);
 app.use(sessionMiddleware);
 
+// Protected static files - must be AFTER session middleware but BEFORE express.static
+const protectedFiles = ['/community.html', '/comment.html', '/create_question.html'];
+app.use((req, res, next) => {
+  // Check if requesting a protected file
+  if (protectedFiles.includes(req.path)) {
+    const user = (req.session as any)?.user;
+    if (!user || user.isGuest === true) {
+      // Not logged in or is guest, redirect to login
+      return res.redirect('/auth/login');
+    }
+  }
+  next();
+});
+
+// Static files - served after protected files check
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 const CLEANUP_INTERVAL_MS =1 * 1 * 1 * 3 * 60 * 1000; // 180 sec in milliseconds
 
 setInterval(async () => {
@@ -87,7 +105,7 @@ setInterval(async () => {
   }
 }, CLEANUP_INTERVAL_MS);
 
-const BypassSession = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/related-questions", "/api/related-questions-all"];
+const BypassSession = ["/auth/login", "/auth/register", "/auth/session", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/related-questions", "/api/related-questions-all"];
 const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/.well-known/appspecific/com.chrome.devtools.json"]
 
 // Session timeout cleanup middleware
@@ -168,14 +186,35 @@ app.use(async (req: express.Request, res: express.Response, next: express.NextFu
   next();
 });
 
+// Middleware to require authentication for protected routes
+const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const user = (req.session as any).user;
+  if (!user || user.isGuest === true) {
+    // Not logged in or is guest, redirect to login
+    return res.redirect('/auth/login');
+  }
+  next();
+};
+
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-app.get('/communities', (req, res, next) => {
-    // const {q} = req.params;
-    // console.log(q);
+// Protected routes - require authentication
+app.get('/community.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'community.html'));
+});
+
+app.get('/comment.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'comment.html'));
+});
+
+app.get('/create_question.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'create_question.html'));
+});
+
+app.get('/communities', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'community.html'));
 });
 

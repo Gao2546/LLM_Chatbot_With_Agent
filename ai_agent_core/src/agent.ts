@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import { Server as SocketIOServer } from 'socket.io';
@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics } from './db.js';
 
 dotenv.config();
 
@@ -67,6 +67,7 @@ const ai = new GoogleGenAI({apiKey:process.env.Google_API_KEY});
 import fs = require('fs');
 import { get } from 'http';
 import { json } from 'stream/consumers';
+import { error } from 'console';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -646,7 +647,7 @@ router.post('/message', async (req : Request, res : Response) => {
           top_k_pages: 5,
           top_k_text: 5,
           threshold_page: 0.8,
-          threshold_text: 0.3,
+          threshold_text: 0.8,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
@@ -702,13 +703,13 @@ router.post('/message', async (req : Request, res : Response) => {
     let question : string = "";
     let question_backup
     if ((currentChatMode) && (serch_doc != "")){
-      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
-      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
+      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
     else{
       console.log("No document")
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = chatContent
+      question_backup = chatContent + "\n\n" + "No Document" + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     const modelToUse = currentChatModel || initialModel;
@@ -737,6 +738,226 @@ router.post('/message', async (req : Request, res : Response) => {
     }
 
     let response: { text: string } | null = null;
+    
+    // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
+    if (modeToUse === 'ai_suggests') {
+      console.log('AI Suggests Mode: Using LLM + Verified Knowledge Base...');
+      
+      try {
+        const userQuestion = userMessage || '';
+        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+        
+        // 1. Generate embedding for the question
+        let embedding: number[] = [];
+        try {
+          const userQuestion = userMessage || '';
+          
+          console.log('⏳ Requesting embedding from Python API...');
+          socket?.emit('StreamText', '⏳ กำลังประมวลผลคำถาม (loading embeddings)...\n');
+          
+          const embeddingRes = await axios.post(
+            `${API_SERVER_URL}/encode_embedding`,
+            { text: userQuestion, dimensions: 1024 },
+            { timeout: 120000 }  // ⬅️ INCREASED from 30s to 120s (2 minutes)
+          );
+          
+          if (embeddingRes.data && embeddingRes.data.embedding) {
+            embedding = embeddingRes.data.embedding;
+            console.log(`✅ AI Suggests: Got embedding with ${embedding.length} dimensions`);
+            socket?.emit('StreamText', '✅ Embedding ready. Searching knowledge base...\n');
+          } else {
+            throw new Error('No embedding in response');
+          }
+        } catch (apiError: any) {
+          console.error('❌ AI Suggests: Failed to get embedding:', apiError.message);
+          socket?.emit('StreamText', '❌ Failed to generate embeddings. Please try again.');
+          return res.json({ response: '❌ Embedding service unavailable' });
+        }
+        
+        // 2. Search verified answers from knowledge base
+        if (embedding.length === 0) {
+          console.warn('⚠️ AI Suggests: Embedding is empty, cannot search knowledge base');
+          socket?.emit('StreamText', '❌ Could not generate embedding for query');
+          return res.json({ response: '❌ Embedding generation failed' });
+        }
+        
+        // Use threshold 0.6 (60%) to find relevant matches only
+        // Higher threshold prevents irrelevant answers from being used
+        const SIMILARITY_THRESHOLD = 0.6;
+        console.log(`🔍 AI Suggests: Searching with embedding length=${embedding.length}, threshold=${SIMILARITY_THRESHOLD}`);
+        const results = await searchVerifiedAnswers(embedding, SIMILARITY_THRESHOLD, 5);
+        console.log(`🔍 AI Suggests: Search returned ${results?.length || 0} results`);
+        
+        let context = '';
+        let sourcesUsed: any[] = [];
+        let totalSources = 0;
+        
+        if (results && results.length > 0) {
+          // Filter out results with low similarity even if they passed threshold
+          const relevantResults = results.filter((r: any) => r.similarity >= SIMILARITY_THRESHOLD);
+          
+          if (relevantResults.length > 0) {
+            console.log(`✅ AI Suggests: Found ${relevantResults.length} relevant verified answers`);
+            relevantResults.forEach((r: any, i: number) => {
+              console.log(`   ${i+1}. Q${r.id} (${r.verification_type}): similarity=${r.similarity?.toFixed(3)} - "${r.question?.substring(0, 60)}..."`);
+            });
+            context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+            relevantResults.forEach((result: any, idx: number) => {
+              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+              context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
+              context += `[คำตอบ]: ${result.answer}\n`;
+              if (result.tags && result.tags.length > 0) {
+                context += `[แท็ก]: ${result.tags.join(', ')}\n`;
+              }
+              context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+              
+              sourcesUsed.push({
+                type: 'verified_answer',
+                question: result.question,
+                similarity: result.similarity
+              });
+              totalSources++;
+            });
+          } else {
+            console.log(`⚠️ AI Suggests: No relevant answers found (all below ${SIMILARITY_THRESHOLD * 100}% threshold)`);
+          }
+        } else {
+          console.log(`📚 AI Suggests: No verified answers found in knowledge base`);
+        }
+        
+        console.log(`📚 Total verified sources found: ${totalSources}`);
+        
+        // 3. Build prompt for LLM
+        const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
+        
+        let systemPrompt = '';
+        if (hasKnowledgeData) {
+          systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+
+กฎสำคัญ:
+1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
+2. สรุปและเรียบเรียงข้อมูลให้ชัดเจน - อย่าคัดลอกทั้งหมด
+3. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่เกี่ยวข้อง
+4. ตอบเป็นภาษาไทย
+5. ใช้ **ตัวหนา** สำหรับคำสำคัญ
+6. ถ้ามีหลายคำตอบที่เกี่ยวข้อง ให้สังเคราะห์รวมกัน
+
+========== ข้อมูลจากฐานความรู้ ==========
+${context}
+==========================================
+`;
+        } else {
+          systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
+
+หมายเหตุ: ไม่พบข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
+กรุณาตอบตามความรู้ทั่วไป และระบุว่านี่เป็นคำตอบจาก AI โดยยังไม่ได้รับการยืนยันจากผู้เชี่ยวชาญ`;
+        }
+        
+        const userPrompt = `คำถาม: ${userQuestion}
+
+${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้อมูลในฐานความรู้:' : 'กรุณาตอบคำถาม:'}
+- เขียนเป็นย่อหน้าที่กระชับ ชัดเจน
+- รวมข้อมูลสำคัญและตัวเลขที่เกี่ยวข้อง
+- ตอบเป็นภาษาไทย`;
+
+        let aiGeneratedAnswer = '';
+        let aiModelUsed = modelToUse || 'gemma-3-4b-it';
+        
+        // 4. Call LLM to synthesize answer
+        try {
+          console.log('🤖 AI Suggests: Calling LLM to synthesize answer...');
+          
+          const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+          
+          // Use Google AI API
+          const aiResponse = await ai.models.generateContent({
+            model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+            contents: fullPrompt
+          });
+          
+          if (aiResponse && aiResponse.text) {
+            aiGeneratedAnswer = aiResponse.text
+              .replace(/\r\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            console.log('✅ AI Suggests: LLM generated answer successfully');
+          }
+        } catch (llmError: any) {
+          console.error('⚠️ AI Suggests: Google AI failed:', llmError.message);
+          
+          // Fallback to Ollama
+          try {
+            console.log('🔄 AI Suggests: Trying Ollama as fallback...');
+            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'gemma3:4b',
+                prompt: `${systemPrompt}\n\n${userPrompt}`,
+                stream: false
+              })
+            });
+            
+            if (ollamaResponse.ok) {
+              const ollamaData = await ollamaResponse.json() as { response: string };
+              aiGeneratedAnswer = (ollamaData.response || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+              aiModelUsed = 'gemma3:4b (Ollama)';
+              console.log('✅ AI Suggests: Ollama generated answer');
+            }
+          } catch (ollamaError) {
+            console.error('⚠️ AI Suggests: Ollama also failed');
+          }
+        }
+        
+        // 5. Build final response
+        let finalResponse = '';
+        
+        if (aiGeneratedAnswer) {
+          finalResponse = aiGeneratedAnswer;
+          
+          // Add sources reference (without model name for chat page)
+          if (totalSources > 0) {
+            finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`;
+          } else {
+            finalResponse += `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`;
+          }
+        } else {
+          // Fallback if LLM fails completely
+          if (totalSources > 0) {
+            finalResponse = '## 🔍 ผลลัพธ์จากฐานความรู้\n\n';
+            results.forEach((result: any, idx: number) => {
+              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+              finalResponse += `### ${idx + 1}. ${result.question}\n`;
+              finalResponse += `**ความคล้าย:** ${similarity}%\n\n`;
+              finalResponse += `${result.answer}\n\n---\n\n`;
+            });
+          } else {
+            finalResponse = '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n';
+            finalResponse += 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n';
+            finalResponse += '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง';
+          }
+        }
+        
+        response = { text: finalResponse };
+        socket?.emit('StreamText', finalResponse);
+        
+        // Save to chat history
+        chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
+        await storeChatHistory(currentChatId, chatContent);
+        
+        return res.json({ response: finalResponse });
+        
+      } catch (aiSuggestError: any) {
+        console.error('AI Suggests Error:', aiSuggestError);
+        const errorMsg = '❌ เกิดข้อผิดพลาดในการค้นหาฐานความรู้: ' + aiSuggestError.message;
+        socket?.emit('StreamText', errorMsg);
+        return res.status(500).json({ error: errorMsg });
+      }
+    }
+    // ===== END AI SUGGESTS MODE =====
     
     // AI Model calling logic (Google, Ollama, OpenRouter, MyModel) remains the same...
     // ... [ The large block of code for calling different AI APIs is omitted for brevity but should be kept as is ] ...
@@ -1453,6 +1674,120 @@ router.post('/edit-message', async (req, res) => {
 
     let response: { text: string } | null = null;
 
+  // ===== AI SUGGESTS MODE for edit-message - Use LLM + Knowledge Base =====
+  if (modeToUse === 'ai_suggests') {
+    console.log('AI Suggests Mode (edit-message): Using LLM + Verified Knowledge Base...');
+    
+    try {
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      let embedding: number[] = [];
+      
+      try {
+        const embeddingRes = await axios.post(
+          `${API_SERVER_URL}/encode_embedding`,
+          { text: newMessage, dimensions: 1024 },
+          { timeout: 30000 }
+        );
+        
+        if (embeddingRes.data && embeddingRes.data.embedding) {
+          embedding = embeddingRes.data.embedding;
+        }
+      } catch (apiError: any) {
+        console.error('AI Suggests: Failed to get embedding:', apiError.message);
+        socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
+        return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+      }
+      
+      // Search verified answers
+      const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+      
+      let context = '';
+      let sourcesUsed: any[] = [];
+      let totalSources = 0;
+      
+      if (results && results.length > 0) {
+        context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+        results.forEach((result: any, idx: number) => {
+          const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+          context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
+          context += `[คำตอบ]: ${result.answer}\n`;
+          context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+          sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
+          totalSources++;
+        });
+      }
+      
+      // Build prompt for LLM
+      const hasKnowledgeData = totalSources > 0;
+      let systemPrompt = hasKnowledgeData 
+        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+
+กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
+
+========== ข้อมูลจากฐานความรู้ ==========
+${context}
+==========================================`
+        : `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`;
+      
+      const userPrompt = `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`;
+      
+      let aiGeneratedAnswer = '';
+      let aiModelUsed = modelToUse || 'gemma-3-4b-it';
+      
+      // Call LLM
+      try {
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        const aiResponse = await ai.models.generateContent({
+          model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+          contents: fullPrompt
+        });
+        
+        if (aiResponse && aiResponse.text) {
+          aiGeneratedAnswer = aiResponse.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+      } catch (llmError: any) {
+        console.error('⚠️ AI Suggests: LLM failed:', llmError.message);
+        // Fallback to Ollama
+        try {
+          const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'gemma3:4b', prompt: `${systemPrompt}\n\n${userPrompt}`, stream: false })
+          });
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response: string };
+            aiGeneratedAnswer = (ollamaData.response || '').replace(/\n{3,}/g, '\n\n').trim();
+            aiModelUsed = 'gemma3:4b (Ollama)';
+          }
+        } catch (e) { /* ignore */ }
+      }
+      
+      // Build final response
+      let finalResponse = aiGeneratedAnswer || (totalSources > 0 
+        ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
+        : 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask');
+      
+      if (aiGeneratedAnswer && totalSources > 0) {
+        finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
+      }
+      
+      response = { text: finalResponse };
+      socket?.emit('StreamText', finalResponse);
+      
+      newChatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
+      await storeChatHistory(chatId, newChatContent);
+      
+      return res.json({ response: finalResponse });
+      
+    } catch (aiSuggestError: any) {
+      console.error('AI Suggests Error:', aiSuggestError);
+      const errorMsg = '❌ เกิดข้อผิดพลาด: ' + aiSuggestError.message;
+      socket?.emit('StreamText', errorMsg);
+      return res.status(500).json({ error: errorMsg });
+    }
+  }
+  // ===== END AI SUGGESTS MODE =====
+
   if (
         // modelToUse.startsWith("gemini") || 
         // modelToUse.startsWith("gemma-3") || 
@@ -1998,6 +2333,28 @@ router.get('/get_current_user', async (req, res) => {
   }
 });
 
+router.get('/isGuest', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    else {
+      const isGuest = req.session?.user?.isGuest;
+      if (isGuest) {
+        return res.status(401).json({error : 'Unauthorized' })
+      }
+      else {
+        res.json({ userId: userId });
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 router.get('/reload-page', async (req, res) => {
   try {
     const chatId = (req.session?.user as any)?.currentChatId;
@@ -2256,6 +2613,11 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
     let question, answer, comment, userName, verificationType, requestedDepartments, notifyMe, tags;
     let files: Express.Multer.File[] = [];
 
+    console.log('📨 /api/verify-answer received');
+    console.log('📨 Content-Type:', req.headers['content-type']);
+    console.log('📨 Body keys:', Object.keys(req.body));
+    console.log('📨 Raw body.tags:', req.body.tags);
+
     // Check if request has multipart form data
     if (req.is('multipart/form-data') && (req as any).files) {
       // File upload case
@@ -2268,10 +2630,19 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       requestedDepartments = req.body.requestedDepartments ? JSON.parse(req.body.requestedDepartments) : [];
       notifyMe = req.body.notify_me === 'true' || req.body.notify_me === true;
       tags = req.body.tags ? JSON.parse(req.body.tags) : [];
+      console.log('📨 FormData tags parsed:', tags);
     } else {
       // JSON case (no files)
       ({ question, answer, comment, userName, verificationType = 'self', requestedDepartments = [], notify_me: notifyMe = false, tags = [] } = req.body);
+      console.log('📨 JSON tags:', tags);
     }
+
+    // Ensure tags is always an array
+    if (!Array.isArray(tags)) {
+      console.log('⚠️ Tags is not an array, converting:', tags);
+      tags = tags ? [tags] : [];
+    }
+    console.log('📨 Final tags:', tags);
 
     const userId = req.session.user?.id;
 
@@ -2334,9 +2705,10 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       return res.status(500).json({ success: false, error: `Database error: ${String(dbError)}` });
     }
     
+    console.log(`📊 saveVerifiedAnswer result:`, result);
+    
     if (result && result.answerId) {
-      // Handle file attachments - Upload to MinIO and save paths
-      const attachmentPaths: string[] = [];
+      // Handle file attachments - Upload to MinIO and save to question_attachments table
       if (files && files.length > 0) {
         try {
           for (const file of files) {
@@ -2344,8 +2716,8 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
             const timestamp = Date.now();
             const randomString = Math.random().toString(36).substring(7);
             const fileExtension = file.originalname.split('.').pop();
-            const uniqueFilename = `verify_${timestamp}_${randomString}.${fileExtension}`;
-            const objectName = `verifications/${result.answerId}/${uniqueFilename}`;
+            const uniqueFilename = `question_${result.answerId}_${timestamp}_${randomString}.${fileExtension}`;
+            const objectName = `questions/${result.answerId}/${uniqueFilename}`;
 
             // Upload to MinIO
             await minioClient.putObject(
@@ -2356,25 +2728,19 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
               { 'Content-Type': file.mimetype }
             );
 
-            console.log(`✅ Verification attachment uploaded to MinIO: ${objectName}`);
-            attachmentPaths.push(objectName);
-          }
+            console.log(`✅ Question attachment uploaded to MinIO: ${objectName}`);
 
-          // Save attachment paths to database if user is logged in
-          if (userId && attachmentPaths.length > 0) {
-            // Get the verification record ID first
-            const verificationResult = await pool.query(
-              `SELECT id FROM answer_verifications 
-               WHERE verified_answer_id = $1 AND user_id = $2
-               ORDER BY created_at DESC LIMIT 1`,
-              [result.answerId, userId]
+            // Save to question_attachments table
+            // Parameters: questionId, fileName, fileData, mimeType, fileSizeBytes, uploadedBy
+            await saveQuestionAttachment(
+              result.answerId,
+              file.originalname,
+              file.buffer,
+              file.mimetype,
+              file.size,
+              userName || 'Anonymous'
             );
-            
-            if (verificationResult.rows.length > 0) {
-              const verificationId = verificationResult.rows[0].id;
-              await saveVerificationAttachments(verificationId, attachmentPaths);
-              console.log(`✅ Verification attachments saved: ${attachmentPaths.length} files`);
-            }
+            console.log(`✅ Question attachment saved to database: ${file.originalname}`);
           }
         } catch (fileError) {
           console.error('Error saving file attachments:', fileError);
@@ -2388,6 +2754,28 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
       }
       
       console.log(`Verification type: ${verificationType}, Requested departments: ${requestedDepartments.join(', ')}, Notify: ${notifyMe}`);
+
+      // Trigger notifications for users who enabled notifications for this question
+      console.log(`🔔 About to trigger notifications for question ${result.answerId}`);
+      try {
+        await triggerNotificationsForQuestion(
+          result.answerId,
+          userName || 'Anonymous',
+          requestedDepartments[0] || ''
+        );
+        console.log(`🔔 Notification trigger completed for question ${result.answerId}`);
+      } catch (notifError) {
+        console.warn('Could not trigger notifications:', notifError);
+      }
+
+      // 🤖 Pre-generate AI suggestion in the background (don't wait)
+      // This allows the AI suggestion to be ready when users view the question
+      if (verificationType === 'request') {
+        console.log(`🤖 Starting background AI suggestion generation for question ${result.answerId}`);
+        generateAISuggestionBackground(result.answerId, question, answer).catch(err => {
+          console.warn('Background AI suggestion generation failed:', err);
+        });
+      }
     }
 
     res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
@@ -2593,6 +2981,7 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
         verification_type: row.verification_type,
         requested_departments: row.requested_departments_list || [],
         requested_departments_list: row.requested_departments_list || [],
+        tags: row.tags || [],
         verification_count: parseInt(row.verification_count) || 0,
         vote_score: parseInt(row.vote_score) || 0
       };
@@ -2742,6 +3131,74 @@ router.get('/get-verifications/:questionId', async (req: Request, res: Response)
   }
 });
 
+// GET /api/get-notifications - Get notifications for current user
+router.get('/get-notifications', async (req: Request, res: Response) => {
+  try {
+    const userId = req.session.user?.id;
+    
+    if (!userId) {
+      return res.json({ success: true, notifications: [], unreadCount: 0 });
+    }
+
+    // Fetch user's notifications with question details
+    const result = await pool.query(
+      `SELECT 
+        n.id,
+        n.question_id as "questionId",
+        n.user_id as "userId",
+        n.verified_by_name as "verifiedBy",
+        n.verified_by_department as "department",
+        n.is_read as "isRead",
+        n.created_at as "createdAt",
+        va.question,
+        va.answer
+       FROM notifications n
+       JOIN verified_answers va ON n.question_id = va.id
+       WHERE n.user_id = $1
+       ORDER BY n.created_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+
+    const notifications = result.rows;
+    const unreadCount = notifications.filter(n => !n.isRead).length;
+
+    res.json({
+      success: true,
+      notifications: notifications,
+      unreadCount: unreadCount
+    });
+  } catch (error) {
+    console.error('❌ Error fetching notifications:', error);
+    res.json({ success: true, notifications: [], unreadCount: 0 });
+  }
+});
+
+// POST /api/mark-notification-read - Mark notification as read
+router.post('/mark-notification-read', async (req: Request, res: Response) => {
+  try {
+    const { notificationId } = req.body;
+    const userId = req.session.user?.id;
+
+    if (!userId || !notificationId) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    // Update notification to mark as read
+    await pool.query(
+      `UPDATE notifications 
+       SET is_read = TRUE 
+       WHERE id = $1 AND user_id = $2`,
+      [notificationId, userId]
+    );
+
+    res.json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('❌ Error marking notification as read:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
 // GET /api/hot-tags - Get hot tags
 router.get('/hot-tags', async (req: Request, res: Response) => {
   try {
@@ -2754,24 +3211,45 @@ router.get('/hot-tags', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/filter-questions - Filter questions by type
+// GET /api/filter-questions - Filter questions by type with pagination
 router.get('/filter-questions', async (req: Request, res: Response) => {
   try {
-    const { type = 'all', username, sortBy = 'newest', limit = 100 } = req.query;
+    const { type = 'all', username, sortBy = 'newest', limit = 20, page = 1 } = req.query;
 
     if (!['all', 'my-questions', 'my-answers', 'pending-review', 'unverified', 'verified'].includes(type as string)) {
       return res.status(400).json({ success: false, error: 'Invalid filter type' });
     }
 
+    const pageNum = parseInt(page as string) || 1;
+    const limitNum = parseInt(limit as string) || 20;
+
+    // Get questions for current page
     const results = await filterQuestionsByType(
       type as string,
       username as string,
       sortBy as string,
-      parseInt(limit as string) || 100
+      limitNum,
+      pageNum
     );
 
-    console.log(`✅ Filtered ${results.length} questions by type: ${type}`);
-    res.json({ success: true, results, count: results.length });
+    // Get total count for pagination
+    const totalCount = await countQuestionsByType(
+      type as string,
+      username as string
+    );
+
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    console.log(`✅ Filtered ${results.length} questions by type: ${type} (page ${pageNum}/${totalPages}, total: ${totalCount})`);
+    res.json({ 
+      success: true, 
+      results, 
+      count: results.length,
+      totalCount,
+      totalPages,
+      currentPage: pageNum,
+      limit: limitNum
+    });
   } catch (error) {
     console.error('❌ Error filtering questions:', error);
     res.status(500).json({ success: false, error: String(error) });
@@ -3103,22 +3581,54 @@ router.post('/request-verifications', async (req: Request, res: Response) => {
   try {
     const { questionId, departments } = req.body;
     const userId = req.session.user?.id;
+    const username = req.session.user?.username || 'Anonymous';
 
     if (!questionId || !departments || !Array.isArray(departments)) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    // Create verification request for each department
+    // Get current requested_departments from question
+    const questionResult = await pool.query(
+      'SELECT requested_departments FROM verified_answers WHERE id = $1',
+      [questionId]
+    );
+
+    let currentDepts: string[] = [];
+    if (questionResult.rows.length > 0 && questionResult.rows[0].requested_departments) {
+      const deptsList = questionResult.rows[0].requested_departments;
+      if (Array.isArray(deptsList)) {
+        currentDepts = deptsList;
+      } else if (typeof deptsList === 'string') {
+        try {
+          currentDepts = JSON.parse(deptsList);
+        } catch (e) {
+          currentDepts = deptsList.split(',').map((d: string) => d.trim());
+        }
+      }
+    }
+
+    // Merge new departments with existing ones (avoid duplicates)
+    const updatedDepts = [...new Set([...currentDepts, ...departments])];
+
+    // Update requested_departments in verified_answers table
+    await pool.query(
+      'UPDATE verified_answers SET requested_departments = $1 WHERE id = $2',
+      [updatedDepts, questionId]
+    );
+
+    // Create verification request for each NEW department
     const promises = departments.map(dept => 
       pool.query(`
         INSERT INTO answer_verifications 
         (verified_answer_id, user_id, commenter_name, verification_type, requested_departments, created_at)
         VALUES ($1, $2, $3, 'request', $4, NOW())
         ON CONFLICT DO NOTHING
-      `, [questionId, userId, `Request-${new Date().getTime()}`, [dept]])
+      `, [questionId, userId, username, [dept]])
     );
 
     await Promise.all(promises);
+
+    console.log(`✅ Updated requested_departments_list for question ${questionId}:`, updatedDepts);
 
     res.json({ success: true, message: `Verification requested from ${departments.join(', ')}` });
   } catch (error) {
@@ -3201,12 +3711,61 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
 
     console.log('📝 Creating question:', { verificationType, userDept, requestedDepartments, userId, username });
 
-    // Insert the question
-    const tagsArray = Array.isArray(tags) ? tags : [];
+    // Generate embeddings for question and answer
+    let questionEmbedding: number[] = [];
+    let answerEmbedding: number[] = [];
+    
+    try {
+      console.log('🔄 Generating embeddings...');
+      const fullQuestionText = `${question}\n\n${answer}`;
+      
+      // Generate question embedding
+      const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: fullQuestionText })
+      });
+      if (qEmbedRes.ok) {
+        const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
+        questionEmbedding = qEmbedData.embedding || [];
+        console.log('✅ Question embedding generated, length:', questionEmbedding.length);
+      }
+      
+      // Generate answer embedding
+      const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: answer })
+      });
+      if (aEmbedRes.ok) {
+        const aEmbedData = await aEmbedRes.json() as { embedding: number[] };
+        answerEmbedding = aEmbedData.embedding || [];
+        console.log('✅ Answer embedding generated, length:', answerEmbedding.length);
+      }
+    } catch (embedError) {
+      console.warn('⚠️ Failed to generate embeddings:', embedError);
+      // Continue without embeddings - they can be added later
+    }
+
+    // Format embeddings for PostgreSQL
+    const questionEmbeddingStr = questionEmbedding.length > 0 ? `[${questionEmbedding.join(',')}]` : null;
+    const answerEmbeddingStr = answerEmbedding.length > 0 ? `[${answerEmbedding.join(',')}]` : null;
+
+    // Parse tags - handle both string and array formats
+    let tagsArray: string[] = [];
+    if (Array.isArray(tags)) {
+      tagsArray = tags.filter((t: any) => t && typeof t === 'string' && t.trim());
+    } else if (typeof tags === 'string' && tags.trim()) {
+      // Split comma-separated string into array
+      tagsArray = tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+    }
+    console.log('📝 Tags parsed:', tagsArray);
+
+    // Insert the question with embeddings
     const result = await pool.query(`
       INSERT INTO verified_answers 
-      (question, answer, tags, department, verification_type, requested_departments, due_date, created_by, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      (question, answer, tags, department, verification_type, requested_departments, due_date, created_by, question_embedding, answer_embedding, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
       RETURNING *;
     `, [
       question, 
@@ -3216,7 +3775,9 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
       verificationType || 'staging',
       requestedDepartments || null,
       dueDate || null,
-      username
+      username,
+      questionEmbeddingStr,
+      answerEmbeddingStr
     ]);
 
     const newQuestion = result.rows[0];
@@ -3337,11 +3898,567 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
 
     console.log('✅ Verification saved:', result.rows[0].id, 'with', (attachments?.length || 0), 'attachments');
 
+    // Trigger notifications for users who enabled notifications for this question
+    try {
+      await triggerNotificationsForQuestion(
+        parseInt(questionId),
+        commenterName || 'Anonymous',
+        userDept || ''
+      );
+      console.log('✅ Notification trigger completed for question', questionId);
+    } catch (notifError) {
+      console.warn('Could not trigger notifications:', notifError);
+    }
+
+    // Send response IMMEDIATELY - LLM Judge runs async after this
     res.json({ 
       success: true, 
       message: 'Verification submitted successfully',
-      verification: result.rows[0]
+      verification: result.rows[0],
+      asyncAnalysis: true // Indicate analysis is running async
     });
+
+    // ========== LLM AS JUDGE: AI Learning Analysis (ASYNC - after response) ==========
+    // Run in background using setImmediate to not block the response
+    setImmediate(async () => {
+      try {
+        const aiSuggestion = await getAISuggestion(parseInt(questionId));
+        
+        if (aiSuggestion && aiSuggestion.decision === 'pending') {
+          // Get the question info including requested departments
+          const questionResult = await pool.query(
+            `SELECT question, answer, verification_type, requested_departments 
+             FROM verified_answers WHERE id = $1`,
+            [questionId]
+          );
+          const questionData = questionResult.rows[0];
+          const originalQuestion = questionData?.question || '';
+          const humanAnswer = questionData?.answer || '';
+          const aiAnswer = aiSuggestion.ai_generated_answer || '';
+          const verificationType = questionData?.verification_type || 'self';
+        const requestedDepartments: string[] = questionData?.requested_departments || [];
+        
+        // Check if verification is complete
+        let isVerificationComplete = false;
+        
+        console.log(`🔍 Q${questionId} - Type: ${verificationType}, Requested: [${requestedDepartments.join(', ')}]`);
+        
+        if (verificationType === 'self') {
+          // Self-verified questions are always complete
+          isVerificationComplete = true;
+          console.log(`✅ Self-verified question - no synthesis needed`);
+        } else if (verificationType === 'request' && requestedDepartments.length > 0) {
+          // Check how many UNIQUE departments have verified
+          const verificationCountResult = await pool.query(
+            `SELECT ARRAY_AGG(DISTINCT requested_departments[1]) as verified_depts, 
+                    COUNT(DISTINCT requested_departments[1]) as verified_count
+             FROM answer_verifications 
+             WHERE verified_answer_id = $1 
+             AND verification_type = 'verification'
+             AND commenter_name IS NOT NULL`,
+            [questionId]
+          );
+          
+          const verifiedDepts = verificationCountResult.rows[0]?.verified_depts || [];
+          const verifiedCount = parseInt(verificationCountResult.rows[0]?.verified_count || '0');
+          const requestedCount = requestedDepartments.length;
+          
+          isVerificationComplete = verifiedCount >= requestedCount;
+          console.log(`📋 Q${questionId} Verification status: ${verifiedCount}/${requestedCount} departments`);
+          console.log(`   Requested: [${requestedDepartments.join(', ')}]`);
+          console.log(`   Verified:  [${verifiedDepts.join(', ')}]`);
+          console.log(`   Complete:  ${isVerificationComplete ? 'YES ✅' : 'NO ⏳'}`);
+        } else {
+          // No specific request, consider complete after first verification
+          isVerificationComplete = true;
+        }
+        
+        // Only run LLM Judge when verification is complete
+        if (!isVerificationComplete) {
+          console.log(`⏳ Waiting for more verifications (${requestedDepartments.length} requested)`);
+          console.log(`⏳ Skipping LLM Judge - verification not complete yet`);
+          return; // Exit early - don't run LLM Judge yet
+        } else {
+          console.log(`✅ All verifications complete! Running LLM Judge analysis...`);
+          
+          // Collect all expert comments for comprehensive analysis
+          const allVerifications = await pool.query(
+            `SELECT commenter_name, comment, requested_departments 
+             FROM answer_verifications 
+             WHERE verified_answer_id = $1 
+             AND verification_type = 'verification'
+             ORDER BY created_at`,
+            [questionId]
+          );
+          
+          const expertComments = allVerifications.rows
+            .map(v => `- ${v.commenter_name} (${v.requested_departments?.[0] || 'General'}): ${v.comment || 'ยืนยันแล้ว'}`)
+            .join('\n');
+        
+          // ========== ⭐ NEW: SYNTHESIZE ANSWER FROM ALL VERIFICATIONS ==========
+          console.log(`🔄 Synthesizing final answer from ${allVerifications.rows.length} verifications...`);
+          
+          const expertCommentsForSynthesis = allVerifications.rows
+            .map(v => `**${v.commenter_name}** (${v.requested_departments?.[0] || 'General'}, ${new Date(v.created_at || Date.now()).toLocaleDateString('th-TH')}):\n${v.comment || 'ยืนยันแล้ว'}`)
+            .join('\n\n---\n\n');
+        
+          // Use LLM to synthesize the final answer
+          const synthesisPrompt = `คุณเป็นผู้เชี่ยวชาญด้าน Semiconductor Packaging กำลังรวบรวมความรู้จากผู้เชี่ยวชาญหลายแผนกเป็นคำตอบเดียวที่ครบถ้วน
+
+**คำถามต้นฉบับ:**
+${originalQuestion}
+
+**คำตอบจากผู้เชี่ยวชาญแต่ละแผนก:**
+${expertCommentsForSynthesis}
+
+**ภารกิจของคุณ:**
+โปรดสังเคราะห์คำตอบจากผู้เชี่ยวชาญทั้งหมดเป็นคำตอบเดียวที่:
+1. **ครบถ้วน** - รวมข้อมูลสำคัญจากทุกแผนก
+2. **กระชับ** - ตัดข้อมูลซ้ำซ้อนออก
+3. **เป็นระบบ** - จัดโครงสร้างเป็นหัวข้อชัดเจน
+4. **ตอบโจทย์** - ตอบคำถามตรงประเด็น
+5. **ระบุแหล่งที่มา** - อ้างอิงผู้เชี่ยวชาญที่ให้ข้อมูล
+
+**รูปแบบคำตอบ:**
+- ใช้ Markdown เพื่อจัดรูปแบบ
+- แบ่งเป็นหัวข้อย่อย (##) หากมีหลายประเด็น
+- ใช้ bullet points (•) เมื่อมีรายการ
+- หากมีความขัดแย้งระหว่างแผนก ให้ระบุทั้งสองมุมมองและอธิบาย
+- สรุปด้วย **Key Takeaways** (สั้นๆ 2-3 ข้อ) ถ้าคำตอบยาว
+
+**ห้ามเพิ่มข้อมูลที่ไม่มีในคำตอบผู้เชี่ยวชาญ - ใช้เฉพาะข้อมูลที่มีให้เท่านั้น**
+
+ตอบเป็นภาษาไทย ชัดเจน เข้าใจง่าย:`;
+
+          let synthesizedAnswer = '';
+          
+          // Try using Google Gemini for synthesis
+          try {
+            console.log('🤖 Calling Gemini for answer synthesis...');
+            const geminiResult = await ai.models.generateContent({
+              model: 'gemini-2.0-flash-exp',
+              contents: synthesisPrompt,
+              config: {
+                maxOutputTokens: 2000,
+                temperature: 0.3,
+              },
+            });
+            
+            synthesizedAnswer = geminiResult.text || '';
+            console.log(`✅ Gemini synthesis complete: ${synthesizedAnswer.length} characters`);
+          } catch (llmError) {
+            console.warn('Gemini synthesis failed, trying Ollama:', llmError);
+            
+            // Fallback to Ollama
+            try {
+              const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'llama3:latest',
+                  prompt: synthesisPrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.3,
+                    num_predict: 2000
+                  }
+                })
+              });
+              
+              if (ollamaResponse.ok) {
+                const ollamaData = await ollamaResponse.json() as { response?: string };
+                synthesizedAnswer = ollamaData.response || '';
+                console.log(`✅ Ollama synthesis complete: ${synthesizedAnswer.length} characters`);
+              }
+            } catch (ollamaError) {
+              console.error('Both Gemini and Ollama synthesis failed:', ollamaError);
+            }
+          }
+          
+          // If synthesis succeeded, create embedding and save to sum_verified_answer
+          if (synthesizedAnswer && synthesizedAnswer.length > 50) {
+            try {
+              // Add synthesis metadata footer
+              const verifierNames = allVerifications.rows
+                .map(v => `${v.commenter_name} (${v.requested_departments?.[0] || 'General'})`)
+                .join(', ');
+              
+              const finalAnswer = `${synthesizedAnswer}\n\n---\n\n*คำตอบนี้ถูกสังเคราะห์จากความเห็นของผู้เชี่ยวชาญ ${allVerifications.rows.length} ท่าน: ${verifierNames}*`;
+              
+              // Get embedding for synthesized answer
+              let sumAnswerEmbedding: number[] = [];
+              try {
+                const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+                const embeddingRes = await fetch(`${API_SERVER_URL}/encode_embedding`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    text: synthesizedAnswer,
+                    dimensions: 1024
+                  })
+                });
+                
+                if (embeddingRes.ok) {
+                  const embData = await embeddingRes.json() as { embedding?: number[] };
+                  sumAnswerEmbedding = embData.embedding || [];
+                  console.log(`✅ Created embedding for synthesized answer (${sumAnswerEmbedding.length} dims)`);
+                }
+              } catch (embErr) {
+                console.warn('Failed to create embedding for synthesized answer:', embErr);
+              }
+              
+              // Update sum_verified_answer and sum_verified_answer_embedding (NOT the original answer)
+              if (sumAnswerEmbedding.length === 1024) {
+                await pool.query(
+                  `UPDATE verified_answers 
+                   SET sum_verified_answer = $1, 
+                       sum_verified_answer_embedding = $2,
+                       last_updated_at = NOW()
+                   WHERE id = $3`,
+                  [finalAnswer, JSON.stringify(sumAnswerEmbedding), questionId]
+                );
+                
+                console.log(`✅ ⭐ SYNTHESIZED ANSWER SAVED to sum_verified_answer for Q${questionId} (${finalAnswer.length} chars)`);
+              } else {
+                console.warn('⚠️ Invalid embedding size, not saving synthesized answer');
+              }
+              
+            } catch (updateError) {
+              console.error('Failed to update synthesized answer:', updateError);
+            }
+          } else {
+            console.warn('⚠️ Synthesis failed or too short, not saving synthesized answer');
+          }
+          // ========== END ANSWER SYNTHESIS ==========
+        
+          // Use LLM to judge the difference
+          const judgePrompt = `คุณเป็นผู้ตรวจสอบคุณภาพคำตอบ AI โปรดวิเคราะห์ความแตกต่างระหว่างคำตอบ AI กับคำตอบจากผู้เชี่ยวชาญ
+
+คำถาม: ${originalQuestion}
+
+คำตอบจาก AI:
+${aiAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+คำตอบจากผู้เชี่ยวชาญ (คำตอบที่ถูกต้อง):
+${humanAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+ความเห็นจากผู้เชี่ยวชาญที่ยืนยัน:
+${expertComments || 'ไม่มีความเห็นเพิ่มเติม'}
+
+**เกณฑ์การตัดสิน:**
+- "accepted" = AI ตอบถูกต้อง ครบถ้วน ตรงคำถาม ใช้ได้
+- "rejected" = AI ตอบผิด/ไม่ครบ/ไม่ตรงคำถาม หรือข้อมูลผิดพลาด
+
+**conflictType:**
+- "none" = ไม่มีปัญหา
+- "off_topic" = ตอบไม่ตรงคำถาม
+- "incomplete_answer" = ตอบไม่ครบถ้วน
+- "factual_error" = ข้อมูลผิดพลาดจริง
+- "wrong_context" = เข้าใจบริบทผิด
+- "outdated_info" = ข้อมูลเก่า/ไม่อัปเดต
+- "style_difference" = แค่สไตล์การเขียนต่าง
+
+กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
+{
+  "decision": "accepted" หรือ "rejected",
+  "similarityPercent": ตัวเลข 0-100,
+  "conflictType": "none/off_topic/incomplete_answer/factual_error/wrong_context/outdated_info/style_difference",
+  "severity": "none" หรือ "minor" หรือ "major" หรือ "critical",
+  "keyDifferences": ["จุดที่ต่าง 1", "จุดที่ต่าง 2"],
+  "analysis": "อธิบายสั้นๆ ว่า AI ตอบผิดตรงไหน หรือถูกต้อง",
+  "suggestedImprovement": "คำแนะนำในการปรับปรุง prompt หรือ AI",
+  "aiInfoCorrect": true หรือ false (ข้อมูลที่ AI ให้ถูกต้องไหม แม้จะไม่ตรงคำถาม)
+}
+
+ตอบเฉพาะ JSON เท่านั้น ไม่ต้องมีคำอธิบายเพิ่มเติม`;
+
+          let judgeResult: any = null;
+          
+          // Use Google Gemini Flash for fast LLM Judge (much faster than Ollama)
+          try {
+            const geminiResult = await ai.models.generateContent({
+              model: 'gemini-2.0-flash',
+              contents: judgePrompt,
+              config: {
+                maxOutputTokens: 1000,
+                temperature: 0.1,
+              },
+            });
+            
+            const responseText = geminiResult.text || '';
+            
+            // Extract JSON from response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              judgeResult = JSON.parse(jsonMatch[0]);
+            }
+          } catch (llmError) {
+            console.warn('LLM Judge (Gemini) failed, trying Ollama:', llmError);
+            
+            // Fallback to Ollama for LLM Judge
+            try {
+              const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'llama3:latest',
+                  prompt: judgePrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.1,
+                    num_predict: 1000
+                  }
+                })
+              });
+              
+              if (ollamaJudgeResponse.ok) {
+                const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
+                const responseText = ollamaData.response || '';
+                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  judgeResult = JSON.parse(jsonMatch[0]);
+                  console.log('✅ LLM Judge (Ollama) succeeded');
+                }
+              }
+            } catch (ollamaJudgeError) {
+              console.warn('LLM Judge (Ollama) also failed:', ollamaJudgeError);
+            }
+          }
+          
+          // Fallback: Smarter text comparison if both LLMs fail
+          if (!judgeResult) {
+            console.log('⚠️ Both LLMs failed, using text analysis fallback');
+            const normalizeText = (text: string) => 
+              text.toLowerCase().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+            
+            const humanNorm = normalizeText(humanAnswer);
+            const aiNorm = normalizeText(aiAnswer);
+            
+            // Calculate word overlap (Jaccard similarity)
+            const humanWords = new Set(humanNorm.split(' ').filter(w => w.length > 2));
+            const aiWords = new Set(aiNorm.split(' ').filter(w => w.length > 2));
+            const intersection = [...humanWords].filter(w => aiWords.has(w));
+            const union = new Set([...humanWords, ...aiWords]);
+            const jaccardSimilarity = union.size > 0 ? (intersection.length / union.size) * 100 : 0;
+            
+            // Check if AI mentions the same key technical terms (English + Thai)
+            const keyTerms = [
+              // English terms
+              'digital core', 'analog block', 'i/o ring', 'power distribution', 
+              'die', 'wafer', 'pad', 'specification', 'design', 'working capital',
+              'liquidity', 'profitability', 'cash flow', 'inventory', 'accounts receivable',
+              // Thai terms
+              'เงินทุนหมุนเวียน', 'สภาพคล่อง', 'กำไร', 'เงินสด', 'สินค้าคงคลัง',
+              'ลูกหนี้การค้า', 'เจ้าหนี้การค้า', 'ธุรกิจ', 'การเติบโต', 'ความเสี่ยง',
+              'การบริหาร', 'ต้นทุน', 'รายได้', 'ค่าใช้จ่าย', 'หนี้สิน', 'สินทรัพย์',
+              'process window', 'defect', 'yield', 'wire bonding', 'die attach'
+            ];
+            const aiHasKeyTerms = keyTerms.filter(term => aiNorm.includes(term.toLowerCase()));
+            const humanHasKeyTerms = keyTerms.filter(term => humanNorm.includes(term.toLowerCase()));
+            const keyTermOverlap = aiHasKeyTerms.filter(t => humanHasKeyTerms.includes(t));
+            const keyTermScore = humanHasKeyTerms.length > 0 ? 
+              (keyTermOverlap.length / humanHasKeyTerms.length) * 100 : 0;
+            
+            // Combined score: 40% Jaccard + 60% key terms
+            const combinedScore = (jaccardSimilarity * 0.4) + (keyTermScore * 0.6);
+            
+            // Decision criteria for fallback: accepted or rejected only
+            let decision: 'accepted' | 'rejected';
+            let conflictType: string;
+            let severity: string;
+            
+            // If both AI and human have similar key terms, they're likely on the same topic
+            if (combinedScore > 50 || keyTermOverlap.length >= 3) {
+              decision = 'accepted';
+              conflictType = 'none';
+              severity = 'none';
+            } else {
+              // Any other case = rejected (incomplete, off-topic, wrong, etc.)
+              decision = 'rejected';
+              if (keyTermOverlap.length === 0 && humanHasKeyTerms.length > 0) {
+                conflictType = 'off_topic';
+                severity = 'major';
+              } else if (combinedScore > 20) {
+                conflictType = 'incomplete_answer';
+                severity = 'minor';
+              } else {
+                conflictType = 'wrong_answer';
+                severity = 'major';
+              }
+            }
+            
+            console.log(`📊 Fallback analysis: Jaccard=${jaccardSimilarity.toFixed(1)}%, KeyTerms=${keyTermScore.toFixed(1)}%, Combined=${combinedScore.toFixed(1)}%`);
+            console.log(`📊 Key terms overlap: AI[${aiHasKeyTerms.join(', ')}] ∩ Human[${humanHasKeyTerms.join(', ')}] = [${keyTermOverlap.join(', ')}]`);
+            
+            // Generate appropriate improvement suggestion based on conflict type
+            let suggestedImprovement = '';
+            if (conflictType === 'off_topic') {
+              suggestedImprovement = 'ปรับปรุง prompt ให้เข้าใจคำถามและตอบตรงประเด็นมากขึ้น เพิ่ม context ที่เกี่ยวข้องกับ domain';
+            } else if (conflictType === 'incomplete_answer') {
+              suggestedImprovement = 'เพิ่มข้อมูลในฐานความรู้เกี่ยวกับหัวข้อนี้ให้ครบถ้วนมากขึ้น';
+            } else if (conflictType === 'factual_error') {
+              suggestedImprovement = 'ตรวจสอบและอัปเดตข้อมูลในฐานความรู้ ข้อมูลปัจจุบันอาจไม่ถูกต้อง';
+            } else {
+              suggestedImprovement = 'พิจารณาเพิ่ม verified answers ใน domain นี้เพื่อปรับปรุงคุณภาพ';
+            }
+            
+            judgeResult = {
+              decision,
+              similarityPercent: Math.round(combinedScore),
+              conflictType,
+              severity,
+              keyDifferences: keyTermOverlap.length < humanHasKeyTerms.length ? 
+                [`AI ขาดคำสำคัญ: ${humanHasKeyTerms.filter(t => !keyTermOverlap.includes(t)).join(', ')}`] : [],
+              analysis: `Fallback analysis - Combined score: ${combinedScore.toFixed(1)}% (Jaccard: ${jaccardSimilarity.toFixed(1)}%, Key terms: ${keyTermScore.toFixed(1)}%)`,
+              suggestedImprovement: suggestedImprovement,
+              aiInfoCorrect: keyTermOverlap.length >= 2
+            };
+          }
+          
+          // Update AI suggestion decision
+          await updateAISuggestionDecision(
+            aiSuggestion.id,
+            judgeResult.decision as 'accepted' | 'rejected',
+            humanAnswer,
+            commenterName || 'LLM-Judge'
+          );
+          
+          // Save learning analysis for ALL decisions (including accepted)
+          // This helps track AI performance over time
+          // Determine suggested routing based on conflict type
+          const suggestedRouting = judgeResult.conflictType === 'factual_error' ? 'expert_review' :
+                                   judgeResult.conflictType === 'off_topic' ? 'prompt_refinement' :
+                                   judgeResult.conflictType === 'incomplete_answer' ? 'knowledge_expansion' :
+                                   judgeResult.conflictType === 'outdated_info' ? 'data_update' :
+                                   judgeResult.conflictType === 'wrong_context' ? 'context_training' : 'none';
+          
+          // Extract error tags from conflict type and key differences
+          const errorTags: string[] = [];
+          if (judgeResult.conflictType && judgeResult.conflictType !== 'none') {
+            errorTags.push(judgeResult.conflictType);
+          }
+          if (judgeResult.severity === 'major' || judgeResult.severity === 'critical') {
+            errorTags.push('needs_attention');
+          }
+          if (judgeResult.decision === 'rejected') {
+            errorTags.push('ai_failed');
+          }
+          
+          // ========== AI Knowledge Group Classification ==========
+          // Classify the question into a knowledge group for analytics
+          let predictedGroup: string | null = null;
+          let groupConfidence: number | null = null;
+          
+          try {
+            // Get full context for better classification
+            const aiAnswerText = aiSuggestion.ai_generated_answer || '';
+            
+            const classificationPrompt = `
+Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+
+**Question:**
+${originalQuestion}
+
+**Answer:**
+${aiAnswerText.substring(0, 600) || humanAnswer.substring(0, 600)}
+
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
+
+**Instructions:**
+1. Read the Q&A and determine which predefined category fits BEST
+2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "Wire Bonding", "confidence": 0.9}
+`;
+
+            // Use Llama3 for better classification accuracy
+            console.log('🔍 Calling Ollama for knowledge group classification...');
+            const classifyResponse = await fetch(process.env.API_OLLAMA!, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'llama3:latest',
+                prompt: classificationPrompt,
+                stream: false,
+                options: { 
+                  temperature: 0.2,
+                  num_predict: 100
+                }
+              })
+            });
+            
+            console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+            
+            if (classifyResponse.ok) {
+              const classifyData = await classifyResponse.json() as { response?: string };
+              const classifyText = classifyData.response || '';
+              
+              console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+              
+              // Try to extract JSON from response
+              const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+              if (jsonMatch) {
+                try {
+                  const classification = JSON.parse(jsonMatch[0]);
+                  predictedGroup = classification.group || null;
+                  groupConfidence = typeof classification.confidence === 'number' 
+                    ? Math.min(1, Math.max(0, classification.confidence)) 
+                    : null;
+                  
+                  console.log(`📁 Knowledge Group: ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                } catch (parseErr) {
+                  console.warn('Could not parse classification JSON:', parseErr);
+                }
+              }
+            }
+          } catch (classifyError) {
+            console.warn('Knowledge group classification failed (non-critical):', classifyError);
+          }
+          // ========== END AI Knowledge Group Classification ==========
+          
+          await saveAILearningAnalysis(aiSuggestion.id, {
+            conflictType: judgeResult.conflictType || 'none',
+            conflictDetails: judgeResult.analysis || '',
+            severity: judgeResult.severity || 'none',
+            similarityScore: (judgeResult.similarityPercent || 0) / 100,
+            keyDifferences: judgeResult.keyDifferences || [],
+            suggestedPromptFix: judgeResult.suggestedImprovement || '',
+            suggestedRouting: suggestedRouting,
+            errorTags: errorTags,
+            analyzedBy: 'llm-judge',
+            predictedGroup: predictedGroup || undefined,
+            groupConfidence: groupConfidence || undefined
+          });
+          
+          // Store judge result to return in response
+          (req as any).llmJudgeResult = judgeResult;
+          
+          console.log(`📊 LLM Judge: Q${questionId} - ${judgeResult.decision} (${judgeResult.similarityPercent}%) - ${judgeResult.conflictType}`);
+        }
+      }
+    } catch (judgeError) {
+      console.warn('LLM Judge analysis failed (non-critical):', judgeError);
+      // Don't fail the verification if judge fails
+    }
+    // ========== END LLM AS JUDGE (ASYNC) ==========
+    }); // End setImmediate
+
   } catch (error) {
     console.error('❌ Error submitting verification:', error);
     console.error('Error details:', {
@@ -3545,30 +4662,30 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
       return res.json({ success: true, results: [] });
     }
 
-    // 2. Get total count of related questions
+    // 2. Get total count of related questions (same criteria as main query)
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Lower threshold to 0.50 for better coverage
     const countResult = await pool.query(
       `SELECT COUNT(*) as total
       FROM verified_answers va
-      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
       WHERE va.id != $1
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type != 'request'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
         AND (
-          (1 - (va.question_embedding <=> $2::vector)) > 0.6
-          OR
-          ((1 - (va.question_embedding <=> $2::vector)) > 0.5 AND va.tags && $3::text[])
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
         )
-      GROUP BY va.id
-      HAVING COUNT(av.id) > 0`,
-      [qId, question_embedding, currentResult.rows[0].tags]
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $2::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $2::vector)) > 0.50)
+        )`,
+      [qId, question_embedding]
     );
     
-    const totalRelated = countResult.rows.length;
+    const totalRelated = parseInt(countResult.rows[0]?.total) || 0;
 
-    // 3. Search for similar questions using vector similarity + tag matching (HYBRID)
-    // Combination of:
-    // - High semantic similarity (embedding > 0.7) OR
-    // - Matching tags (AND high similarity > 0.5)
+    // 3. Search for similar questions using vector similarity
+    // Include both self-verified and request-verified (with synthesized answer) questions
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -3578,39 +4695,34 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
         va.tags,
         va.verification_type,
         va.created_at,
-        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
-        COALESCE(ARRAY_LENGTH(
-          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
-          1
-        ), 0) as matching_tags_count,
+        va.sum_verified_answer IS NOT NULL as is_fully_verified,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
         COALESCE(COUNT(av.id), 0) as verification_count
       FROM verified_answers va
       LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
       WHERE va.id != $2
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type != 'request'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
         AND (
-          -- Condition 1: Very high semantic similarity (0.6+)
-          (1 - (va.question_embedding <=> $1::vector)) > 0.6
-          OR
-          -- Condition 2: Medium similarity (0.5+) WITH matching tags
-          ((1 - (va.question_embedding <=> $1::vector)) > 0.5 AND va.tags && $3::text[])
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
         )
-      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
-      HAVING COUNT(av.id) > 0
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding, va.sum_verified_answer
       ORDER BY 
-        -- Prioritize: very high similarity > tag matching > moderate similarity
-        CASE 
-          WHEN (1 - (va.question_embedding <=> $1::vector)) > 0.6 THEN 1
-          ELSE 2
-        END,
-        (1 - (va.question_embedding <=> $1::vector)) DESC,
-        COALESCE(ARRAY_LENGTH(
-          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
-          1
-        ), 0) DESC
-      LIMIT 2`,
-      [question_embedding, qId, currentResult.rows[0].tags || []]
+        similarity_score DESC
+      LIMIT 5`,
+      [question_embedding, qId]
     );
 
     const relatedQuestions = relatedResult.rows.map(row => ({
@@ -3620,6 +4732,7 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
       views: parseInt(row.views) || 0,
       tags: row.tags || [],
       verification_type: row.verification_type,
+      is_fully_verified: row.is_fully_verified || row.verification_type === 'self',
       created_at: row.created_at,
       similarity: parseFloat(row.similarity_score),
       verification_count: parseInt(row.verification_count) || 0
@@ -3661,7 +4774,9 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
       return res.json({ success: true, results: [] });
     }
 
-    // 2. Search for ALL similar questions using vector similarity + tag matching (NO LIMIT)
+    // 2. Search for ALL similar questions - improved filtering
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Lower threshold to 0.50 for better coverage
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -3671,35 +4786,31 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
         va.tags,
         va.verification_type,
         va.created_at,
-        (1 - (va.question_embedding <=> $1::vector)) as similarity_score,
-        COALESCE(ARRAY_LENGTH(
-          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
-          1
-        ), 0) as matching_tags_count,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
         COALESCE(COUNT(av.id), 0) as verification_count
       FROM verified_answers va
       LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
       WHERE va.id != $2
-        AND va.question_embedding IS NOT NULL
-        AND va.verification_type != 'request'
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
         AND (
-          (1 - (va.question_embedding <=> $1::vector)) > 0.6
-          OR
-          ((1 - (va.question_embedding <=> $1::vector)) > 0.5 AND va.tags && $3::text[])
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
         )
-      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding
-      HAVING COUNT(av.id) > 0
-      ORDER BY 
-        CASE 
-          WHEN (1 - (va.question_embedding <=> $1::vector)) > 0.6 THEN 1
-          ELSE 2
-        END,
-        (1 - (va.question_embedding <=> $1::vector)) DESC,
-        COALESCE(ARRAY_LENGTH(
-          ARRAY(SELECT unnest(va.tags) INTERSECT SELECT unnest($3::text[])),
-          1
-        ), 0) DESC`,
-      [question_embedding, qId, currentResult.rows[0].tags || []]
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding
+      ORDER BY similarity_score DESC`,
+      [question_embedding, qId]
     );
 
     const relatedQuestions = relatedResult.rows.map(row => ({
@@ -3719,6 +4830,1307 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
 
   } catch (error) {
     console.error('Error fetching all related questions:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// =====================================================
+// ========== AI SUGGESTIONS API ENDPOINTS ==========
+// =====================================================
+// These endpoints handle AI-generated suggestions for Q&A
+// Separate from main chat flow - used in Q&A Detail page
+// =====================================================
+
+/**
+ * Background function to generate AI suggestion without blocking
+ * Called after a new question is created to pre-generate the suggestion
+ */
+async function generateAISuggestionBackground(questionId: number, questionText: string, answerText: string) {
+  try {
+    console.log(`🤖 [Background] Generating AI suggestion for question ${questionId}`);
+    
+    // Generate embedding for the question
+    const fullQuestionText = answerText 
+      ? `${questionText}\n\n${answerText}` 
+      : questionText;
+    
+    const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullQuestionText })
+    });
+
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to generate embedding');
+    }
+
+    const embeddingData = await embeddingResponse.json() as { embedding: number[] };
+    const questionEmbedding = embeddingData.embedding;
+
+    // Search for similar verified questions
+    const SIMILARITY_THRESHOLD = 0.6;
+    const similarQuestions = await pool.query(
+      `SELECT va.id, va.question, 
+              CASE 
+                WHEN va.verification_type = 'self' THEN va.answer
+                WHEN va.sum_verified_answer IS NOT NULL THEN va.sum_verified_answer
+                ELSE NULL
+              END as verified_answer,
+              va.verification_type,
+              1 - (va.question_embedding <=> $1::vector) as similarity
+       FROM verified_answers va
+       WHERE va.id != $2
+         AND va.question_embedding IS NOT NULL
+         AND (
+           (va.verification_type = 'self')
+           OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+         )
+         AND 1 - (va.question_embedding <=> $1::vector) > $3
+       ORDER BY similarity DESC
+       LIMIT 5`,
+      [`[${questionEmbedding.join(',')}]`, questionId, SIMILARITY_THRESHOLD]
+    );
+
+    // Build context from similar questions
+    let context = '';
+    const sourcesUsed: any[] = [];
+    
+    if (similarQuestions.rows.length > 0) {
+      console.log(`🤖 [Background] Found ${similarQuestions.rows.length} similar verified questions`);
+      
+      for (const sq of similarQuestions.rows) {
+        if (sq.verified_answer) {
+          context += `\n---\nคำถามที่คล้ายกัน: ${sq.question}\nคำตอบ: ${sq.verified_answer}\n`;
+          sourcesUsed.push({
+            type: sq.verification_type === 'self' ? 'self_verified' : 'synthesized',
+            questionId: sq.id,
+            question: sq.question,
+            similarity: sq.similarity
+          });
+        }
+      }
+    }
+
+    // Generate AI suggestion using the context
+    if (context) {
+      const systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้ที่ผ่านการยืนยันแล้ว
+กรุณาตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ต่อไปนี้ หากไม่มีข้อมูลที่เกี่ยวข้อง ให้แจ้งว่าไม่พบข้อมูลในฐานความรู้
+
+ฐานความรู้:
+${context}`;
+
+      const aiResponse = await fetch(`${process.env.API_SERVER_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: questionText,
+          system_prompt: systemPrompt,
+          model: 'llama3.2'
+        })
+      });
+
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json() as { response?: string };
+        const suggestion = aiData.response || '';
+        
+        if (suggestion) {
+          // Save to ai_suggestions table
+          await saveAISuggestion(
+            questionId,
+            suggestion,
+            'create_question',
+            {
+              aiModelUsed: 'llama3.2',
+              aiConfidence: 0.7,
+              sourcesUsed: sourcesUsed
+            }
+          );
+          console.log(`✅ [Background] AI suggestion saved for question ${questionId}`);
+        }
+      }
+    } else {
+      console.log(`🤖 [Background] No similar verified questions found for question ${questionId}`);
+    }
+  } catch (error) {
+    console.error(`❌ [Background] Error generating AI suggestion for question ${questionId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Generate AI suggestion for a question
+ * POST /api/ai-generate-suggestion
+ * 
+ * This endpoint:
+ * 1. Takes a question ID or question text
+ * 2. Searches verified_answers for similar content
+ * 3. Gets VERIFIED COMMENTS from answer_verifications as Knowledge Base
+ * 4. Generates an AI answer suggestion by synthesizing from verified knowledge
+ * 5. Saves to ai_suggestions table
+ */
+router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
+  try {
+    const { 
+      questionId, 
+      questionText, 
+      sourceType = 'create_question',
+      originalChatMessage,
+      originalAiResponse 
+    } = req.body;
+
+    if (!questionId && !questionText) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Either questionId or questionText is required' 
+      });
+    }
+
+    // Get the question details if questionId provided
+    let question = questionText;
+    let questionBody = ''; // The full content/body of the question
+    let verifiedAnswerId = questionId;
+
+    if (questionId && !questionText) {
+      const questionResult = await pool.query(
+        'SELECT question, answer FROM verified_answers WHERE id = $1',
+        [questionId]
+      );
+      if (questionResult.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Question not found' });
+      }
+      question = questionResult.rows[0].question;
+      questionBody = questionResult.rows[0].answer || '';
+    }
+
+    // Combine title + body for better embedding (important for short titles)
+    const fullQuestionText = questionBody 
+      ? `${question}\n\n${questionBody}` 
+      : question;
+    
+    console.log(`📋 Question title: ${question.substring(0, 50)}...`);
+    console.log(`📋 Question body length: ${questionBody.length} chars`);
+
+    // Generate embedding for the FULL question (title + body)
+    const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullQuestionText })
+    });
+
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to generate embedding');
+    }
+
+    const embeddingData = await embeddingResponse.json() as { embedding: number[] };
+    const questionEmbedding = embeddingData.embedding;
+
+    // ========== ดึงข้อมูลจาก Knowledge Base ==========
+    // 1. ตรวจสอบว่าคำถามนี้ self-verified หรือยัง (ใช้ answer ของตัวเอง)
+    const currentQuestionData = await pool.query(
+      `SELECT id, question, answer, verification_type, created_by
+       FROM verified_answers 
+       WHERE id = $1`,
+      [questionId]
+    );
+    
+    const isCurrentSelfVerified = currentQuestionData.rows[0]?.verification_type === 'self';
+    const isCurrentRequestType = currentQuestionData.rows[0]?.verification_type === 'request';
+    const currentAnswer = currentQuestionData.rows[0]?.answer || '';
+    const currentCreatedBy = currentQuestionData.rows[0]?.created_by || 'Unknown';
+
+    // ========== Approach 1: ใช้เฉพาะข้อมูลของคำถามปัจจุบันเท่านั้น ==========
+    // ไม่ใช้ข้อมูลจากคำถามอื่นที่คล้ายกัน เพื่อป้องกันคำตอบปนกัน
+
+    console.log(`📚 Current question self-verified: ${isCurrentSelfVerified}, request-type: ${isCurrentRequestType}`);
+
+    // Build context from current question's verifications AND similar verified questions
+    let context = '';
+    const sourcesUsed: any[] = [];
+    let totalSources = 0;
+    
+    // ถ้าคำถามนี้ self-verified แล้ว ใช้คำตอบของตัวเอง
+    if (isCurrentSelfVerified && currentAnswer) {
+      context = `คำตอบที่ยืนยันแล้วสำหรับคำถามนี้ (โดย ${currentCreatedBy}):\n${currentAnswer}\n\n`;
+      sourcesUsed.push({
+        type: 'self_verified',
+        questionId: questionId,
+        verifiedBy: currentCreatedBy
+      });
+      totalSources++;
+    }
+
+    // ========== Approach 2: ค้นหาคำถามที่คล้ายกันจากฐานความรู้ ==========
+    // ถ้าคำถามนี้ยังไม่มีคำตอบที่ยืนยัน ให้ค้นหาจากคำถามที่คล้ายกัน
+    if (!isCurrentSelfVerified || totalSources === 0) {
+      console.log('🔍 Searching similar verified questions from knowledge base...');
+      
+      // Search for:
+      // 1. Self-verified questions (verification_type = 'self')
+      // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
+      // Use higher threshold (0.6) to avoid irrelevant results
+      const SIMILARITY_THRESHOLD = 0.6;
+      
+      const similarQuestions = await pool.query(
+        `SELECT va.id, va.question, 
+                CASE 
+                  WHEN va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL 
+                  THEN va.sum_verified_answer
+                  ELSE va.answer
+                END as answer,
+                va.verification_type, va.created_by,
+                GREATEST(
+                  COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+                  CASE 
+                    WHEN va.sum_verified_answer_embedding IS NOT NULL 
+                    THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+                    ELSE 0
+                  END
+                ) as similarity
+         FROM verified_answers va
+         WHERE va.id != $2
+           AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+           AND (
+             (va.verification_type = 'self')
+             OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+           )
+           AND (
+             (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > $3)
+             OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > $3)
+           )
+         ORDER BY similarity DESC
+         LIMIT 3`,
+        [JSON.stringify(questionEmbedding), questionId, SIMILARITY_THRESHOLD]
+      );
+
+      if (similarQuestions.rows.length > 0) {
+        console.log(`📚 Found ${similarQuestions.rows.length} similar verified questions:`);
+        similarQuestions.rows.forEach((q, idx) => {
+          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): similarity=${(parseFloat(q.similarity) * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
+        });
+        
+        context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
+        similarQuestions.rows.forEach((q, idx) => {
+          const similarity = (parseFloat(q.similarity) * 100).toFixed(1);
+          context += `\n[${idx + 1}] คำถาม: ${q.question}\n`;
+          context += `    ความคล้าย: ${similarity}%\n`;
+          context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 500)}${q.answer.length > 500 ? '...' : ''}\n`;
+          
+          sourcesUsed.push({
+            type: 'similar_verified',
+            questionId: q.id,
+            question: q.question,
+            verificationType: q.verification_type,
+            verifiedBy: q.created_by,
+            similarity: parseFloat(q.similarity)
+          });
+          totalSources++;
+        });
+      } else {
+        console.log('📚 No similar verified questions found');
+      }
+    }
+
+    // 3. ดึง verification comments จากผู้เชี่ยวชาญ (สำหรับคำถามปัจจุบัน)
+    const expertVerifications = await pool.query(
+      `SELECT av.comment, av.commenter_name, av.requested_departments
+       FROM answer_verifications av
+       WHERE av.verified_answer_id = $1 
+         AND av.comment IS NOT NULL 
+         AND av.comment != ''
+         AND av.verification_type = 'verification'
+       ORDER BY av.created_at DESC`,
+      [questionId]
+    );
+
+    if (expertVerifications.rows.length > 0) {
+      context += '\nคำยืนยันจากผู้เชี่ยวชาญสำหรับคำถามนี้:\n';
+      expertVerifications.rows.forEach((v, idx) => {
+        const dept = v.requested_departments?.[0] || '';
+        context += `- ${v.commenter_name}${dept ? ` (${dept})` : ''}: ${v.comment}\n`;
+        sourcesUsed.push({
+          type: 'expert_verification',
+          verifiedBy: v.commenter_name,
+          department: dept
+        });
+        totalSources++;
+      });
+    }
+
+    console.log(`📚 Expert verifications: ${expertVerifications.rows.length}`);
+
+    // ========== 4. ดึงไฟล์แนบและวิเคราะห์ (Priority 2 - รองจาก Knowledge Base) ==========
+    // OPTIMIZED: Process attachments in PARALLEL for faster loading
+    let attachmentContext = '';
+    const attachments = await getQuestionAttachments(parseInt(questionId));
+    
+    if (attachments && attachments.length > 0) {
+      console.log(`📎 Found ${attachments.length} attachments for question ${questionId}`);
+      
+      // Process attachments in parallel for faster loading
+      const attachmentPromises = attachments.map(async (att): Promise<{context: string, source: any} | null> => {
+        try {
+          // Get full attachment data including file content
+          const attachmentData = await getQuestionAttachmentData(att.id);
+          
+          if (attachmentData && attachmentData.file_data) {
+            const mimeType = attachmentData.mime_type || '';
+            const fileName = attachmentData.file_name || 'unknown';
+            
+            // Handle different file types
+            if (mimeType.startsWith('image/')) {
+              // For images - use VLM to describe
+              console.log(`📎 Processing image: ${fileName}`);
+              try {
+                const imageBase64 = attachmentData.file_data.toString('base64');
+                
+                // Call Python API to analyze image with VLM
+                const vlmResponse = await fetch(`${process.env.API_SERVER_URL}/analyze_image`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    image_base64: imageBase64,
+                    prompt: `Describe this image in detail. What information does it contain? Answer in Thai if the image contains Thai text.`
+                  })
+                });
+                
+                if (vlmResponse.ok) {
+                  const vlmData = await vlmResponse.json() as { description: string };
+                  if (vlmData.description) {
+                    return {
+                      context: `\n[ไฟล์แนบ: ${fileName}]\n${vlmData.description}\n`,
+                      source: {
+                        type: 'attachment_image',
+                        fileName: fileName,
+                        description: vlmData.description.substring(0, 100) + '...'
+                      }
+                    };
+                  }
+                }
+              } catch (imgError) {
+                console.warn(`⚠️ Could not analyze image ${fileName}:`, imgError);
+              }
+            } else if (mimeType === 'application/pdf' || mimeType.includes('document') || mimeType === 'text/plain') {
+              // For PDFs and documents - extract text
+              console.log(`📎 Processing document: ${fileName}`);
+              try {
+                const fileBase64 = attachmentData.file_data.toString('base64');
+                
+                // Call Python API to extract text from document
+                const extractResponse = await fetch(`${process.env.API_SERVER_URL}/extract_text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    file_base64: fileBase64,
+                    file_name: fileName,
+                    mime_type: mimeType
+                  })
+                });
+                
+                if (extractResponse.ok) {
+                  const extractData = await extractResponse.json() as { text: string };
+                  if (extractData.text && extractData.text.trim()) {
+                    // Limit text length to avoid token overflow
+                    const extractedText = extractData.text.substring(0, 3000);
+                    return {
+                      context: `\n[ไฟล์แนบ: ${fileName}]\n${extractedText}\n`,
+                      source: {
+                        type: 'attachment_document',
+                        fileName: fileName,
+                        textLength: extractData.text.length
+                      }
+                    };
+                  }
+                }
+              } catch (docError) {
+                console.warn(`⚠️ Could not extract text from ${fileName}:`, docError);
+              }
+            }
+          }
+        } catch (attError) {
+          console.warn(`⚠️ Error processing attachment ${att.id}:`, attError);
+        }
+        return null;
+      });
+      
+      // Wait for all attachments to be processed in parallel
+      const attachmentResults = await Promise.allSettled(attachmentPromises);
+      
+      // Combine results
+      for (const result of attachmentResults) {
+        if (result.status === 'fulfilled' && result.value) {
+          const { context: ctx, source } = result.value;
+          if (ctx) attachmentContext += ctx;
+          if (source) sourcesUsed.push(source);
+        }
+      }
+      
+      if (attachmentContext) {
+        console.log(`📎 Attachment context length: ${attachmentContext.length} chars`);
+      }
+    }
+
+    console.log(`📚 Total sources for AI: ${totalSources}`);
+
+    // Generate AI suggestion using LLM 
+    // สร้าง system prompt โดยดูว่ามีข้อมูลหรือไม่
+    const hasKnowledgeData = totalSources > 0 && context && context.trim().length > 0;
+    const hasAttachments = attachmentContext && attachmentContext.trim().length > 0;
+    
+    // Build system prompt with priority: Knowledge Base > Attachments
+    let systemPrompt = '';
+    
+    if (hasKnowledgeData || hasAttachments) {
+      systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
+
+IMPORTANT PRIORITY RULES:
+1. **PRIORITY 1 (HIGHEST)**: Use KNOWLEDGE BASE data as the main source of truth
+2. **PRIORITY 2 (SECONDARY)**: Use ATTACHED FILES as supplementary information
+3. If Knowledge Base and Attachments conflict, prefer Knowledge Base data
+4. If only Attachments are available (no Knowledge Base), use them but note it's from attachments
+
+Rules:
+1. Use the verified answers and expert comments as your PRIMARY reference
+2. Use attached file content as SECONDARY/supporting information
+3. Rephrase and summarize the information clearly - do NOT copy word-for-word
+4. Include all important data, numbers, and specifications mentioned
+5. Answer in Thai language
+
+Response format:
+- Write in continuous paragraphs, concise and clear
+- Use **bold** for important keywords
+- Use bullet points for lists when appropriate
+- Do not leave multiple blank lines in a row
+`;
+
+      if (hasKnowledgeData) {
+        systemPrompt += `
+========== KNOWLEDGE BASE DATA (PRIORITY 1 - USE THIS FIRST!) ==========
+${context}
+========================================================================
+`;
+      }
+
+      if (hasAttachments) {
+        systemPrompt += `
+========== ATTACHED FILES DATA (PRIORITY 2 - SUPPLEMENTARY) ==========
+${attachmentContext}
+======================================================================
+`;
+      }
+    } else {
+      systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+
+Since there is NO data available, respond with exactly:
+"ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยัน"
+
+Do not make up any information.`;
+    }
+
+    const userPrompt = `Question: ${question}
+${questionBody ? `\nDetails: ${questionBody}` : ''}
+
+Create a summary answer from the knowledge base:
+- Write in concise paragraphs with clear main points
+- Include important numbers and data if available
+- If there are conflicting information, clearly state them
+- Do NOT copy the original answer word-for-word
+- Answer in Thai language`;
+
+    let aiGeneratedAnswer = '';
+    let aiModelUsed = 'gemma-3-4b-it';
+    
+    // Try to call LLM to synthesize answer
+    try {
+      console.log('🤖 Calling Google AI to synthesize answer...');
+      
+      // Use Google AI API (same as chat uses)
+      const ai = new GoogleGenAI({ apiKey: process.env.Google_API_KEY });
+      
+      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+      
+      const response = await ai.models.generateContent({
+        model: 'gemma-3-4b-it',
+        contents: fullPrompt
+      });
+      
+      if (response && response.text) {
+        aiGeneratedAnswer = response.text
+          .replace(/\r\n/g, '\n')  // Normalize line endings
+          .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+          .replace(/\n\n\n/g, '\n\n')  // Ensure no triple newlines
+          .trim();
+        console.log('✅ Google AI generated answer successfully');
+      }
+    } catch (llmError) {
+      console.error('⚠️ Google AI call failed:', llmError);
+      
+      // Fallback: Try Ollama
+      try {
+        console.log('🔄 Trying Ollama as fallback...');
+        const llmResponse = await fetch(`${process.env.API_OLLAMA}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'llama3:latest',
+            prompt: `${systemPrompt}\n\n${userPrompt}`,
+            stream: false
+          })
+        });
+        
+        if (llmResponse.ok) {
+          const llmData = await llmResponse.json() as { response: string };
+          aiGeneratedAnswer = (llmData.response || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          aiModelUsed = 'llama3:latest (Ollama)';
+          console.log('✅ Ollama generated answer successfully');
+        }
+      } catch (ollamaError) {
+        console.error('⚠️ Ollama also failed:', ollamaError);
+      }
+    }
+    
+    // Check if LLM incorrectly said "no data" when we actually have sources
+    const noDataPhrases = [
+      'ยังไม่มีคำตอบที่ยืนยันแล้ว',
+      'ไม่มีข้อมูลในฐานความรู้',
+      'ยังไม่มีข้อมูล',
+      'No data available',
+      'no verified',
+      'กรุณารอผู้เชี่ยวชาญมายืนยัน'
+    ];
+    
+    const llmSaidNoData = noDataPhrases.some(phrase => 
+      aiGeneratedAnswer.toLowerCase().includes(phrase.toLowerCase())
+    );
+    
+    // If LLM said no data but we have sources, use fallback instead
+    if (llmSaidNoData && totalSources > 0) {
+      console.log('⚠️ LLM incorrectly said no data, using fallback with actual sources');
+      aiGeneratedAnswer = ''; // Reset to trigger fallback below
+    }
+    
+    // Fallback if LLM fails or returns empty
+    if (!aiGeneratedAnswer) {
+      if (totalSources > 0) {
+        // Show verified answers directly from sources
+        aiGeneratedAnswer = '';
+        
+        // Show self-verified answer if exists
+        if (isCurrentSelfVerified && currentAnswer) {
+          aiGeneratedAnswer += `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
+        }
+        
+        // Show answers from similar verified questions
+        const similarSources = sourcesUsed.filter((s: any) => s.type === 'similar_verified');
+        if (similarSources.length > 0) {
+          aiGeneratedAnswer += '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n';
+          similarSources.forEach((source: any, idx: number) => {
+            const similarity = source.similarity ? Math.round(source.similarity * 100) : 0;
+            aiGeneratedAnswer += `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`;
+          });
+          aiGeneratedAnswer += '\n';
+        }
+        
+        // Show expert verifications if any
+        if (expertVerifications.rows.length > 0) {
+          aiGeneratedAnswer += '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n';
+          expertVerifications.rows.forEach((v) => {
+            const dept = v.requested_departments?.[0] || '';
+            aiGeneratedAnswer += `• **${v.commenter_name}${dept ? ` (${dept})` : ''}:** ${v.comment}\n`;
+          });
+        }
+        
+        aiGeneratedAnswer = aiGeneratedAnswer.trim();
+      } else {
+        aiGeneratedAnswer = 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+      }
+    }
+
+    // Calculate confidence based on verified sources
+    const confidence = isCurrentSelfVerified ? 1.0 : (totalSources > 0 ? 0.8 : 0);
+
+    // Save AI suggestion to database
+    const saveResult = await saveAISuggestion(
+      verifiedAnswerId,
+      aiGeneratedAnswer,
+      sourceType as 'chat_verify' | 'create_question',
+      {
+        originalChatMessage,
+        originalAiResponse,
+        aiModelUsed,
+        aiConfidence: confidence,
+        sourcesUsed
+      }
+    );
+
+    console.log(`✅ AI suggestion generated for question ${verifiedAnswerId} with ${totalSources} sources`);
+
+    // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
+    // Auto-reject ONLY when:
+    // 1. No knowledge base sources (totalSources === 0)
+    // 2. No attachments (wait for human verification if attachments exist)
+    if (totalSources === 0 && saveResult.suggestionId && !hasAttachments) {
+      console.log('🔄 No knowledge and no attachments - auto-rejecting and classifying topic group for analytics...');
+      setImmediate(async () => {
+        try {
+          let predictedGroup: string | null = null;
+          let groupConfidence: number | null = null;
+          
+          // Use AI to classify the question topic
+          const classificationPrompt = `
+Classify this question into one of the predefined categories. If none fit well, create a new category.
+
+**Question:**
+${question}
+
+${questionBody ? `**Question Details:**\n${questionBody.substring(0, 500)}` : ''}
+
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
+
+**Instructions:**
+1. Read the question and determine which predefined category fits BEST
+2. If the question clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "IT & Computer", "confidence": 0.9}
+`;
+
+          const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+          console.log('🔍 Calling Ollama for knowledge group classification (no KB data)...');
+          
+          const classifyResponse = await fetch(ollamaUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'llama3:latest',
+              prompt: classificationPrompt,
+              stream: false,
+              options: { 
+                temperature: 0.2,
+                num_predict: 100
+              }
+            })
+          });
+          
+          if (classifyResponse.ok) {
+            const classifyData = await classifyResponse.json() as { response?: string };
+            const classifyText = classifyData.response || '';
+            
+            console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+            
+            const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+            if (jsonMatch) {
+              try {
+                const classification = JSON.parse(jsonMatch[0]);
+                predictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Knowledge Group (no KB): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+              } catch (parseErr) {
+                console.warn('Could not parse classification JSON:', parseErr);
+              }
+            }
+          }
+          
+          // Auto-reject since no knowledge available
+          await updateAISuggestionDecision(
+            saveResult.suggestionId!,
+            'rejected',
+            'No verified answer in knowledge base',
+            'auto-system'
+          );
+          
+          // Save to ai_learning_analysis with group classification
+          await saveAILearningAnalysis(saveResult.suggestionId!, {
+            conflictType: 'incomplete_answer',
+            conflictDetails: 'No verified answer found in knowledge base for this topic',
+            severity: 'major',
+            similarityScore: 0,
+            keyDifferences: ['Missing knowledge topic'],
+            suggestedPromptFix: 'Add verified answers for this topic to knowledge base',
+            suggestedRouting: 'knowledge_expansion',
+            errorTags: ['missing_knowledge', 'no_kb_data'],
+            analyzedBy: 'auto-system',
+            predictedGroup: predictedGroup || 'Uncategorized',
+            groupConfidence: groupConfidence || 0.5
+          });
+          
+          console.log(`✅ Missing knowledge topic classified: ${predictedGroup || 'Uncategorized'}`);
+          
+        } catch (err) {
+          console.warn('Classification for no-KB question failed:', err);
+        }
+      });
+    }
+
+    // For questions with attachments but no KB data - wait for human verification
+    // Don't auto-reject, let humans verify the attachment content first
+    if (totalSources === 0 && saveResult.suggestionId && hasAttachments) {
+      console.log('⏳ Question with attachments but no KB data - waiting for human verification before decision');
+    }
+
+    // For self-verified questions, create a verification record automatically to trigger LLM Judge
+    if (isCurrentSelfVerified && saveResult.suggestionId) {
+      console.log('🔄 Creating auto-verification record for self-verified question...');
+      setImmediate(async () => {
+        try {
+          // Check if verification record already exists
+          const existingVerif = await pool.query(
+            `SELECT id FROM answer_verifications 
+             WHERE verified_answer_id = $1 AND verification_type = 'verification'`,
+            [verifiedAnswerId]
+          );
+          
+          if (existingVerif.rows.length === 0) {
+            // Create auto-verification record
+            await pool.query(`
+              INSERT INTO answer_verifications 
+              (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+              VALUES ($1, $2, $3, $4, 'verification', $5, NOW())
+            `, [
+              verifiedAnswerId, 
+              1, // system user
+              currentCreatedBy, 
+              'Self-verified by author',
+              ['Self']
+            ]);
+            
+            console.log('✅ Auto-verification record created, LLM Judge will run now...');
+            
+            // Now run LLM Judge analysis (copy the logic from submit-verification)
+            const aiSuggestion = await getAISuggestion(parseInt(verifiedAnswerId));
+            if (aiSuggestion && aiSuggestion.decision === 'pending') {
+              // Get question data
+              const questionResult = await pool.query(
+                `SELECT question, answer FROM verified_answers WHERE id = $1`,
+                [verifiedAnswerId]
+              );
+              const questionData = questionResult.rows[0];
+              const originalQuestion = questionData?.question || '';
+              const humanAnswer = questionData?.answer || '';
+              const aiAnswer = aiSuggestion.ai_generated_answer || '';
+              
+              // ========== AI Knowledge Group Classification for Self-Verified ==========
+              let predictedGroup: string | null = null;
+              let groupConfidence: number | null = null;
+              
+              try {
+                const classificationPrompt = `
+Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+
+**Question:**
+${originalQuestion}
+
+**Answer:**
+${humanAnswer.substring(0, 600)}
+
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Die Attach & Bonding
+- Wire Bonding
+- Molding & Encapsulation
+- Testing & Inspection
+- Wafer Processing
+- Equipment Maintenance
+- Quality Control
+- Yield Improvement
+- IT & Computer
+- Safety & Environment
+- HR & Training
+- Finance & Procurement
+
+**Instructions:**
+1. Read the Q&A and determine which predefined category fits BEST
+2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
+3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
+4. New categories should be at the same level of generality as predefined ones
+5. Do NOT create overly specific categories
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "Wire Bonding", "confidence": 0.9}
+`;
+
+                const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+                console.log('🔍 Calling Ollama for knowledge group classification (self-verified)...');
+                console.log('🔍 Ollama URL:', ollamaUrl);
+                console.log('🔍 Question:', originalQuestion.substring(0, 100));
+                
+                const classifyResponse = await fetch(ollamaUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'llama3:latest',
+                    prompt: classificationPrompt,
+                    stream: false,
+                    options: { 
+                      temperature: 0.2,
+                      num_predict: 100
+                    }
+                  })
+                });
+                
+                console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+                
+                if (classifyResponse.ok) {
+                  const classifyData = await classifyResponse.json() as { response?: string };
+                  const classifyText = classifyData.response || '';
+                  
+                  console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+                  
+                  const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                  if (jsonMatch) {
+                    try {
+                      const classification = JSON.parse(jsonMatch[0]);
+                      predictedGroup = classification.group || null;
+                      groupConfidence = typeof classification.confidence === 'number' 
+                        ? Math.min(1, Math.max(0, classification.confidence)) 
+                        : null;
+                      
+                      console.log(`📁 Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                    } catch (parseErr) {
+                      console.warn('Could not parse classification JSON:', parseErr);
+                    }
+                  }
+                }
+              } catch (classifyError) {
+                console.warn('Knowledge group classification failed (non-critical):', classifyError);
+              }
+              // ========== END AI Knowledge Group Classification ==========
+              
+              // Simplified LLM Judge for self-verified (always accept)
+              await updateAISuggestionDecision(
+                aiSuggestion.id,
+                'accepted',
+                humanAnswer,
+                currentCreatedBy
+              );
+              
+              await saveAILearningAnalysis(aiSuggestion.id, {
+                conflictType: 'none',
+                conflictDetails: 'Self-verified question - auto-accepted',
+                severity: undefined,
+                similarityScore: 1.0,
+                keyDifferences: [],
+                suggestedPromptFix: '',
+                suggestedRouting: 'none',
+                errorTags: [],
+                analyzedBy: 'auto-accept',
+                predictedGroup: predictedGroup || undefined,
+                groupConfidence: groupConfidence || undefined
+              });
+              
+              console.log('✅ LLM Judge auto-accept completed for self-verified question');
+            }
+          } else {
+            console.log('ℹ️ Verification record already exists, skipping');
+          }
+        } catch (err) {
+          console.warn('Auto-verification failed (non-critical):', err);
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      suggestion: {
+        id: saveResult.suggestionId,
+        answer: aiGeneratedAnswer,
+        model: aiModelUsed,
+        confidence: confidence,
+        sources: sourcesUsed,
+        verifiedSourcesCount: totalSources
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating AI suggestion:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get AI suggestion for a question
+ * GET /api/ai-suggestion/:questionId
+ */
+router.get('/ai-suggestion/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    
+    const suggestion = await getAISuggestion(parseInt(questionId));
+    
+    if (!suggestion) {
+      return res.json({ 
+        success: true, 
+        suggestion: null,
+        message: 'No AI suggestion found for this question'
+      });
+    }
+
+    res.json({
+      success: true,
+      suggestion: {
+        id: suggestion.id,
+        answer: suggestion.ai_generated_answer,
+        model: suggestion.ai_model_used,
+        confidence: suggestion.ai_confidence,
+        sources: suggestion.sources_used,
+        decision: suggestion.decision,
+        reviewedAt: suggestion.reviewed_at,
+        reviewedBy: suggestion.reviewed_by,
+        createdAt: suggestion.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting AI suggestion:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Update AI suggestion decision after human review
+ * POST /api/ai-suggestion-decision
+ */
+router.post('/ai-suggestion-decision', async (req: Request, res: Response) => {
+  try {
+    const { 
+      suggestionId, 
+      decision, 
+      humanFinalAnswer, 
+      reviewedBy,
+      // For AI learning analysis
+      conflictType,
+      conflictDetails,
+      severity
+    } = req.body;
+
+    if (!suggestionId || !decision) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'suggestionId and decision are required' 
+      });
+    }
+
+    if (!['accepted', 'rejected'].includes(decision)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'decision must be: accepted or rejected' 
+      });
+    }
+
+    // Update the decision
+    await updateAISuggestionDecision(
+      suggestionId,
+      decision,
+      humanFinalAnswer || '',
+      reviewedBy || 'Anonymous'
+    );
+
+    // If decision is rejected, save learning analysis
+    if (decision === 'rejected' && (conflictType || conflictDetails)) {
+      await saveAILearningAnalysis(suggestionId, {
+        conflictType: conflictType || 'incorrect_answer',
+        conflictDetails,
+        severity: severity || 'major',
+        analyzedBy: reviewedBy || 'user'
+      });
+    }
+
+    console.log(`✅ AI suggestion ${suggestionId} decision updated: ${decision}`);
+
+    res.json({
+      success: true,
+      message: `Decision updated to: ${decision}`
+    });
+
+  } catch (error) {
+    console.error('Error updating AI suggestion decision:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get AI performance dashboard data
+ * GET /api/ai-performance
+ */
+router.get('/ai-performance', async (req: Request, res: Response) => {
+  try {
+    const days = parseInt(req.query.days as string) || 30;
+    
+    const [performance, conflicts] = await Promise.all([
+      getAIPerformanceSummary(days),
+      getAIConflictPatterns()
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        performance,
+        conflicts,
+        period: `Last ${days} days`
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting AI performance:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Save AI learning analysis manually
+ * POST /api/ai-learning-analysis
+ */
+router.post('/ai-learning-analysis', async (req: Request, res: Response) => {
+  try {
+    const {
+      suggestionId,
+      conflictType,
+      conflictDetails,
+      severity,
+      errorTags,
+      suggestedPromptFix,
+      suggestedRouting,
+      analyzedBy
+    } = req.body;
+
+    if (!suggestionId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'suggestionId is required' 
+      });
+    }
+
+    const result = await saveAILearningAnalysis(suggestionId, {
+      conflictType,
+      conflictDetails,
+      severity,
+      errorTags,
+      suggestedPromptFix,
+      suggestedRouting,
+      analyzedBy
+    });
+
+    res.json({
+      success: true,
+      analysisId: result.analysisId
+    });
+
+  } catch (error) {
+    console.error('Error saving AI learning analysis:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get Missing Knowledge Topics (No KB Data)
+ * GET /api/missing-knowledge-topics
+ * Returns topics where AI said "no data in knowledge base"
+ */
+router.get('/missing-knowledge-topics', async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        ala.predicted_group,
+        COUNT(DISTINCT va.id) as total_questions,
+        COUNT(DISTINCT CASE WHEN ala.user_decision = 'accepted' THEN va.id END) as accepted_count,
+        COUNT(DISTINCT CASE WHEN ala.user_decision = 'rejected' THEN va.id END) as rejected_count,
+        ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
+        STRING_AGG(DISTINCT va.question, ' | ' ORDER BY va.question) as sample_questions
+      FROM ai_learning_analysis ala
+      INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
+      INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
+      WHERE ala.predicted_group IS NOT NULL
+        AND ala.conflict_type = 'incomplete_answer'
+        AND ('missing_knowledge' = ANY(ala.error_tags) OR 'no_kb_data' = ANY(ala.error_tags))
+      GROUP BY ala.predicted_group
+      ORDER BY total_questions DESC
+      LIMIT 20
+    `);
+    
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error getting missing knowledge topics:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get Knowledge Group Analytics
+ * GET /api/knowledge-group-analytics
+ */
+router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
+  try {
+    const [groupAnalytics, confidenceDistribution] = await Promise.all([
+      getKnowledgeGroupAnalytics(),
+      getConfidenceDistribution()
+    ]);
+
+    // Calculate summary stats
+    const totalQuestions = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.total_questions || 0), 0);
+    const totalRejected = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.rejected_count || 0), 0);
+    const totalAccepted = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.accepted_count || 0), 0);
+    const totalPending = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.pending_count || 0), 0);
+    const totalHighConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.high_conf_count || 0), 0);
+    const totalLowConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.low_conf_count || 0), 0);
+    const totalDecisions = totalRejected + totalAccepted;
+    
+    res.json({
+      success: true,
+      data: {
+        groupDistribution: groupAnalytics,
+        confidenceDistribution,
+        summary: {
+          totalQuestions,
+          totalPending,
+          totalRejected,
+          totalAccepted,
+          rejectionRate: totalDecisions > 0 ? Math.round(100 * totalRejected / totalDecisions) : 0,
+          highConfidenceCount: totalHighConf,
+          lowConfidenceCount: totalLowConf,
+          uniqueGroups: groupAnalytics.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting knowledge group analytics:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get Department User Statistics
+ * GET /api/department-user-stats
+ */
+router.get('/department-user-stats', async (req: Request, res: Response) => {
+  try {
+    const stats = await getDepartmentUserStatistics();
+
+    res.json({
+      success: true,
+      data: stats
+    });
+
+  } catch (error) {
+    console.error('Error fetching department user statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch department user statistics'
+    });
+  }
+});
+
+// =====================================================
+// ========== END AI SUGGESTIONS API ==========
+// =====================================================
+
+/**
+ * Update embeddings for questions that don't have them
+ * POST /api/update-missing-embeddings
+ */
+router.post('/update-missing-embeddings', async (req: Request, res: Response) => {
+  try {
+    console.log('🔄 Updating missing embeddings...');
+    
+    // Get all questions without embeddings
+    const questionsResult = await pool.query(`
+      SELECT id, question, answer 
+      FROM verified_answers 
+      WHERE question_embedding IS NULL
+      ORDER BY id
+    `);
+    
+    console.log(`📋 Found ${questionsResult.rows.length} questions without embeddings`);
+    
+    let updated = 0;
+    let failed = 0;
+    
+    for (const q of questionsResult.rows) {
+      try {
+        const fullText = `${q.question}\n\n${q.answer}`;
+        
+        // Generate question embedding
+        const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: fullText })
+        });
+        
+        if (!qEmbedRes.ok) {
+          console.warn(`⚠️ Failed to get embedding for question ${q.id}`);
+          failed++;
+          continue;
+        }
+        
+        const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
+        const questionEmbedding = qEmbedData.embedding || [];
+        
+        // Generate answer embedding
+        const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: q.answer })
+        });
+        
+        let answerEmbedding: number[] = [];
+        if (aEmbedRes.ok) {
+          const aEmbedData = await aEmbedRes.json() as { embedding: number[] };
+          answerEmbedding = aEmbedData.embedding || [];
+        }
+        
+        // Update database
+        const qEmbStr = questionEmbedding.length > 0 ? `[${questionEmbedding.join(',')}]` : null;
+        const aEmbStr = answerEmbedding.length > 0 ? `[${answerEmbedding.join(',')}]` : null;
+        
+        await pool.query(`
+          UPDATE verified_answers 
+          SET question_embedding = $1, answer_embedding = $2, last_updated_at = NOW()
+          WHERE id = $3
+        `, [qEmbStr, aEmbStr, q.id]);
+        
+        updated++;
+        console.log(`✅ Updated embedding for question ${q.id} (${updated}/${questionsResult.rows.length})`);
+        
+      } catch (err) {
+        console.error(`❌ Error updating question ${q.id}:`, err);
+        failed++;
+      }
+    }
+    
+    console.log(`✅ Embedding update complete: ${updated} updated, ${failed} failed`);
+    
+    res.json({
+      success: true,
+      total: questionsResult.rows.length,
+      updated,
+      failed
+    });
+    
+  } catch (error) {
+    console.error('Error updating embeddings:', error);
     res.status(500).json({ success: false, error: String(error) });
   }
 });

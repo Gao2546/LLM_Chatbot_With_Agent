@@ -33,7 +33,7 @@ from docling.datamodel.pipeline_options import (
     TesseractOcrOptions,
     RapidOcrOptions,
 )
-# from modelscope import snapshot_download
+from modelscope import snapshot_download
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel import vlm_model_specs
 from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
@@ -85,14 +85,13 @@ def clear_gpu():
 # ==============================================================================
 clear_gpu()
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# This model remains for text embedding (Legacy Mode), unchanged.
-# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = device)
-# model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B').to(device=device)
-# model = SentenceTransformer("jinaai/jina-embeddings-v4", trust_remote_code=True, device = device,model_kwargs={'default_task': 'retrieval'})
+
+# Initialize model variable (will be set below if LOCAL=True)
+model = None
 
 # Quantization model
-
 if LOCAL:
+    print("🚀 Loading Jina embedding model (LOCAL mode)...")
     # 1. Define the 4-bit configuration
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -102,23 +101,25 @@ if LOCAL:
     )
 
     # 2. Load the model with the config
-    model = SentenceTransformer(
-        "jinaai/jina-embeddings-v4",
-        trust_remote_code=True,
-        model_kwargs={
-            "default_task": "retrieval",
-            "quantization_config": bnb_config,
-            "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
-        },
-    )
-    clear_gpu()
-
-    print(model)
-
-    uses_mem = get_model_memory(model)
-
-# Now move to GPU
-# model.to(device)
+    try:
+        model = SentenceTransformer(
+            "jinaai/jina-embeddings-v4",
+            trust_remote_code=True,
+            model_kwargs={
+                "default_task": "retrieval",
+                "quantization_config": bnb_config,
+                "device_map": "auto"  # REQUIRED: Lets accelerate handle GPU placement
+            },
+        )
+        clear_gpu()
+        print("✅ Jina model loaded successfully")
+        print(model)
+        uses_mem = get_model_memory(model)
+    except Exception as e:
+        print(f"❌ Failed to load Jina model: {e}")
+        model = None
+else:
+    print("📡 Running in REMOTE mode (will use Ollama/API for embeddings)")
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
@@ -867,7 +868,7 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     if not LOCAL:
         response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
-        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:4b-instruct", prompt=prompt, system_prompt=system_prompt)
+        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b-instruct", prompt=prompt, system_prompt=system_prompt)
     return response
 
 # ==============================================================================
@@ -1211,7 +1212,28 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 1.1 ต่อวงจร ตามรูปที่ 1
 1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
 ```""")
+    
+    vlm_system_prompt = (
+"""You are an expert Document Analyst AI converting images to structured Markdown.
 
+**CORE DIRECTIVE: Extract content sequentially and verbatim. NO summarization, interpretation, or omission.**
+
+### Operational Rules
+1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
+2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
+3.  **Visual Deconstruction (CRITICAL):**
+    *   Convert visuals into literal text descriptions inside specific tags.
+    *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
+
+### Required Tags
+*   `<diagram>`: Detailed schematic connection tracing.
+*   `<table>`: Markdown tables.
+*   `<chart>`: Type, axes, legend, and data points.
+*   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+
+### Relevance Filter
+If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
+""")
     # Add context about the images
     page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
     reference_text = "\n".join(page_references)
@@ -1224,10 +1246,10 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
     Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
 
     # --- Step 4: Call OpenRouterInference ---
-    print(f"Sending {len(image_bytes_list)} images to OpenRouter VLM...")
+    print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
 
     vlm_response = ""
-    batch_size = 15
+    batch_size = 10
     for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
         print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
         if (i)*batch_size >= len(image_bytes_list):
@@ -1238,22 +1260,24 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
                 prompt=final_user_prompt,
                 system_prompt=vlm_system_prompt, # The user's detailed instructions go here
                 image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                model_name="Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+                model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
             ) + "\n\n"
+            print(vlm_response)
         else :
              # System prompt for OpenRouter VLM
             vlm_system_prompt = ("You're an image expert."
                              "If the image contains text, extract and summarize it...")
             # Prompt for OpenRouter VLM
             final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-            vlm_response += ollama_describe_image(
+            vlm_response_L = ollama_describe_image(
                 image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
-                model="qwen3-vl:4b-instruct",
+                model="qwen3-vl:2b-instruct",
                 prompt=final_user_prompt,
                 system_prompt=vlm_system_prompt
                 )
-            vlm_response = "\n\n".join(vlm_response) + "\n\n"
+            vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
 
+    print(vlm_response)
     print("✅ VLM processing complete.")
 
     # --- Step 5: Handle "summarize" option ---
@@ -1334,6 +1358,23 @@ def OllamaInference(prompt: str, system_prompt: str = "", image_bytes_list: List
 #  DEEPINFRA FUNCTION (Updated)
 # ==============================================================================
 
+parameter_option = {
+                'normal' : {
+                    'temperature': 0.1,
+                    'top_p': 0.95,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                },
+
+                'deepseek-ai/DeepSeek-OCR' : {
+                    'temperature': 0.1,
+                    'top_p': 0.9,
+                    'min_p': 0.0,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                },
+            }
+
 def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "deepseek-ai/DeepSeek-OCR") -> str:
     """
     Perform inference using DeepInfra's OpenAI-compatible API.
@@ -1368,8 +1409,8 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
                 img = Image.open(io.BytesIO(image_bytes))
                 
                 # --- START: RESIZING SECTION ---
-                max_size = (1028, 1028)  # Max width and height of 1028 pixels
-                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                # max_size = (1028, 1028)  # Max width and height of 1028 pixels
+                # img.thumbnail(max_size, Image.Resampling.LANCZOS)
                 
                 output_buffer = io.BytesIO()
                 image_format = img.format or 'JPEG' 
@@ -1395,6 +1436,12 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
 
     # --- API Call Section (Modified for DeepInfra) ---
     try:
+        if model_name in parameter_option.keys():
+            parameter = parameter_option[model_name]
+        else:
+            parameter = parameter_option['normal']
+        parameter['model'] = model_name
+        parameter['messages'] = messages
         response = requests.post(
             # Use DeepInfra's OpenAI-compatible endpoint
             url="https://api.deepinfra.com/v1/chat/completions",
@@ -1402,14 +1449,7 @@ def DeepInfraInference(prompt: str = "", system_prompt: str = "", image_bytes_li
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": model_name,
-                "messages": messages,
-                'temperature': 0.1,
-                'top_p': 0.95,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-            }
+            json=parameter
         )
         response.raise_for_status()
         data = response.json()
@@ -1578,17 +1618,60 @@ def get_image_embedding_jinna_api(
 # """
 
 
+#     create_search_prompt = f"""
+# Act as a document search engine (PDF document search by vector similarity). 
+# Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
+# Include likely keywords and factual phrasing.
+
+# User Query: {text}
+# Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
+# Prompt Language: English
+
+# Output only the simulated excerpt.
+# """ #*****************
+    
+
+
+
+
+
+
+
     create_search_prompt = f"""
-Act as a document search engine (PDF document search by vector similarity). 
-Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
-Include likely keywords and factual phrasing.
+Act as a high-precision OCR and document retrieval system.
+Generate a single, dense excerpt that mimics a direct "hit" from a technical manual or datasheet answering the query: "{text}".
+Requirements:
+    1. Use high-density technical language (e.g., "nominal operating range," "tolerance ±5%," "hex-head bolt," "thermal conductivity").
+    2. Include specific identifiers like model numbers (e.g., Series-X1), section headers (e.g., Section 4.2.1), or units (e.g., mV, PSI, Nm).
+    3. Structure the output as a standalone technical fact or a row from a specification table.
+    4. Do not use introductory filler; start immediately with the data.
+    """
+    
+    # create_search_prompt = f"""
+# Act as a document search engine. Simulate a raw text extraction from a table or diagram within a PDF datasheet to answer: "{text}".
+# Style Guidelines:
+#     # Format the response as a condensed data string (e.g., [Parameter] | [Value] | [Conditions]).
+#     # Use "telegraphic" writing style (no unnecessary articles like 'the' or 'a').
+#     # Ensure the text contains a specific numerical value or a direct instruction found in a "Notes" column.
+#     # Example format: "Table 3: Max Load Capacity; Model A: 500kg; Model B: 750kg; Note: Ensure surface is level."
+# """
 
-User Query: {text}
-Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
-Prompt Language: English
+    # create_search_prompt = f"""
+# Act as a semantic search engine retrieving a snippet from a field service manual.
+# Generate one concise, authoritative sentence that answers the query "{text}" as it would appear in a printed instruction set.
+# Instructions:
+#     # Use imperative verbs (e.g., "Calibrate," "Verify," "Torque," "Connect").
+#     # Include a page or figure reference (e.g., "See Fig. 12-B").
+#     # Use specific technical terminology relevant to the query to ensure high vector similarity.
+#     # Output only the excerpt.
+# """
 
-Output only the simulated excerpt.
-""" #*****************
+
+
+
+
+
+
 
 
 #     create_search_prompt = f"""
@@ -1792,10 +1875,10 @@ def get_image_embedding_jinna_api_local(
     global _JINA_MODEL_INSTANCE
 
     # 1. Input Validation
-    if text and image_bytes_list:
+    if (text or search_text) and image_bytes_list:
         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
         return None
-    if not text and not image_bytes_list:
+    if not text and not search_text and not image_bytes_list:
         print("Error: Must provide either 'text' or 'image_bytes_list'.")
         return None
 
@@ -2589,42 +2672,48 @@ Output only the descriptive paragraph.
     
 def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[float]:
     """
-    Convert text into an embedding vector.
+    Convert text into an embedding vector using pre-loaded model (FAST).
+    Falls back to Ollama if pre-loaded model unavailable.
     
     Args:
         text: ข้อความที่ต้องการ embedding
         target_dimensions: จำนวน dimensions ที่ต้องการ (default: 1024 สำหรับ verified_answers)
-                          - 384: ใช้ sentence-transformers/all-MiniLM-L6-v2 (เร็ว, RAG เก่า)
-                          - 1024: ใช้ jinaai/jina-embeddings-v4 (ดี, verified_answers)
     
     Returns:
-        list[float]: embedding vector
+        list[float]: embedding vector (1024 dims)
     """
+    global model  # Use the pre-loaded model
+    
     # ตรวจสอบว่า text ว่างหรือไม่
     if not text or not text.strip():
         print(f"❌ ERROR: Empty text provided!")
         raise ValueError("Cannot create embedding from empty text")
     
-    # --- NEW: Use DeepInfra for embeddings ---
-    if os.getenv("DEEPINFRA_API_KEY"):
-        if not LOCAL:
-            embeddings_list = DeepInfraEmbedding(inputs=[text],model_name="Qwen/Qwen3-Embedding-4B")
-            if embeddings_list and len(embeddings_list) > 0:
-                print("✅ Generated embedding using DeepInfra.")
-                return embeddings_list[0]
-            else:
-                print("⚠️ DeepInfra embedding failed. Falling back to local model.")
+    try:
+        # Use the pre-loaded Jina embedding model (FAST - no reload)
+        if model is not None:
+            print(f"⚡ Using PRE-LOADED Jina model (LOCAL) for embedding (instant)...")
+            embedding = model.encode(text, task='retrieval')
+            return embedding.tolist()
         else:
-            embeddings_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
-            # embeddings_list = model.encode(text,device='cpu',task='retrieval').tolist()
-            return embeddings_list
-    
-    # --- FALLBACK: Original SentenceTransformer logic ---
-    print("Generating embedding using local SentenceTransformer model.")
-    # model.to(device)
-    embedding = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")[0]
-    # model.to("cpu")
-    return embedding
+            print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
+            embedding_list = get_image_embedding_jinna_api(search_text=text)
+            if embedding_list and len(embedding_list) > 0:
+                return embedding_list
+            else:
+                raise ValueError("Ollama returned empty embedding")
+            
+    except Exception as e:
+        print(f"❌ Jina embedding error: {e}. Trying Ollama fallback...")
+        try:
+            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+            if embedding_list and len(embedding_list) > 0:
+                return embedding_list[0]
+            else:
+                raise ValueError("Ollama returned empty embedding")
+        except Exception as ollama_error:
+            print(f"❌ ALL embedding methods failed: {ollama_error}")
+            raise ValueError(f"Embedding failed: {ollama_error}")
 
 def clean_text(input_text: str) -> str:
     """
@@ -2758,6 +2847,7 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
 
         # Step 2: Search within same user and same chat
         # JOIN with uploaded_files to filter by chat_history_id
+        print(f"🔍 Searching legacy documents for chat_id={chat_history_id}, threshold={threshold_text}, top_k={top_k}...")
         query = """
             SELECT 
                 t1.id AS page_embedding_id, 
@@ -2779,11 +2869,13 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
         cur.close()
 
         # Step 3: Return results
-
+        print(f"✅ Found {len(results)} legacy document matches")
+        
         # Show search results for debugging
-        print("Search Results:")
-        for row in results:
-            print(row[1] + " ==> " + str(row[5]))
+        if results:
+            print("Search Results:")
+            for row in results:
+                print(f"  - {row[1]} (distance: {row[5]:.4f})")
 
         return [
             {'id': row[0], 'file_name': row[1],'object_name' : row[2],'page_number' : row[3], 'text': row[4], 'distance': row[5]}
@@ -2880,31 +2972,34 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
             
             # Handle division by zero if all distances are identical (dist_range == 0)
             if dist_range == 0:
-                normalized_distance = 0.0
+                # If all distances are the same, all results are equally good
+                similarity_score = 1.0
             else:
                 # Min-Max normalization: (value - min) / (max - min)
                 normalized_distance = (original_distance - min_dist) / dist_range
+                # Convert distance to similarity: lower distance = higher similarity
+                similarity_score = 1.0 - normalized_distance
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'  # Show full precision
+            })
         
         print(f"processed_results : {processed_results}")
 
-        # Now, filter based on the *new* normalized threshold
-        final_normalized_threshold = 1.0
+        # Now, filter based on the *new* similarity threshold (higher is better)
+        similarity_threshold = 0.5  # Keep results with similarity >= 0.5
         final_filtered_results = [
             item for item in processed_results 
-            if item['normalized_distance'] <= final_normalized_threshold
+            if item['similarity_score'] >= similarity_threshold
         ]
         
-        print(f"ℹ️ Filtered to {len(final_filtered_results)} pages (normalized distance <= {final_normalized_threshold}).")
+        print(f"ℹ️ Filtered to {len(final_filtered_results)} pages (similarity_score >= {similarity_threshold}).")
         # --- END: New logic ---
 
         # Step 3: Return *final filtered* results
@@ -3030,22 +3125,28 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
         processed_results = []
         for row in results:
             original_distance = row[4]
-            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            if dist_range == 0:
+                similarity_score = 1.0
+            else:
+                normalized_distance = (original_distance - min_dist) / dist_range
+                similarity_score = 1.0 - normalized_distance
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'
+            })
 
         print(f"processed_results : {processed_results}")
         
-        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
-        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        # Filter by similarity threshold (higher is better)
+        similarity_threshold = 0.5
+        final_filtered_results = [item for item in processed_results if item['similarity_score'] >= similarity_threshold]
         
         return final_filtered_results
 
@@ -3160,22 +3261,28 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
         processed_results = []
         for row in results:
             original_distance = row[4]
-            normalized_distance = 0.0 if dist_range == 0 else (original_distance - min_dist) / dist_range
             
-            if normalized_distance < 0.5:
-                processed_results.append({
-                    'page_embedding_id': row[0],
-                    'file_name': row[1],
-                    'object_name': row[2],
-                    'page_number': row[3],
-                    'distance': original_distance,
-                    'normalized_distance': normalized_distance
-                })
+            if dist_range == 0:
+                similarity_score = 1.0
+            else:
+                normalized_distance = (original_distance - min_dist) / dist_range
+                similarity_score = 1.0 - normalized_distance
+            
+            processed_results.append({
+                'page_embedding_id': row[0],
+                'file_name': row[1],
+                'object_name': row[2],
+                'page_number': row[3],
+                'distance': original_distance,
+                'similarity_score': similarity_score,
+                'double-precision': f'{similarity_score:.10f}'
+            })
 
         print(f"processed_results : {processed_results}")
         
-        # Filter (keeping threshold 1.0 for normalized, or adjust to 0.3 if strict filtering is needed)
-        final_filtered_results = [item for item in processed_results if item['normalized_distance'] <= 1.0]
+        # Filter by similarity threshold (higher is better)
+        similarity_threshold = 0.5
+        final_filtered_results = [item for item in processed_results if item['similarity_score'] >= similarity_threshold]
         return final_filtered_results
     except Exception as e:
         print(f"Error in search_similar_pages_by_active_user_all: {e}")

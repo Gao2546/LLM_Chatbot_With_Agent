@@ -14,7 +14,7 @@ dotenv.config()
 
 const APP_SERVER_URL = process.env.APP_SERVER || 'http://localhost:3000'
 
-console.log(APP_SERVER_URL);
+console.log(`CORS configured for: ${APP_SERVER_URL}`);
 
 const app = express();
 app.use(express.json());

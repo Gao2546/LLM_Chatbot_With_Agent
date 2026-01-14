@@ -2807,9 +2807,10 @@ async function showVerifyModal(question, answer, verifyBtn) {
     `).join('');
     
     // Replace placeholders in template
+    let cleanAnswerForDisplay = formatMarkdownToHtml(cleanAnswer.substring(0, 800) + (cleanAnswer.length > 800 ? '...' : ''));
     let modalHTML = templateHTML
         .replace('{{QUESTION}}', escapeHtml(question))
-        .replace('{{ANSWER}}', escapeHtml(cleanAnswer.substring(0, 500)) + (cleanAnswer.length > 500 ? '...' : ''))
+        .replace('{{ANSWER}}', cleanAnswerForDisplay)
         .replace('{{TAGS}}', tagsHTML)
         .replace('{{DEPARTMENTS}}', departmentsHTML);
     
@@ -3146,6 +3147,60 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Helper function to strip markdown syntax from text
+function stripMarkdown(text) {
+    if (!text) return '';
+    return text
+        .replace(/\*\*\*(.+?)\*\*\*/g, '$1')  // Bold italic ***text***
+        .replace(/\*\*(.+?)\*\*/g, '$1')      // Bold **text**
+        .replace(/__(.+?)__/g, '$1')          // Bold __text__
+        .replace(/\*([^*]+?)\*/g, '$1')       // Italic *text*
+        .replace(/_([^_]+?)_/g, '$1')         // Italic _text_
+        .replace(/~~(.+?)~~/g, '$1')          // Strikethrough ~~text~~
+        .replace(/`(.+?)`/g, '$1')            // Code `text`
+        .replace(/^#{1,6}\s+/gm, '')          // Headers # text
+        .replace(/^\s*[-*+]\s+/gm, '• ')      // Bullet points - item → • item
+        .replace(/^\s*\d+\.\s+/gm, '')        // Numbered lists 1. item
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')  // Links [text](url)
+        .trim();
+}
+
+// Helper function to convert markdown to HTML (preserve formatting)
+function formatMarkdownToHtml(text) {
+    if (!text) return '';
+    
+    let formatted = text
+        .replace(/\r\n/g, '\n')  // Normalize line endings
+        .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+        .trim();
+    
+    // Convert markdown headers
+    formatted = formatted
+        .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+        .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^# (.+)$/gm, '<h2>$1</h2>');
+    
+    // Convert bold text with colon as section title (e.g., **หัวข้อ:**)
+    formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong>$1:</strong>');
+    
+    // Convert remaining bold
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert italic
+    formatted = formatted.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+    
+    // Convert bullet points
+    formatted = formatted.replace(/^\s*[-*+]\s+(.+)$/gm, '<li>$1</li>');
+    
+    // Wrap consecutive <li> items in <ul>
+    formatted = formatted.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    
+    // Convert line breaks to <br> for non-list content
+    formatted = formatted.replace(/\n(?!<)/g, '<br>');
+    
+    return formatted;
 }
 
 function goToCommunity(answerText) {

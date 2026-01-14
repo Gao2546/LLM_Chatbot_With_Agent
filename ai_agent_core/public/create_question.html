@@ -137,46 +137,48 @@
                     <!-- Verification Type Selection -->
                     <div class="form-section">
                         <label class="form-label">
-                            Verification type<span style="color: red;">*</span>
+                            <i class="fas fa-shield-check" style="margin-right: 6px; color: #017374;"></i>
+                            Verification
                         </label>
                         
-                        <div class="verification-box">
-                            <!-- Option 1: Self Verify -->
-                            <label class="verification-label">
-                                <input type="radio" name="verificationType" value="self" checked style="margin-top: 3px; cursor: pointer;">
-                                <div style="flex: 1; width: 100%;">
-                                    <div style="font-weight: 600; margin-bottom: 4px;">Verify this answer "by my department"</div>
-                                    <div class="verification-description">Submit answer that's verified by your department</div>
-                                    
-                                    <!-- Departments Box for Self Verification (shown when self is selected) -->
-                                    <div id="selfDepartmentsContainer" style="display: block;">
-                                        <div id="selfDepartmentsBox" class="departments-box departments-box-self" style="border: 2px solid #0a8276; margin-top: 12px;">
-                                            <!-- Will be populated by JavaScript -->
-                                        </div>
-                                    </div>
+                        <div class="verification-cards-container">
+                            <!-- Card 1: Self Verification -->
+                            <div class="verification-card verification-card-active" id="selfCard" onclick="selectVerificationCard('self')">
+                                <input type="radio" name="verificationType" value="self" checked style="display: none;">
+                                <div class="verification-card-header">
+                                    <i class="fas fa-building" style="color: #017374; font-size: 20px;"></i>
+                                    <span class="verification-card-title">Verified by my department</span>
                                 </div>
-                            </label>
+                                <div id="selfDepartmentsContainer" class="verification-card-content" style="display: block;">
+                                    <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 6px; display: block;">Select department:</label>
+                                    <select id="selfDepartmentSelect" class="verification-select">
+                                        <option value="">Select department</option>
+                                        <!-- Will be populated by JavaScript -->
+                                    </select>
+                                </div>
+                            </div>
 
-                            <!-- Option 2: Request Verification -->
-                            <label class="verification-label">
-                                <input type="radio" name="verificationType" value="request" style="margin-top: 3px; cursor: pointer;">
-                                <div style="flex: 1; width: 100%;">
-                                    <div style="font-weight: 600; margin-bottom: 4px;">Request verification from other department(s)</div>
-                                    <div class="verification-description">Request verification from specific departments with optional due date</div>
-                                    
-                                    <!-- Departments Box (shown when request is selected) -->
-                                    <div id="departmentsSelectContainer" style="display: none;">
-                                        <div id="departmentsBox" class="departments-box">
-                                            <!-- Will be populated by JavaScript -->
-                                        </div>
-                                    </div>
+                            <!-- Card 2: Request Verification -->
+                            <div class="verification-card" id="requestCard" onclick="selectVerificationCard('request')">
+                                <input type="radio" name="verificationType" value="request" style="display: none;">
+                                <div class="verification-card-header">
+                                    <i class="fas fa-users" style="color: #017374; font-size: 20px;"></i>
+                                    <span class="verification-card-title">Request verification from other departments</span>
                                 </div>
-                            </label>
+                                <div id="departmentsSelectContainer" class="verification-card-content" style="display: block;">
+                                    <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 6px; display: block;">Select department:</label>
+                                    <select id="requestDepartmentsSelect" class="verification-select" onchange="addRequestDepartment()" disabled>
+                                        <option value="">Select department</option>
+                                        <!-- Will be populated by JavaScript -->
+                                    </select>
+                                    <div id="selectedDepartmentsChips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Notify Me Checkbox -->
-                    <div class="form-section">
+                    <!-- Notify Me Checkbox - Hidden by default for self verification -->
+                    <div class="form-section" style="display: none;">
                         <label class="verify-checkbox-item-themed">
                             <input type="checkbox" id="notifyCheckbox" style="width: 18px; height: 18px; cursor: pointer; accent-color: #017374;">
                             <span class="verify-checkbox-text-themed">
@@ -221,6 +223,41 @@
     </div>
 
     <style>
+        /* CSS Variables for Theme Support */
+        :root {
+            /* Light theme (default) */
+            --text-color: #333;
+            --text-muted: #666;
+            --text-primary: #333;
+            --input-bg: #ffffff;
+            --border-color: #ccc;
+            --accent-color: #0a8276;
+            --accent-hover: #086b61;
+            --bg-secondary: #f5f5f5;
+        }
+
+        [data-theme="dark"] {
+            --text-color: #e0e0e0;
+            --text-muted: #999;
+            --text-primary: #e0e0e0;
+            --input-bg: #2d2d2d;
+            --border-color: #444;
+            --accent-color: #0a8276;
+            --accent-hover: #086b61;
+            --bg-secondary: #1e1e1e;
+        }
+
+        [data-theme="light"] {
+            --text-color: #333;
+            --text-muted: #666;
+            --text-primary: #333;
+            --input-bg: #ffffff;
+            --border-color: #ccc;
+            --accent-color: #0a8276;
+            --accent-hover: #086b61;
+            --bg-secondary: #f5f5f5;
+        }
+
         .form-section {
             margin-bottom: 30px;
         }
@@ -235,28 +272,18 @@
 
         .form-hint {
             font-size: 13px;
-            color: #666;
+            color: var(--text-muted);
             margin-bottom: 10px;
-        }
-
-        [data-theme="dark"] .form-hint {
-            color: #999;
         }
 
         .form-input {
             width: 100%;
             padding: 12px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             font-size: 14px;
-            background: white;
-            color: #333;
-        }
-
-        [data-theme="dark"] .form-input {
-            background: #2d2d2d;
-            color: #e0e0e0;
-            border-color: #444;
+            background: var(--input-bg);
+            color: var(--text-color);
         }
 
         .form-input:focus {
@@ -283,17 +310,6 @@
             color: var(--text-color);
             font-size: 13px;
             transition: all 0.2s;
-        }
-
-        [data-theme="dark"] .form-input-tags {
-            background: #2d2d2d;
-            color: #e0e0e0;
-            border-color: #444;
-        }
-
-        [data-theme="light"] .form-input-tags {
-            border: 1px solid #cccccc;
-            background: #fafafa;
         }
 
         .form-input-tags:focus {
@@ -362,54 +378,172 @@
             border-color: #ddd !important;
         }
 
-        /* Verification Box Styles */
-        .verification-box {
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 15px;
-            margin-top: 15px;
-            background: var(--input-bg);
-        }
-
-        [data-theme="light"] .verification-box {
-            background: #fafafa;
-            border-color: #ddd;
-        }
-
-        .verification-label {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            cursor: pointer;
-            margin-bottom: 15px;
-        }
-
-        .verification-label:last-child {
-            margin-bottom: 0;
-        }
-
-        .verification-description {
-            font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 12px;
-        }
-
-        .departments-box {
-            border: 2px solid var(--accent-color);
-            border-radius: 4px;
-            padding: 15px;
-            background: var(--input-bg);
-            min-height: 60px;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .departments-box-self {
+        /* Verification Cards Container */
+        .verification-cards-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
             margin-top: 12px;
         }
 
-        [data-theme="light"] .departments-box {
+        @media (max-width: 768px) {
+            .verification-cards-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Verification Card */
+        .verification-card {
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            background: var(--input-bg);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .verification-card:hover {
+            border-color: #017374;
+            box-shadow: 0 2px 8px rgba(1, 115, 116, 0.15);
+        }
+
+        .verification-card-active {
+            border-color: #017374;
+            background: rgba(1, 115, 116, 0.05);
+        }
+
+        [data-theme="light"] .verification-card {
             background: #ffffff;
+            border-color: #e0e0e0;
+        }
+
+        [data-theme="light"] .verification-card:hover {
+            border-color: #017374;
+        }
+
+        [data-theme="light"] .verification-card-active {
+            background: #e8f5f5;
+            border-color: #017374;
+        }
+
+        /* Card Header */
+        .verification-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .verification-card-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-color);
+        }
+
+        /* Card Content */
+        .verification-card-content {
+            margin-top: 12px;
+        }
+
+        /* Verification Select */
+        .verification-select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        /* Multiple select styling */
+        .verification-select[multiple] {
+            min-height: 120px;
+            padding: 4px;
+        }
+        
+        .verification-select[multiple] option {
+            padding: 6px 8px;
+            border-radius: 2px;
+            margin-bottom: 2px;
+        }
+        
+        .verification-select[multiple] option:checked {
+            background: linear-gradient(135deg, #017374 0%, #0a8276 100%);
+            color: white;
+        }
+
+        .verification-select:focus {
+            outline: none;
+            border-color: #017374;
+            box-shadow: 0 0 0 2px rgba(1, 115, 116, 0.1);
+        }
+        
+        .verification-select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--bg-secondary);
+        }
+
+        [data-theme="light"] .verification-select {
+            background: #ffffff;
+            border-color: #ddd;
+        }
+        
+        [data-theme="light"] .verification-select[multiple] option:checked {
+            background: linear-gradient(135deg, #017374 0%, #0a8276 100%);
+            color: white;
+        }
+
+        /* Department Chips */
+        .department-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: linear-gradient(135deg, #017374 0%, #0a8276 100%);
+            color: white;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .department-chip .remove-chip {
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .department-chip .remove-chip:hover {
+            opacity: 1;
+        }
+
+        /* Placeholder Button */
+        .verification-placeholder-btn {
+            width: 100%;
+            padding: 10px;
+            border: 1px dashed var(--border-color);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .verification-placeholder-btn:hover {
+            border-color: #017374;
+            color: #017374;
+            background: rgba(1, 115, 116, 0.05);
+        }
+
+        [data-theme="light"] .verification-placeholder-btn {
+            border-color: #ccc;
         }
 
         /* Notify Checkbox Themed Styles */
@@ -468,17 +602,11 @@
             border: 2px solid #017374;
             border-radius: 4px;
             padding: 15px;
-            background: white;
-            color: #333;
+            background: var(--input-bg);
+            color: var(--text-color);
             min-height: 100px;
             max-height: 250px;
             overflow-y: auto;
-        }
-
-        [data-theme="dark"] #departmentsBox {
-            background: #2d2d2d;
-            border-color: #017374;
-            color: #e0e0e0;
         }
 
         #departmentsBox label {
@@ -510,40 +638,28 @@
         .form-textarea {
             width: 100%;
             padding: 12px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--border-color);
             border-radius: 0 0 4px 4px;
             font-size: 14px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             resize: vertical;
-            background: white;
-            color: #333;
+            background: var(--input-bg);
+            color: var(--text-color);
         }
 
-        [data-theme="dark"] .form-textarea {
-            background: #2d2d2d;
-            color: #e0e0e0;
-            border-color: #444;
-        }
-
-        [data-theme="dark"] .form-textarea::placeholder {
-            color: #ffffff;
-            opacity: 1;
+        .form-textarea::placeholder {
+            color: var(--text-muted);
         }
 
         .editor-toolbar {
             display: flex;
             gap: 2px;
             padding: 8px;
-            background: #f5f5f5;
-            border: 1px solid #ccc;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             border-bottom: none;
             border-radius: 4px 4px 0 0;
             flex-wrap: wrap;
-        }
-
-        [data-theme="dark"] .editor-toolbar {
-            background: #1e1e1e;
-            border-color: #444;
         }
 
         .editor-btn {
@@ -552,22 +668,13 @@
             border: 1px solid transparent;
             border-radius: 3px;
             cursor: pointer;
-            color: #666;
+            color: var(--text-muted);
             font-size: 14px;
         }
 
         .editor-btn:hover {
-            background: #e0e0e0;
-            color: #333;
-        }
-
-        [data-theme="dark"] .editor-btn {
-            color: #999;
-        }
-
-        [data-theme="dark"] .editor-btn:hover {
-            background: #2d2d2d;
-            color: #e0e0e0;
+            background: var(--border-color);
+            color: var(--text-color);
         }
 
         .tags-input-container {
@@ -576,23 +683,18 @@
 
         /* File Upload Styles */
         .file-drop-zone {
-            border: 2px dashed #ccc;
+            border: 2px dashed var(--border-color);
             border-radius: 8px;
             padding: 40px 20px;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            background: #f9f9f9;
-        }
-
-        [data-theme="dark"] .file-drop-zone {
-            background: #1a1a1a;
-            border-color: #444;
+            background: var(--bg-secondary);
         }
 
         .file-drop-zone:hover {
             border-color: #017374;
-            background: #f0f8ff;
+            background: rgba(1, 115, 116, 0.05);
         }
 
         [data-theme="dark"] .file-drop-zone:hover {
@@ -602,7 +704,7 @@
 
         .file-drop-zone.drag-over {
             border-color: #017374;
-            background: #e6f7ff;
+            background: rgba(1, 115, 116, 0.1);
             box-shadow: 0 0 10px rgba(1, 115, 116, 0.2);
         }
 
@@ -616,10 +718,10 @@
             align-items: center;
             gap: 6px;
             padding: 8px 12px;
-            background: white;
+            background: var(--input-bg);
             border: 2px dashed #4caf50;
             border-radius: 4px;
-            color: #4caf50;
+            color: #66bb6a;
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
@@ -628,9 +730,9 @@
         }
 
         .file-upload-btn-small:hover {
-            background: rgba(76, 175, 80, 0.05);
-            border-color: #45a049;
-            color: #45a049;
+            background: rgba(76, 175, 80, 0.1);
+            border-color: #66bb6a;
+            color: #81c784;
             box-shadow: 0 2px 6px rgba(76, 175, 80, 0.2);
         }
 
@@ -648,18 +750,6 @@
             background: rgba(76, 175, 80, 0.05);
             border-color: #45a049;
             color: #45a049;
-        }
-
-        [data-theme="dark"] .file-upload-btn-small {
-            background: #1e1e1e;
-            border-color: #4caf50;
-            color: #66bb6a;
-        }
-
-        [data-theme="dark"] .file-upload-btn-small:hover {
-            background: rgba(76, 175, 80, 0.1);
-            border-color: #66bb6a;
-            color: #81c784;
         }
 
         /* Files List Styling */
@@ -683,15 +773,10 @@
         }
 
         .files-list {
-            background: #f5f5f5;
-            border: 1px solid #ddd;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             padding: 15px;
-        }
-
-        [data-theme="dark"] .files-list {
-            background: #1e1e1e;
-            border-color: #444;
         }
 
         .file-item {
@@ -699,14 +784,10 @@
             align-items: center;
             justify-content: space-between;
             padding: 12px;
-            background: white;
+            background: var(--input-bg);
             border-radius: 4px;
             margin-bottom: 10px;
             border-left: 4px solid #017374;
-        }
-
-        [data-theme="dark"] .file-item {
-            background: #2d2d2d;
         }
 
         .file-item:last-child {
@@ -798,17 +879,11 @@
 
         .btn-cancel {
             padding: 10px 20px;
-            background: white;
-            color: #333;
-            border: 1px solid #ccc;
+            background: var(--input-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             cursor: pointer;
-        }
-
-        [data-theme="dark"] .btn-cancel {
-            background: #2d2d2d;
-            color: #e0e0e0;
-            border-color: #444;
         }
 
         /* Notify Checkbox Styles */
@@ -835,22 +910,14 @@
             display: flex;
             align-items: center;
             padding: 10px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             cursor: pointer;
             transition: background 0.2s;
         }
 
         .dept-checkbox-label:hover {
-            background: #f5f5f5;
-        }
-
-        [data-theme="dark"] .dept-checkbox-label {
-            border-color: #444;
-        }
-
-        [data-theme="dark"] .dept-checkbox-label:hover {
-            background: #2d2d2d;
+            background: var(--bg-secondary);
         }
 
         .dept-checkbox {
@@ -870,36 +937,22 @@
             display: none;
         }
 
-        [data-theme="dark"] #departmentsSection {
-            background: transparent;
-            border: none;
-        }
-
         #departmentsCheckboxGroup {
             display: flex;
             flex-direction: column;
             gap: 0;
-            background: white;
-            border: 1px solid #ccc;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             overflow: hidden;
             margin-top: 10px;
         }
 
-        [data-theme="dark"] #departmentsCheckboxGroup {
-            background: #1e1e1e;
-            border-color: #444;
-        }
-
         #departmentsCheckboxGroup label {
             padding: 12px !important;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--border-color);
             margin: 0;
             transition: background 0.2s;
-        }
-
-        [data-theme="dark"] #departmentsCheckboxGroup label {
-            border-bottom-color: #333;
         }
 
         #departmentsCheckboxGroup label:last-child {
@@ -907,11 +960,7 @@
         }
 
         #departmentsCheckboxGroup label:hover {
-            background: #f9f9f9;
-        }
-
-        [data-theme="dark"] #departmentsCheckboxGroup label:hover {
-            background: #2d2d2d;
+            background: var(--bg-secondary);
         }
 
         #departmentsCheckboxGroup input[type="checkbox"] {
@@ -920,18 +969,13 @@
 
         /* Preview Pane Styles */
         #previewPane {
-            border: 1px solid #ddd !important;
+            border: 1px solid var(--border-color) !important;
             border-radius: 4px !important;
             padding: 15px !important;
             max-height: 400px !important;
             overflow-y: auto !important;
-            background: #f9f9f9 !important;
-        }
-
-        [data-theme="dark"] #previewPane {
-            background: #2d2d2d !important;
-            border-color: #444 !important;
-            color: #e0e0e0;
+            background: var(--bg-secondary) !important;
+            color: var(--text-color);
         }
 
         #previewContent {
@@ -961,29 +1005,19 @@
         }
 
         #previewContent code {
-            background: #e8e8e8;
+            background: var(--bg-secondary);
             padding: 2px 6px;
             border-radius: 3px;
             font-family: 'Courier New', monospace;
             font-size: 13px;
         }
 
-        [data-theme="dark"] #previewContent code {
-            background: #1a1a1a;
-            color: #f0f0f0;
-        }
-
         #previewContent pre {
-            background: #e8e8e8;
+            background: var(--bg-secondary);
             padding: 12px;
             border-radius: 4px;
             overflow-x: auto;
             margin: 10px 0;
-        }
-
-        [data-theme="dark"] #previewContent pre {
-            background: #1a1a1a;
-            color: #f0f0f0;
         }
 
         #previewContent ul,
@@ -997,16 +1031,11 @@
         }
 
         #previewContent blockquote {
-            border-left: 4px solid #ddd;
+            border-left: 4px solid var(--border-color);
             padding-left: 12px;
             margin: 10px 0;
-            color: #666;
+            color: var(--text-muted);
             font-style: italic;
-        }
-
-        [data-theme="dark"] #previewContent blockquote {
-            border-left-color: #444;
-            color: #aaa;
         }
 
         #previewContent table {
@@ -1017,23 +1046,14 @@
 
         #previewContent table th,
         #previewContent table td {
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color);
             padding: 8px 12px;
             text-align: left;
         }
 
-        [data-theme="dark"] #previewContent table th,
-        [data-theme="dark"] #previewContent table td {
-            border-color: #444;
-        }
-
         #previewContent table th {
-            background: #f0f0f0;
+            background: var(--bg-secondary);
             font-weight: 600;
-        }
-
-        [data-theme="dark"] #previewContent table th {
-            background: #1a1a1a;
         }
 
         #previewContent img {
@@ -1056,11 +1076,11 @@
         #departmentsDropdown {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             font-size: 14px;
-            background: white;
-            color: #333;
+            background: var(--input-bg);
+            color: var(--text-color);
             cursor: pointer;
             font-family: inherit;
             transition: border-color 0.2s, box-shadow 0.2s;
@@ -1079,32 +1099,11 @@
             box-shadow: 0 0 0 3px rgba(10, 149, 255, 0.2);
         }
 
-        [data-theme="dark"] #departmentsDropdown {
-            background: #1e1e1e;
-            border-color: #444;
-            color: #fff;
-        }
-
-        [data-theme="dark"] #departmentsDropdown:hover {
-            border-color: #0a95ff;
-            box-shadow: 0 0 0 2px rgba(10, 149, 255, 0.2);
-        }
-
-        [data-theme="dark"] #departmentsDropdown:focus {
-            border-color: #0a95ff;
-            box-shadow: 0 0 0 3px rgba(10, 149, 255, 0.3);
-        }
-
         #departmentsDropdown option {
             padding: 8px;
-            background: white;
-            color: #333;
+            background: var(--input-bg);
+            color: var(--text-color);
             font-size: 14px;
-        }
-
-        [data-theme="dark"] #departmentsDropdown option {
-            background: #1e1e1e;
-            color: #fff;
         }
 
         #departmentsDropdown option:checked {
@@ -1124,17 +1123,64 @@
         #departmentsSection.hidden {
             display: none;
         }
-
-        [data-theme="dark"] #departmentsSection {
-            background: transparent;
-            border: none;
-        }
     </style>
 
     <script>
         let currentUserId = null;
-        const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'PE', 'QA', 'IT'];
+        const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
         let selectedFiles = []; // Store selected files for submission
+        
+        // Tags array - MUST be declared at top level so all functions can access it
+        let customTags = [];
+        let selectedRequestDepartments = []; // Array to store selected departments for request verification
+
+        // Add department to request verification list
+        function addRequestDepartment() {
+            const select = document.getElementById('requestDepartmentsSelect');
+            const selectedValue = select.value;
+            
+            if (!selectedValue) return;
+            
+            // Check if already selected
+            if (selectedRequestDepartments.includes(selectedValue)) {
+                alert('This department is already selected');
+                select.value = '';
+                return;
+            }
+            
+            // Add to array
+            selectedRequestDepartments.push(selectedValue);
+            
+            // Reset dropdown
+            select.value = '';
+            
+            // Update chips display
+            renderRequestDepartmentChips();
+        }
+
+        // Remove department from request verification list
+        function removeRequestDepartment(dept) {
+            selectedRequestDepartments = selectedRequestDepartments.filter(d => d !== dept);
+            renderRequestDepartmentChips();
+        }
+
+        // Render department chips
+        function renderRequestDepartmentChips() {
+            const container = document.getElementById('selectedDepartmentsChips');
+            if (!container) return;
+            
+            if (selectedRequestDepartments.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            container.innerHTML = selectedRequestDepartments.map(dept => `
+                <span class="department-chip">
+                    ${dept}
+                    <span class="remove-chip" onclick="removeRequestDepartment('${dept}')" title="Remove">×</span>
+                </span>
+            `).join('');
+        }
         
         // Initialize markdown-it
         const md = window.markdownit({
@@ -1240,7 +1286,7 @@
             if (allQuestions.length === 0) {
                 const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
                 if (hotQuestionsDiv) {
-                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center; font-size: 13px;">No questions yet</div>';
                 }
                 return;
             }
@@ -1254,18 +1300,17 @@
                 })
                 .slice(0, 3);
 
-            // Update Hot Questions list
+            // Update Hot Questions list with consistent styling
             const hotQuestionsDiv = document.getElementById('sidebarHotQuestions');
             if (hotQuestionsDiv) {
-                hotQuestionsDiv.innerHTML = topQuestions.map(q => {
-                    const scoreDisplay = q.score || 0;
-                    const title = escapeHtml(q.question || q.question_title || 'Untitled');
-                    return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" title="Score: ${scoreDisplay}">${title}</a>`;
-                }).join('');
-
-                // If no questions, show placeholder
                 if (topQuestions.length === 0) {
-                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center;">No questions yet</div>';
+                    hotQuestionsDiv.innerHTML = '<div style="color: #999; padding: 10px; text-align: center; font-size: 13px;">No questions yet</div>';
+                } else {
+                    hotQuestionsDiv.innerHTML = topQuestions.map((q, idx) => {
+                        const scoreDisplay = q.score || 0;
+                        const title = escapeHtml(q.question || q.question_title || 'Untitled');
+                        return `<a href="comment.html?id=${q.id}" class="mini-link" onclick="event.stopPropagation()" style="display: flex; align-items: center; gap: 8px;" title="Score: ${scoreDisplay}"><span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span></a>`;
+                    }).join('');
                 }
             }
         }
@@ -1338,26 +1383,74 @@
         // Setup verification type selection
         function setupVerificationType() {
             const radios = document.querySelectorAll('input[name="verificationType"]');
-            const requestDepartmentsContainer = document.getElementById('departmentsSelectContainer');
-            const selfDepartmentsContainer = document.getElementById('selfDepartmentsContainer');
+            const notifySection = document.getElementById('notifyCheckbox')?.closest('.form-section');
 
             radios.forEach(radio => {
                 radio.addEventListener('change', (e) => {
                     if (e.target.value === 'request') {
-                        // Show request departments, hide self departments
-                        requestDepartmentsContainer.style.display = 'block';
-                        selfDepartmentsContainer.style.display = 'none';
+                        // Show notify checkbox for request verification
+                        if (notifySection) {
+                            notifySection.style.display = 'block';
+                        }
                     } else {
-                        // Show self departments, hide request departments
-                        selfDepartmentsContainer.style.display = 'block';
-                        requestDepartmentsContainer.style.display = 'none';
+                        // Clear selected request departments when switching to self
+                        selectedRequestDepartments = [];
+                        renderRequestDepartmentChips();
+                        // Hide notify checkbox for self verification
+                        if (notifySection) {
+                            notifySection.style.display = 'none';
+                        }
                     }
                 });
             });
             
-            // Initialize: show self by default since "self" is checked first
-            requestDepartmentsContainer.style.display = 'none';
-            selfDepartmentsContainer.style.display = 'block';
+            // Initialize: hide notify checkbox by default (self is selected)
+            if (notifySection) {
+                notifySection.style.display = 'none';
+            }
+        }
+
+        // Handle card selection
+        function selectVerificationCard(type) {
+            const selfCard = document.getElementById('selfCard');
+            const requestCard = document.getElementById('requestCard');
+            const selfRadio = document.querySelector('input[name="verificationType"][value="self"]');
+            const requestRadio = document.querySelector('input[name="verificationType"][value="request"]');
+            const selfSelect = document.getElementById('selfDepartmentSelect');
+            const requestSelect = document.getElementById('requestDepartmentsSelect');
+            
+            // Get notify section
+            const notifyCheckbox = document.getElementById('notifyCheckbox');
+            const notifySection = notifyCheckbox?.closest('.form-section');
+
+            if (type === 'self') {
+                // Highlight self card, unhighlight request card
+                selfCard.classList.add('verification-card-active');
+                requestCard.classList.remove('verification-card-active');
+                selfRadio.checked = true;
+                requestRadio.checked = false;
+                // Enable self dropdown, disable request dropdown
+                selfSelect.disabled = false;
+                requestSelect.disabled = true;
+                // Hide notify section for self verification
+                if (notifySection) notifySection.style.display = 'none';
+            } else {
+                // Highlight request card, unhighlight self card
+                requestCard.classList.add('verification-card-active');
+                selfCard.classList.remove('verification-card-active');
+                requestRadio.checked = true;
+                selfRadio.checked = false;
+                // Disable self dropdown, enable request dropdown
+                selfSelect.disabled = true;
+                requestSelect.disabled = false;
+                // Show notify section for request verification
+                if (notifySection) notifySection.style.display = 'block';
+            }
+        }
+
+        // Placeholder function for request verification modal
+        function showRequestVerificationModal() {
+            alert('Request verification modal coming soon!\\n\\nThis will allow you to:\\n- Select multiple departments\\n- Set a due date\\n- Add verification notes');
         }
 
         // Setup file upload functionality
@@ -1467,36 +1560,39 @@
 
         // Initialize departments checkbox group
         function initializeDepartmentsDropdown() {
-            const departmentsBox = document.getElementById('departmentsBox');
-            const selfDepartmentsBox = document.getElementById('selfDepartmentsBox');
+            const selfDepartmentSelect = document.getElementById('selfDepartmentSelect');
+            const requestDepartmentsSelect = document.getElementById('requestDepartmentsSelect');
             
-            // Populate request departments (multiple select)
-            if (departmentsBox) {
-                departmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                    <label class="dept-label">
-                        <input type="checkbox" class="dept-checkbox" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
-                        <span class="dept-label-text">${dept}</span>
-                    </label>
-                `).join('');
+            // Populate self department select dropdown
+            if (selfDepartmentSelect) {
+                AVAILABLE_DEPARTMENTS.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept;
+                    option.textContent = dept;
+                    selfDepartmentSelect.appendChild(option);
+                });
             }
             
-            // Populate self departments (single select - radio buttons)
-            if (selfDepartmentsBox) {
-                selfDepartmentsBox.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
-                    <label class="dept-label">
-                        <input type="radio" name="selfDepartment" class="self-dept-radio" value="${dept}" style="margin-right: 10px; cursor: pointer; width: 18px; height: 18px;">
-                        <span class="dept-label-text">${dept}</span>
-                    </label>
-                `).join('');
+            // Populate request departments select dropdown (multiple)
+            if (requestDepartmentsSelect) {
+                AVAILABLE_DEPARTMENTS.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept;
+                    option.textContent = dept;
+                    requestDepartmentsSelect.appendChild(option);
+                });
             }
         }
 
-        // Main submit function
+        // Main submit function (customTags is now declared at top of script)
         async function submitQuestion() {
             const title = document.getElementById('questionTitle').value.trim();
             const body = tinymce.get('questionBody') ? tinymce.get('questionBody').getContent() : document.getElementById('questionBody').value;
             const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
             const notifyMe = document.getElementById('notifyCheckbox').checked; // Get notify_me value
+
+            console.log('🏷️ customTags before submit:', customTags);
+            console.log('🏷️ customTags length:', customTags.length);
 
             if (!title) {
                 alert('Please enter a title');
@@ -1533,21 +1629,22 @@
                 // Get departments based on verification type
                 let selectedDepts = [];
                 if (verificationType === 'request') {
-                    selectedDepts = Array.from(document.querySelectorAll('#departmentsBox .dept-checkbox:checked'))
-                        .map(cb => cb.value);
-
+                    // Get selected departments from the array
+                    selectedDepts = [...selectedRequestDepartments];
+                    
                     if (selectedDepts.length === 0) {
-                        alert('Please select at least one department');
+                        alert('Please select at least one department for verification request');
                         return;
                     }
                 } else if (verificationType === 'self') {
-                    selectedDepts = Array.from(document.querySelectorAll('#selfDepartmentsBox .self-dept-radio:checked'))
-                        .map(cb => cb.value);
+                    const selfDeptSelect = document.getElementById('selfDepartmentSelect');
+                    const selectedDept = selfDeptSelect?.value;
 
-                    if (selectedDepts.length === 0) {
+                    if (!selectedDept) {
                         alert('Please select your department');
                         return;
                     }
+                    selectedDepts = [selectedDept];
                 }
 
                 // Add selected departments to payload
@@ -1622,12 +1719,12 @@
             }
         }
 
-        // Tags functionality
-        let customTags = [];
-
+        // Tags functionality (customTags is declared at top of script block)
         function addCustomTag() {
             const input = document.getElementById('questionTags');
             const tagName = input.value.trim();
+            
+            console.log('🏷️ addCustomTag called, tagName:', tagName);
             
             if (!tagName) {
                 return;
@@ -1644,6 +1741,7 @@
             }
             
             customTags.push(tagName);
+            console.log('🏷️ Tag added, customTags now:', customTags);
             renderCustomTags();
             input.value = '';
         }
@@ -1665,14 +1763,30 @@
             `).join('');
         }
 
-        // Add tag button click event
-        document.getElementById('addTagBtn').addEventListener('click', addCustomTag);
-
-        // Add tag on Enter key press
-        document.getElementById('questionTags').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                addCustomTag();
+        // Add tag button click event - use DOMContentLoaded to ensure elements exist
+        document.addEventListener('DOMContentLoaded', function() {
+            const addTagBtn = document.getElementById('addTagBtn');
+            const questionTagsInput = document.getElementById('questionTags');
+            
+            console.log('🏷️ Setting up tag listeners...');
+            console.log('🏷️ addTagBtn found:', !!addTagBtn);
+            console.log('🏷️ questionTagsInput found:', !!questionTagsInput);
+            
+            if (addTagBtn) {
+                addTagBtn.addEventListener('click', function() {
+                    console.log('🏷️ Add button clicked!');
+                    addCustomTag();
+                });
+            }
+            
+            if (questionTagsInput) {
+                questionTagsInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        console.log('🏷️ Enter pressed!');
+                        e.preventDefault();
+                        addCustomTag();
+                    }
+                });
             }
         });
 

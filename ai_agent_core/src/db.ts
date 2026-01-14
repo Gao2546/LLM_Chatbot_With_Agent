@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     chat_history_id INTEGER NOT NULL,
     uploaded_file_id INTEGER NOT NULL,
     extracted_text TEXT,
-    embedding VECTOR(1024),
+    embedding VECTOR(2048),
     page_number INTEGER DEFAULT -1, -- <<< NEW/UPDATED COLUMN
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
@@ -169,10 +169,12 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     id SERIAL PRIMARY KEY,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
+    sum_verified_answer TEXT,
     tags TEXT[],
     verification_type VARCHAR(50) DEFAULT 'staging',
     question_embedding VECTOR(1024),
     answer_embedding VECTOR(1024),
+    sum_verified_answer_embedding VECTOR(1024),
     views INT DEFAULT 0,
     requested_departments TEXT[],
     notify_me BOOLEAN DEFAULT FALSE,
@@ -188,6 +190,9 @@ ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS idx_verified_answers_answer_embedding 
 ON verified_answers USING ivfflat (answer_embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_sum_embedding 
+ON verified_answers USING ivfflat (sum_verified_answer_embedding vector_cosine_ops);
 `;
 
 const createAnswerVerificationsTableQuery = `
@@ -233,6 +238,28 @@ CREATE INDEX IF NOT EXISTS idx_comments_question
 ON comments(question_id);
 `;
 
+// Additional indexes for optimization
+const createOptimizationIndexesQuery = `
+-- Index for verified_answers commonly used filters
+CREATE INDEX IF NOT EXISTS idx_verified_answers_verification_type 
+ON verified_answers(verification_type);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_created_at 
+ON verified_answers(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_verified_answers_created_by 
+ON verified_answers(created_by);
+
+-- Composite index for common query patterns
+CREATE INDEX IF NOT EXISTS idx_verified_answers_type_embedding 
+ON verified_answers(verification_type) 
+WHERE question_embedding IS NOT NULL;
+
+-- Index for tags array search
+CREATE INDEX IF NOT EXISTS idx_verified_answers_tags 
+ON verified_answers USING GIN(tags);
+`;
+
 // Question Votes table for Stack Overflow style voting
 const createQuestionVotesTableQuery = `
 CREATE TABLE IF NOT EXISTS question_votes (
@@ -271,6 +298,26 @@ CREATE INDEX IF NOT EXISTS idx_question_attachments_question
 ON question_attachments(question_id);
 `;
 
+// Notifications table - tracks when users want to be notified for questions
+const createNotificationsTableQuery = `
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    question_id INT NOT NULL REFERENCES verified_answers(id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    verified_by_name VARCHAR(255),
+    verified_by_department VARCHAR(255),
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(question_id, user_id)
+);
+`;
+
+const createNotificationsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_question ON notifications(question_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+`;
+
 // ALTER TABLE to add missing columns
 const alterVerifiedAnswersAddNotifyMeQuery = `
 DO $$
@@ -293,6 +340,29 @@ BEGIN
         WHERE table_name='verified_answers' AND column_name='tags'
     ) THEN
         ALTER TABLE verified_answers ADD COLUMN tags TEXT[];
+    END IF;
+END
+$$;
+`;
+
+// ALTER TABLE to add sum_verified_answer columns
+const alterVerifiedAnswersAddSumColumnsQuery = `
+DO $$
+BEGIN
+    -- Add sum_verified_answer column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='sum_verified_answer'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer TEXT;
+    END IF;
+    
+    -- Add sum_verified_answer_embedding column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='verified_answers' AND column_name='sum_verified_answer_embedding'
+    ) THEN
+        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer_embedding VECTOR(1024);
     END IF;
 END
 $$;
@@ -444,6 +514,10 @@ async function initializeDatabase() {
     await pool.query(createVerifiedAnswersTableQuery);
     console.log('DB: Verified answers table created or already exists');
 
+    // ⭐ ADD COLUMNS FIRST BEFORE CREATING INDEXES
+    await pool.query(alterVerifiedAnswersAddSumColumnsQuery);
+    console.log('DB: sum_verified_answer columns added to verified_answers');
+
     await pool.query(createVerifiedAnswersIndexQuery);
     console.log('DB: Verified answers index created or already exists');
 
@@ -460,6 +534,10 @@ async function initializeDatabase() {
     await pool.query(createCommentsIndexQuery);
     console.log('DB: Comments index created or already exists');
 
+    // Create optimization indexes
+    await pool.query(createOptimizationIndexesQuery);
+    console.log('DB: Optimization indexes created or already exists');
+
     // Create question votes table
     await pool.query(createQuestionVotesTableQuery);
     console.log('DB: Question votes table created or already exists');
@@ -473,6 +551,14 @@ async function initializeDatabase() {
 
     await pool.query(createQuestionAttachmentsIndexQuery);
     console.log('DB: Question attachments index created or already exists');
+
+    // Create notifications table
+    await pool.query(createNotificationsTableQuery);
+    console.log('DB: Notifications table created or already exists');
+
+    await pool.query(createNotificationsIndexQuery);
+    console.log('DB: Notifications indexes created or already exists');
+
     // Add verification_type and requested_departments columns if not exists
     await pool.query(`
       DO $$
@@ -514,10 +600,19 @@ async function initializeDatabase() {
     `);
     console.log('DB: verification_type, requested_departments, due_date, and attachments columns added');
 
-    // DROP rating column if exists
+    // DROP rating column and its CHECK constraint if exists
     await pool.query(`
       DO $$
       BEGIN
+        -- Drop the CHECK constraint first if it exists
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'answer_verifications_rating_check'
+        ) THEN
+          ALTER TABLE answer_verifications DROP CONSTRAINT answer_verifications_rating_check;
+        END IF;
+        
+        -- Then drop the rating column if it exists
         IF EXISTS (
           SELECT 1 FROM information_schema.columns
           WHERE table_name='answer_verifications' AND column_name='rating'
@@ -527,7 +622,7 @@ async function initializeDatabase() {
       END
       $$;
     `);
-    console.log('DB: rating column removed from answer_verifications table');
+    console.log('DB: rating column and constraint removed from answer_verifications table');
 
     // DROP department, due_date columns if exists from verified_answers
     // But keep created_by column if it exists
@@ -608,6 +703,9 @@ async function initializeDatabase() {
   try {
     await initializeDatabase();
     console.log('✅ Database initialization complete');
+    
+    // Initialize AI Suggestions tables (NEW)
+    await initializeAISuggestionsTables();
   } catch (error) {
     console.error('❌ FATAL: Database initialization failed:', error);
     process.exit(1);
@@ -1159,15 +1257,16 @@ async function saveVerifiedAnswer(
       // Answer already exists - get its ID
       answerId = existingAnswer.rows[0].id;
       
-      // Update verification_type and requested_departments if provided
-      if (verificationType || requestedDepartments) {
-        await pool.query(
-          `UPDATE verified_answers 
-           SET verification_type = $1, requested_departments = $2
-           WHERE id = $3`,
-          [verificationType || 'self', requestedDepartments || [], answerId]
-        );
-      }
+      // Update verification_type, requested_departments, and tags if provided
+      await pool.query(
+        `UPDATE verified_answers 
+         SET verification_type = COALESCE($1, verification_type),
+             requested_departments = COALESCE($2, requested_departments),
+             tags = COALESCE($3, tags),
+             last_updated_at = NOW()
+         WHERE id = $4`,
+        [verificationType || 'self', requestedDepartments || [], tags || [], answerId]
+      );
     } else {
       // Answer doesn't exist - create new one
       // Format embeddings as PostgreSQL vector string (allow NULL if no embedding)
@@ -1214,8 +1313,70 @@ async function saveVerifiedAnswer(
 }
 
 /**
+ * Trigger notifications for all users who enabled notifications for a question
+ * Get users with notify_me=true from verified_answers, create notification records
+ */
+async function triggerNotificationsForQuestion(
+  questionId: number,
+  verifiedByName: string = 'Anonymous',
+  verifiedByDepartment: string = ''
+) {
+  try {
+    // Get the user who created this question and has notify_me = true
+    // Join with users table to get user_id from created_by username
+    const result = await pool.query(
+      `SELECT u.id as user_id, va.created_by
+       FROM verified_answers va
+       JOIN users u ON u.username = va.created_by
+       WHERE va.id = $1 AND va.notify_me = true`,
+      [questionId]
+    );
+
+    if (result.rows.length === 0) {
+      console.log(`No users to notify for question ${questionId} (notify_me not enabled or user not found)`);
+      return;
+    }
+
+    // For each user, create a notification
+    for (const row of result.rows) {
+      const userId = row.user_id;
+      const createdBy = row.created_by;
+      
+      // ✅ Don't send notification if the verifier is the question creator (self-verification)
+      // This means the request shows "✓ Requested by username" and should not trigger bell notification
+      if (verifiedByName === createdBy) {
+        console.log(`⏭️ Skipping notification for question ${questionId} - self-verification by ${verifiedByName}`);
+        continue;
+      }
+      
+      try {
+        await pool.query(
+          `INSERT INTO notifications (question_id, user_id, verified_by_name, verified_by_department, is_read)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (question_id, user_id) DO UPDATE SET
+             verified_by_name = EXCLUDED.verified_by_name,
+             verified_by_department = EXCLUDED.verified_by_department,
+             is_read = FALSE,
+             created_at = NOW()`,
+          [questionId, userId, verifiedByName, verifiedByDepartment, false]
+        );
+      } catch (err) {
+        console.error(`Error creating notification for user ${userId}:`, err);
+        // Continue with other users
+      }
+    }
+
+    console.log(`✅ Triggered notifications for ${result.rows.length} users for question ${questionId}`);
+  } catch (error) {
+    console.error('Error triggering notifications:', error);
+    // Don't fail the verification if notifications fail
+  }
+}
+
+/**
  * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
  * Searches for verified answers using vector similarity
+ * Searches both question_embedding AND answer_embedding for better matching
  */
 async function searchVerifiedAnswers(
   questionEmbedding: number[],
@@ -1232,19 +1393,59 @@ async function searchVerifiedAnswers(
     // Format embedding as PostgreSQL vector string
     const embeddingStr = `[${questionEmbedding.join(',')}]`;
 
+    // First, check how many verified answers have embeddings
+    const countResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total,
+        COUNT(question_embedding) as with_q_emb,
+        COUNT(sum_verified_answer_embedding) as with_sum_emb,
+        COUNT(CASE WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL THEN 1 END) as request_with_sum
+      FROM verified_answers
+    `);
+    console.log('📊 Verified Answers Stats:', countResult.rows[0]);
+
+    // Search using question and answer embeddings, prioritize sum_verified_answer for request type
+    // For 'request' type with sum_verified_answer, use it; otherwise use regular answer
+    // IMPORTANT: Include questions that have sum_verified_answer_embedding even if question_embedding is NULL
     const result = await pool.query(
       `SELECT 
         id,
         question,
-        answer,
+        CASE 
+          WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL 
+          THEN sum_verified_answer
+          ELSE answer
+        END as answer,
+        verification_type,
         created_by,
-        1 - (question_embedding <-> $1) as similarity
+        tags,
+        GREATEST(
+          COALESCE(1 - (question_embedding <-> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <-> $1::vector), 0),
+          CASE 
+            WHEN sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (sum_verified_answer_embedding <-> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity
        FROM verified_answers
-       WHERE 1 - (question_embedding <-> $1) > $2
+       WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+         AND (
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <-> $1::vector) > $2)
+         )
        ORDER BY similarity DESC
        LIMIT $3`,
       [embeddingStr, threshold, limit]
     );
+
+    console.log(`🔍 searchVerifiedAnswers: threshold=${threshold}, found ${result.rows.length} results`);
+    if (result.rows.length > 0) {
+      result.rows.forEach((row, idx) => {
+        console.log(`  ${idx + 1}. Q${row.id} (${row.verification_type}): similarity=${row.similarity.toFixed(3)} - "${row.question.substring(0, 80)}..."`);
+      });
+    }
 
     return result.rows;
   } catch (error) {
@@ -1286,7 +1487,8 @@ async function filterQuestionsByType(
   filterType: string,
   username?: string,
   sortBy: string = 'newest',
-  limit: number = 100
+  limit: number = 20,
+  page: number = 1
 ) {
   try {
     let query = `
@@ -1404,30 +1606,136 @@ async function filterQuestionsByType(
         query += ` ORDER BY va.created_at DESC`;
     }
 
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+    
     const limitIndex = params.length + 1;
-    query += ` LIMIT $${limitIndex}`;
+    const offsetIndex = params.length + 2;
+    query += ` LIMIT $${limitIndex} OFFSET $${offsetIndex}`;
     params.push(limit);
+    params.push(offset);
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
-      id: row.id,
-      question: row.question,
-      answer: row.answer,
-      created_at: row.created_at,
-      created_by: row.created_by,
-      views: parseInt(row.views) || 0,
-      verification_type: row.verification_type,
-      requested_departments: row.requested_departments_list || [],
-      tags: row.tags || [],
-      verification_count: parseInt(row.verification_count) || 0,
-      total_requested_depts: parseInt(row.total_requested_depts) || 0,
-      vote_score: parseInt(row.vote_score) || 0,
-      user_has_answered: parseInt(row.user_comment_count) > 0
-    }));
+    return result.rows.map(row => {
+      const verificationType = row.verification_type;
+      const verificationCount = parseInt(row.verification_count) || 0;
+      const totalRequestedDepts = parseInt(row.total_requested_depts) || 0;
+      
+      // Determine if fully verified
+      let isFullyVerified = false;
+      if (verificationType === 'self') {
+        // Self-verified is always considered verified
+        isFullyVerified = true;
+      } else if (verificationType === 'request') {
+        // Request type: check if all requested departments have verified
+        if (totalRequestedDepts > 0) {
+          isFullyVerified = verificationCount >= totalRequestedDepts;
+        } else {
+          // No departments requested, consider verified if has any verification
+          isFullyVerified = verificationCount > 0;
+        }
+      }
+      
+      return {
+        id: row.id,
+        question: row.question,
+        answer: row.answer,
+        created_at: row.created_at,
+        created_by: row.created_by,
+        views: parseInt(row.views) || 0,
+        verification_type: verificationType,
+        requested_departments: row.requested_departments_list || [],
+        tags: row.tags || [],
+        verification_count: verificationCount,
+        total_requested_depts: totalRequestedDepts,
+        vote_score: parseInt(row.vote_score) || 0,
+        user_has_answered: parseInt(row.user_comment_count) > 0,
+        is_fully_verified: isFullyVerified
+      };
+    });
   } catch (error) {
     console.error('Error filtering questions:', error);
     throw error;
+  }
+}
+
+/**
+ * Count total questions by filter type (for pagination)
+ */
+async function countQuestionsByType(filterType: string, username?: string): Promise<number> {
+  try {
+    let query = `SELECT COUNT(*) as total FROM verified_answers va`;
+    const params: any[] = [];
+
+    switch (filterType) {
+      case 'my-questions':
+        if (username) {
+          query += ` WHERE va.created_by = $1`;
+          params.push(username);
+        }
+        break;
+
+      case 'my-answers':
+        if (username) {
+          query += ` WHERE EXISTS (
+            SELECT 1 FROM comments 
+            WHERE question_id = va.id AND username = $1
+          )`;
+          params.push(username);
+        }
+        break;
+
+      case 'pending-review':
+        query += ` WHERE va.verification_type = 'request'
+                   AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') > 0
+                   AND (SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != '') < ARRAY_LENGTH(va.requested_departments, 1)`;
+        break;
+
+      case 'unverified':
+        query += ` WHERE va.verification_type = 'request'
+                   AND COALESCE((SELECT COUNT(DISTINCT dept) 
+                    FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                    WHERE av.verified_answer_id = va.id 
+                    AND av.verification_type = 'verification'
+                    AND av.commenter_name IS NOT NULL 
+                    AND av.commenter_name != ''), 0) = 0`;
+        break;
+
+      case 'verified':
+        query += ` WHERE (va.verification_type = 'self')
+                   OR (va.verification_type = 'request' 
+                       AND ARRAY_LENGTH(va.requested_departments, 1) > 0
+                       AND (SELECT COUNT(DISTINCT dept) 
+                        FROM answer_verifications av, UNNEST(av.requested_departments) AS dept
+                        WHERE av.verified_answer_id = va.id 
+                        AND av.verification_type = 'verification'
+                        AND av.commenter_name IS NOT NULL 
+                        AND av.commenter_name != ''
+                        AND dept = ANY(va.requested_departments)) >= ARRAY_LENGTH(va.requested_departments, 1))`;
+        break;
+
+      case 'all':
+      default:
+        break;
+    }
+
+    const result = await pool.query(query, params);
+    return parseInt(result.rows[0]?.total) || 0;
+  } catch (error) {
+    console.error('Error counting questions:', error);
+    return 0;
   }
 }
 
@@ -1757,6 +2065,428 @@ async function setFileProcessStatus(fileId: number, status: string) {
   }
 }
 
+// =====================================================
+// ========== AI SUGGESTIONS FUNCTIONS ==========
+// =====================================================
+// These functions handle AI-generated suggestions for Q&A
+// Separate from main chat flow - used in Q&A Detail page
+// =====================================================
+
+/**
+ * Creates the AI suggestions tables if they don't exist
+ */
+async function initializeAISuggestionsTables() {
+  try {
+    // Create ai_suggestions table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_suggestions (
+        id SERIAL PRIMARY KEY,
+        verified_answer_id INT REFERENCES verified_answers(id) ON DELETE CASCADE,
+        source_type VARCHAR(50) NOT NULL DEFAULT 'create_question',
+        original_chat_message TEXT,
+        original_ai_response TEXT,
+        ai_generated_answer TEXT NOT NULL,
+        ai_model_used VARCHAR(100),
+        ai_confidence FLOAT DEFAULT 0.0,
+        sources_used JSONB DEFAULT '[]'::jsonb,
+        human_final_answer TEXT,
+        decision VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        reviewed_at TIMESTAMP,
+        reviewed_by VARCHAR(255)
+      );
+    `);
+
+    // Create ai_learning_analysis table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_learning_analysis (
+        id SERIAL PRIMARY KEY,
+        ai_suggestion_id INT NOT NULL REFERENCES ai_suggestions(id) ON DELETE CASCADE,
+        conflict_type VARCHAR(100),
+        conflict_details TEXT,
+        severity VARCHAR(50) DEFAULT 'minor',
+        similarity_score FLOAT,
+        key_differences JSONB DEFAULT '[]'::jsonb,
+        suggested_prompt_fix TEXT,
+        suggested_routing TEXT,
+        error_tags TEXT[],
+        predicted_group VARCHAR(255),
+        group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1),
+        analyzed_at TIMESTAMP DEFAULT NOW(),
+        analyzed_by VARCHAR(100) DEFAULT 'auto'
+      );
+    `);
+
+    // Migration: Add new columns if they don't exist (for existing tables)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='predicted_group') THEN
+          ALTER TABLE ai_learning_analysis ADD COLUMN predicted_group VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='group_confidence') THEN
+          ALTER TABLE ai_learning_analysis ADD COLUMN group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1);
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_verified_answer ON ai_suggestions(verified_answer_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_decision ON ai_suggestions(decision);
+      CREATE INDEX IF NOT EXISTS idx_ai_learning_analysis_suggestion ON ai_learning_analysis(ai_suggestion_id);
+    `);
+    
+    // Create indexes for new columns (separate to handle existing table)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_learning_predicted_group ON ai_learning_analysis(predicted_group);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_learning_group_confidence ON ai_learning_analysis(group_confidence);`);
+
+    console.log('✅ AI Suggestions tables initialized');
+  } catch (error) {
+    console.error('Error initializing AI suggestions tables:', error);
+    throw error;
+  }
+}
+
+/**
+ * Save an AI-generated suggestion for a question
+ * @param verifiedAnswerId The ID of the verified_answers record
+ * @param aiGeneratedAnswer The answer AI generated
+ * @param sourceType 'chat_verify' or 'create_question'
+ * @param options Additional options
+ */
+async function saveAISuggestion(
+  verifiedAnswerId: number,
+  aiGeneratedAnswer: string,
+  sourceType: 'chat_verify' | 'create_question' = 'create_question',
+  options?: {
+    originalChatMessage?: string;
+    originalAiResponse?: string;
+    aiModelUsed?: string;
+    aiConfidence?: number;
+    sourcesUsed?: any[];
+  }
+) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO ai_suggestions (
+        verified_answer_id, ai_generated_answer, source_type,
+        original_chat_message, original_ai_response, 
+        ai_model_used, ai_confidence, sources_used
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id`,
+      [
+        verifiedAnswerId,
+        aiGeneratedAnswer,
+        sourceType,
+        options?.originalChatMessage || null,
+        options?.originalAiResponse || null,
+        options?.aiModelUsed || null,
+        options?.aiConfidence || 0,
+        JSON.stringify(options?.sourcesUsed || [])
+      ]
+    );
+    
+    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}`);
+    return { success: true, suggestionId: result.rows[0].id };
+  } catch (error) {
+    console.error('Error saving AI suggestion:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get AI suggestion for a specific question
+ * @param verifiedAnswerId The ID of the verified_answers record
+ */
+async function getAISuggestion(verifiedAnswerId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM ai_suggestions 
+       WHERE verified_answer_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [verifiedAnswerId]
+    );
+    
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting AI suggestion:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update AI suggestion decision after human review
+ * @param suggestionId The AI suggestion ID
+ * @param decision 'accepted' | 'rejected'
+ * @param humanFinalAnswer The final answer after human review
+ * @param reviewedBy Username of the reviewer
+ */
+async function updateAISuggestionDecision(
+  suggestionId: number,
+  decision: 'accepted' | 'rejected',
+  humanFinalAnswer: string,
+  reviewedBy: string
+) {
+  try {
+    await pool.query(
+      `UPDATE ai_suggestions 
+       SET decision = $1, human_final_answer = $2, reviewed_at = NOW(), reviewed_by = $3
+       WHERE id = $4`,
+      [decision, humanFinalAnswer, reviewedBy, suggestionId]
+    );
+    
+    console.log(`✅ AI suggestion ${suggestionId} decision updated to: ${decision}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating AI suggestion decision:', error);
+    throw error;
+  }
+}
+
+/**
+ * Save AI learning analysis for a suggestion
+ * This is used to track AI mistakes and improve the model
+ */
+async function saveAILearningAnalysis(
+  suggestionId: number,
+  analysis: {
+    conflictType?: string;
+    conflictDetails?: string;
+    severity?: 'minor' | 'major' | 'critical';
+    similarityScore?: number;
+    keyDifferences?: any[];
+    suggestedPromptFix?: string;
+    suggestedRouting?: string;
+    errorTags?: string[];
+    analyzedBy?: string;
+    predictedGroup?: string;
+    groupConfidence?: number;
+  }
+) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO ai_learning_analysis (
+        ai_suggestion_id, conflict_type, conflict_details, severity,
+        similarity_score, key_differences, suggested_prompt_fix,
+        suggested_routing, error_tags, analyzed_by, predicted_group, group_confidence
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING id`,
+      [
+        suggestionId,
+        analysis.conflictType || null,
+        analysis.conflictDetails || null,
+        analysis.severity || 'minor',
+        analysis.similarityScore || null,
+        JSON.stringify(analysis.keyDifferences || []),
+        analysis.suggestedPromptFix || null,
+        analysis.suggestedRouting || null,
+        analysis.errorTags || [],
+        analysis.analyzedBy || 'auto',
+        analysis.predictedGroup || null,
+        analysis.groupConfidence || null
+      ]
+    );
+    
+    console.log(`✅ AI learning analysis saved for suggestion ${suggestionId}`);
+    return { success: true, analysisId: result.rows[0].id };
+  } catch (error) {
+    console.error('Error saving AI learning analysis:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get AI performance summary (for dashboard)
+ */
+async function getAIPerformanceSummary(days: number = 30) {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        ai_model_used,
+        COUNT(*) as total_suggestions,
+        COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
+        COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count,
+        COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count
+       FROM ai_suggestions
+       WHERE created_at >= NOW() - INTERVAL '${days} days'
+       GROUP BY ai_model_used`
+    );
+    
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting AI performance summary:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get common conflict patterns from AI learning analysis
+ */
+async function getAIConflictPatterns() {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        conflict_type,
+        severity,
+        COUNT(*) as occurrence_count
+       FROM ai_learning_analysis
+       WHERE conflict_type IS NOT NULL
+       GROUP BY conflict_type, severity
+       ORDER BY occurrence_count DESC`
+    );
+    
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting AI conflict patterns:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get Knowledge Group distribution and confidence analysis
+ * For AI classification analytics - with Pending/Rejected stats
+ */
+async function getKnowledgeGroupAnalytics() {
+  try {
+    // First, ensure we have the necessary indexes for performance
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_learning_predicted_group_confidence 
+      ON ai_learning_analysis(predicted_group, group_confidence);
+      
+      CREATE INDEX IF NOT EXISTS idx_ai_suggestions_decision 
+      ON ai_suggestions(decision);
+      
+      CREATE INDEX IF NOT EXISTS idx_verified_answers_tags 
+      ON verified_answers USING GIN(tags);
+    `);
+    
+    const result = await pool.query(`
+      SELECT 
+        ala.predicted_group,
+        COUNT(DISTINCT va.id) as total_questions,
+        COUNT(*) as total_predictions,
+        ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'pending' THEN va.id END) as pending_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'accepted' THEN va.id END) as accepted_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'rejected' THEN va.id END) as rejected_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence >= 0.80) as high_conf_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence < 0.50) as low_conf_count
+      FROM ai_learning_analysis ala
+      INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
+      INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
+      WHERE ala.predicted_group IS NOT NULL
+      GROUP BY ala.predicted_group
+      ORDER BY total_questions DESC, rejected_count DESC
+      LIMIT 100
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting knowledge group analytics:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get confidence distribution histogram
+ */
+async function getConfidenceDistribution() {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        CASE 
+          WHEN group_confidence >= 0.80 THEN 'High (≥0.80)'
+          WHEN group_confidence >= 0.60 THEN 'Medium (0.60-0.79)'
+          ELSE 'Low (<0.60)'
+        END as range,
+        COUNT(*) as count
+      FROM ai_learning_analysis
+      WHERE predicted_group IS NOT NULL
+      GROUP BY range
+      ORDER BY range DESC
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting confidence distribution:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get Department Request & Verification Statistics
+ * Shows request count and verified count per department
+ * - Request = จำนวนคำถามที่ request ไปยังแต่ละแผนก (จาก verified_answers.requested_departments)
+ * - Verified = จำนวนการ verify ที่แต่ละแผนกทำ (จาก answer_verifications WHERE verification_type = 'verification')
+ */
+async function getDepartmentUserStatistics() {
+  try {
+    // Requests: นับจาก verified_answers WHERE verification_type = 'request'
+    // Verifications: นับจาก answer_verifications WHERE verification_type = 'verification' (ไม่เอา 'self')
+    const result = await pool.query(`
+      WITH 
+      -- นับ Requests จาก verified_answers WHERE verification_type = 'request'
+      request_counts AS (
+        SELECT 
+          TRIM(dept) as department,
+          COUNT(*) as cnt
+        FROM verified_answers va,
+        LATERAL UNNEST(va.requested_departments) as dept
+        WHERE va.verification_type = 'request'
+          AND TRIM(dept) IS NOT NULL 
+          AND TRIM(dept) != ''
+          AND LOWER(TRIM(dept)) != 'self'
+        GROUP BY TRIM(dept)
+      ),
+      -- นับ Verifications จาก answer_verifications WHERE verification_type = 'verification' (ไม่เอา 'self')
+      verify_counts AS (
+        SELECT 
+          TRIM(dept) as department,
+          COUNT(*) as cnt
+        FROM answer_verifications av,
+        LATERAL UNNEST(av.requested_departments) as dept
+        WHERE av.verification_type = 'verification'
+          AND TRIM(dept) IS NOT NULL 
+          AND TRIM(dept) != ''
+          AND LOWER(TRIM(dept)) != 'self'
+        GROUP BY TRIM(dept)
+      ),
+      -- รวม departments ทั้งหมด
+      all_depts AS (
+        SELECT department FROM request_counts
+        UNION
+        SELECT department FROM verify_counts
+      )
+      SELECT 
+        ad.department,
+        COALESCE(rc.cnt, 0)::int as requests,
+        COALESCE(vc.cnt, 0)::int as verifications
+      FROM all_depts ad
+      LEFT JOIN request_counts rc ON ad.department = rc.department
+      LEFT JOIN verify_counts vc ON ad.department = vc.department
+      ORDER BY requests DESC, verifications DESC
+    `);
+    
+    console.log('Department stats result:', result.rows);
+    
+    return result.rows.map(row => ({
+      department: row.department,
+      request_users: parseInt(row.requests) || 0,
+      verify_users: parseInt(row.verifications) || 0,
+      total_active_users: (parseInt(row.requests) || 0) + (parseInt(row.verifications) || 0)
+    }));
+  } catch (error) {
+    console.error('Error getting department user statistics:', error);
+    throw error;
+  }
+}
+
+// =====================================================
+// ========== END AI SUGGESTIONS FUNCTIONS ==========
+// =====================================================
+
 // These startup cleanup functions can be run if needed.
 export {
   // User Functions
@@ -1802,6 +2532,8 @@ export {
   searchVerifiedAnswers,
   getAnswerVerifications,
   filterQuestionsByType,
+  countQuestionsByType,
+  triggerNotificationsForQuestion,
 
   // Question Attachments Functions
   saveQuestionAttachment,
@@ -1814,6 +2546,18 @@ export {
 
   // Hot Tags Function
   getHotTags,
+
+  // AI Suggestions Functions (NEW - Q&A AI Suggests)
+  initializeAISuggestionsTables,
+  saveAISuggestion,
+  getAISuggestion,
+  updateAISuggestionDecision,
+  saveAILearningAnalysis,
+  getAIPerformanceSummary,
+  getAIConflictPatterns,
+  getKnowledgeGroupAnalytics,
+  getConfidenceDistribution,
+  getDepartmentUserStatistics,
 
   // Deletion and Cleanup Functions
   deleteUserAndHistory,
