@@ -2699,7 +2699,7 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
             print("⚠️ Model not initialized (model=None). Using Jinna API fallback ...")
             embedding_list = get_image_embedding_jinna_api(search_text=text)
             if embedding_list and len(embedding_list) > 0:
-                return embedding_list[0]
+                return embedding_list
             else:
                 raise ValueError("Ollama returned empty embedding")
             
