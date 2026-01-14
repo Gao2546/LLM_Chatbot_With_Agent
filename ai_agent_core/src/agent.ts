@@ -813,6 +813,7 @@ router.post('/message', async (req : Request, res : Response) => {
               
               sourcesUsed.push({
                 type: 'verified_answer',
+                questionId: result.id,
                 question: result.question,
                 similarity: result.similarity
               });
@@ -830,9 +831,28 @@ router.post('/message', async (req : Request, res : Response) => {
         // 3. Build prompt for LLM
         const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
         
+        // Detect language of the question (Thai vs English/Other)
+        const detectLanguage = (text: string): 'thai' | 'english' => {
+          // Count Thai characters (Unicode range: \u0E00-\u0E7F)
+          const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+          // Count English characters
+          const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+          
+          // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
+          const totalChars = thaiChars + englishChars;
+          if (totalChars === 0) return 'english'; // Default to English if no letters
+          
+          return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+        };
+        
+        const questionLanguage = detectLanguage(userQuestion);
+        const isThaiQuestion = questionLanguage === 'thai';
+        console.log(`🌐 AI Suggests: Detected language = ${questionLanguage}`);
+        
         let systemPrompt = '';
         if (hasKnowledgeData) {
-          systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+          if (isThaiQuestion) {
+            systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
 กฎสำคัญ:
 1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
@@ -846,19 +866,49 @@ router.post('/message', async (req : Request, res : Response) => {
 ${context}
 ==========================================
 `;
+          } else {
+            systemPrompt = `You are an AI Assistant that answers questions using verified knowledge base information.
+
+Important rules:
+1. Use the knowledge base as your primary source
+2. Summarize and organize information clearly - don't copy everything
+3. Include important data, numbers, and relevant details
+4. Respond in English
+5. Use **bold** for key terms
+6. If there are multiple relevant answers, synthesize them together
+
+========== Knowledge Base Information ==========
+${context}
+================================================
+`;
+          }
         } else {
-          systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
+          if (isThaiQuestion) {
+            systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
 
 หมายเหตุ: ไม่พบข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
 กรุณาตอบตามความรู้ทั่วไป และระบุว่านี่เป็นคำตอบจาก AI โดยยังไม่ได้รับการยืนยันจากผู้เชี่ยวชาญ`;
+          } else {
+            systemPrompt = `You are an AI Assistant that helps answer questions.
+
+Note: No verified information was found in the knowledge base for this question.
+Please answer based on general knowledge and indicate that this is an AI-generated answer that has not been verified by experts.`;
+          }
         }
         
-        const userPrompt = `คำถาม: ${userQuestion}
+        const userPrompt = isThaiQuestion 
+          ? `คำถาม: ${userQuestion}
 
 ${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้อมูลในฐานความรู้:' : 'กรุณาตอบคำถาม:'}
 - เขียนเป็นย่อหน้าที่กระชับ ชัดเจน
 - รวมข้อมูลสำคัญและตัวเลขที่เกี่ยวข้อง
-- ตอบเป็นภาษาไทย`;
+- ตอบเป็นภาษาไทย`
+          : `Question: ${userQuestion}
+
+${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Please answer the question:'}
+- Write in clear, concise paragraphs
+- Include important data and relevant numbers
+- Respond in English`;
 
         let aiGeneratedAnswer = '';
         let aiModelUsed = modelToUse || 'gemma-3-4b-it';
@@ -920,24 +970,38 @@ ${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้�
           
           // Add sources reference (without model name for chat page)
           if (totalSources > 0) {
-            finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`;
+            finalResponse += isThaiQuestion 
+              ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`
+              : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}*`;
           } else {
-            finalResponse += `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`;
+            finalResponse += isThaiQuestion
+              ? `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`
+              : `\n\n---\n⚠️ *No data found in knowledge base - AI answer not yet verified*`;
           }
         } else {
           // Fallback if LLM fails completely
           if (totalSources > 0) {
-            finalResponse = '## 🔍 ผลลัพธ์จากฐานความรู้\n\n';
+            finalResponse = isThaiQuestion 
+              ? '## 🔍 ผลลัพธ์จากฐานความรู้\n\n'
+              : '## 🔍 Results from Knowledge Base\n\n';
             results.forEach((result: any, idx: number) => {
               const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
               finalResponse += `### ${idx + 1}. ${result.question}\n`;
-              finalResponse += `**ความคล้าย:** ${similarity}%\n\n`;
+              finalResponse += isThaiQuestion 
+                ? `**ความคล้าย:** ${similarity}%\n\n`
+                : `**Similarity:** ${similarity}%\n\n`;
               finalResponse += `${result.answer}\n\n---\n\n`;
             });
           } else {
-            finalResponse = '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n';
-            finalResponse += 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n';
-            finalResponse += '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง';
+            finalResponse = isThaiQuestion 
+              ? '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n'
+              : '## ℹ️ No matching answers found\n\n';
+            finalResponse += isThaiQuestion
+              ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n'
+              : 'No verified answers in the knowledge base yet.\n\n';
+            finalResponse += isThaiQuestion
+              ? '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง'
+              : '**Suggestion:** Try using **Ask** mode to get a direct AI answer';
           }
         }
         
@@ -1682,6 +1746,16 @@ router.post('/edit-message', async (req, res) => {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       let embedding: number[] = [];
       
+      // Detect language of the question
+      const detectLang = (text: string): 'thai' | 'english' => {
+        const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+        const totalChars = thaiChars + englishChars;
+        if (totalChars === 0) return 'english';
+        return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+      };
+      const isThaiQuestion = detectLang(newMessage) === 'thai';
+      
       try {
         const embeddingRes = await axios.post(
           `${API_SERVER_URL}/encode_embedding`,
@@ -1694,8 +1768,9 @@ router.post('/edit-message', async (req, res) => {
         }
       } catch (apiError: any) {
         console.error('AI Suggests: Failed to get embedding:', apiError.message);
-        socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
-        return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+        const errorMsg = isThaiQuestion ? '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' : '❌ Cannot connect to Python API Server';
+        socket?.emit('StreamText', errorMsg);
+        return res.json({ response: errorMsg });
       }
       
       // Search verified answers
@@ -1706,12 +1781,12 @@ router.post('/edit-message', async (req, res) => {
       let totalSources = 0;
       
       if (results && results.length > 0) {
-        context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+        context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
         results.forEach((result: any, idx: number) => {
           const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
-          context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
-          context += `[คำตอบ]: ${result.answer}\n`;
-          context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+          context += isThaiQuestion 
+            ? `[คำถาม ${idx + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
+            : `[Question ${idx + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
           sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
           totalSources++;
         });
@@ -1719,17 +1794,33 @@ router.post('/edit-message', async (req, res) => {
       
       // Build prompt for LLM
       const hasKnowledgeData = totalSources > 0;
-      let systemPrompt = hasKnowledgeData 
-        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+      let systemPrompt = '';
+      
+      if (hasKnowledgeData) {
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
 กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
 
 ========== ข้อมูลจากฐานความรู้ ==========
 ${context}
 ==========================================`
-        : `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`;
+          : `You are an AI Assistant that answers questions using verified knowledge base data.
+
+Rules: Use knowledge base as primary source, summarize clearly, answer in English
+
+========== Knowledge Base Data ==========
+${context}
+==========================================`;
+      } else {
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`
+          : `You are an AI Assistant. No data found in knowledge base. Answer based on general knowledge and indicate it has not been verified.`;
+      }
       
-      const userPrompt = `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`;
+      const userPrompt = isThaiQuestion 
+        ? `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`
+        : `Question: ${newMessage}\n\nGenerate answer:`;
       
       let aiGeneratedAnswer = '';
       let aiModelUsed = modelToUse || 'gemma-3-4b-it';
@@ -1765,10 +1856,12 @@ ${context}
       // Build final response
       let finalResponse = aiGeneratedAnswer || (totalSources > 0 
         ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
-        : 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask');
+        : (isThaiQuestion ? 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask' : 'No answers found in knowledge base. Try Ask mode'));
       
       if (aiGeneratedAnswer && totalSources > 0) {
-        finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
+        finalResponse += isThaiQuestion
+          ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`
+          : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
       }
       
       response = { text: finalResponse };
@@ -1781,7 +1874,7 @@ ${context}
       
     } catch (aiSuggestError: any) {
       console.error('AI Suggests Error:', aiSuggestError);
-      const errorMsg = '❌ เกิดข้อผิดพลาด: ' + aiSuggestError.message;
+      const errorMsg = '❌ Error: ' + aiSuggestError.message;
       socket?.emit('StreamText', errorMsg);
       return res.status(500).json({ error: errorMsg });
     }
@@ -4032,11 +4125,11 @@ ${expertCommentsForSynthesis}
 
           let synthesizedAnswer = '';
           
-          // Try using Google Gemini for synthesis
+          // Try using Google Gemini for synthesis (⚡ FASTEST MODEL)
           try {
-            console.log('🤖 Calling Gemini for answer synthesis...');
+            console.log('🤖 Calling Gemma-3-4B for answer synthesis (FASTEST)...');
             const geminiResult = await ai.models.generateContent({
-              model: 'gemini-2.0-flash-exp',
+              model: 'gemma-3-4b-it',
               contents: synthesisPrompt,
               config: {
                 maxOutputTokens: 2000,
@@ -4045,7 +4138,7 @@ ${expertCommentsForSynthesis}
             });
             
             synthesizedAnswer = geminiResult.text || '';
-            console.log(`✅ Gemini synthesis complete: ${synthesizedAnswer.length} characters`);
+            console.log(`✅ Gemma-3-4B synthesis complete: ${synthesizedAnswer.length} characters`);
           } catch (llmError) {
             console.warn('Gemini synthesis failed, trying Ollama:', llmError);
             
@@ -4174,10 +4267,10 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
 
           let judgeResult: any = null;
           
-          // Use Google Gemini Flash for fast LLM Judge (much faster than Ollama)
+          // Use Google Gemma-3-4B for FASTEST LLM Judge (⚡ MAXIMUM SPEED)
           try {
             const geminiResult = await ai.models.generateContent({
-              model: 'gemini-2.0-flash',
+              model: 'gemma-3-4b-it',
               contents: judgePrompt,
               config: {
                 maxOutputTokens: 1000,
@@ -5277,11 +5370,52 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     const hasKnowledgeData = totalSources > 0 && context && context.trim().length > 0;
     const hasAttachments = attachmentContext && attachmentContext.trim().length > 0;
     
+    // Detect language of the question (Thai vs English/Other)
+    const detectLanguage = (text: string): 'thai' | 'english' => {
+      // Count Thai characters (Unicode range: \u0E00-\u0E7F)
+      const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+      // Count English characters
+      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+      
+      // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
+      const totalChars = thaiChars + englishChars;
+      if (totalChars === 0) return 'english'; // Default to English if no letters
+      
+      return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+    };
+    
+    const questionLanguage = detectLanguage(question + ' ' + questionBody);
+    const isThaiQuestion = questionLanguage === 'thai';
+    console.log(`🌐 AI Suggestion: Detected language = ${questionLanguage}`);
+    
     // Build system prompt with priority: Knowledge Base > Attachments
     let systemPrompt = '';
     
     if (hasKnowledgeData || hasAttachments) {
-      systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
+      if (isThaiQuestion) {
+        systemPrompt = `คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
+
+กฎลำดับความสำคัญ:
+1. **ลำดับที่ 1 (สูงสุด)**: ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
+2. **ลำดับที่ 2 (รอง)**: ใช้ไฟล์แนบเป็นข้อมูลเสริม
+3. หากข้อมูลจากฐานความรู้และไฟล์แนบขัดแย้งกัน ให้ใช้ข้อมูลจากฐานความรู้
+4. หากมีเฉพาะไฟล์แนบ (ไม่มีฐานความรู้) ให้ใช้ข้อมูลจากไฟล์แนบแต่ระบุว่ามาจากไฟล์แนบ
+
+กฎการตอบ:
+1. ใช้คำตอบที่ยืนยันแล้วและความเห็นผู้เชี่ยวชาญเป็นแหล่งข้อมูลหลัก
+2. ใช้เนื้อหาจากไฟล์แนบเป็นข้อมูลเสริม
+3. เรียบเรียงและสรุปข้อมูลให้ชัดเจน - อย่าคัดลอกทั้งหมด
+4. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่กล่าวถึง
+5. ตอบเป็นภาษาไทย
+
+รูปแบบการตอบ:
+- เขียนเป็นย่อหน้าต่อเนื่อง กระชับและชัดเจน
+- ใช้ **ตัวหนา** สำหรับคำสำคัญ
+- ใช้หัวข้อย่อยเมื่อเหมาะสม
+- ไม่เว้นบรรทัดว่างหลายบรรทัดติดกัน
+`;
+      } else {
+        systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
 
 IMPORTANT PRIORITY RULES:
 1. **PRIORITY 1 (HIGHEST)**: Use KNOWLEDGE BASE data as the main source of truth
@@ -5294,7 +5428,7 @@ Rules:
 2. Use attached file content as SECONDARY/supporting information
 3. Rephrase and summarize the information clearly - do NOT copy word-for-word
 4. Include all important data, numbers, and specifications mentioned
-5. Answer in Thai language
+5. Answer in English
 
 Response format:
 - Write in continuous paragraphs, concise and clear
@@ -5302,9 +5436,16 @@ Response format:
 - Use bullet points for lists when appropriate
 - Do not leave multiple blank lines in a row
 `;
+      }
 
       if (hasKnowledgeData) {
-        systemPrompt += `
+        systemPrompt += isThaiQuestion 
+          ? `
+========== ข้อมูลฐานความรู้ (ลำดับที่ 1 - ใช้ก่อน!) ==========
+${context}
+=============================================================
+`
+          : `
 ========== KNOWLEDGE BASE DATA (PRIORITY 1 - USE THIS FIRST!) ==========
 ${context}
 ========================================================================
@@ -5312,22 +5453,47 @@ ${context}
       }
 
       if (hasAttachments) {
-        systemPrompt += `
+        systemPrompt += isThaiQuestion
+          ? `
+========== ข้อมูลจากไฟล์แนบ (ลำดับที่ 2 - ข้อมูลเสริม) ==========
+${attachmentContext}
+================================================================
+`
+          : `
 ========== ATTACHED FILES DATA (PRIORITY 2 - SUPPLEMENTARY) ==========
 ${attachmentContext}
 ======================================================================
 `;
       }
     } else {
-      systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+      if (isThaiQuestion) {
+        systemPrompt = `คุณคือ AI assistant ยังไม่มีข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
 
-Since there is NO data available, respond with exactly:
+เนื่องจากไม่มีข้อมูล ให้ตอบว่า:
 "ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยัน"
 
+อย่าสร้างข้อมูลขึ้นมาเอง`;
+      } else {
+        systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+
+Since there is NO data available, respond with exactly:
+"No verified answer available in the knowledge base yet. Please wait for expert verification."
+
 Do not make up any information.`;
+      }
     }
 
-    const userPrompt = `Question: ${question}
+    const userPrompt = isThaiQuestion 
+      ? `คำถาม: ${question}
+${questionBody ? `\nรายละเอียด: ${questionBody}` : ''}
+
+สร้างคำตอบสรุปจากฐานความรู้:
+- เขียนเป็นย่อหน้าที่กระชับ มีประเด็นหลักชัดเจน
+- รวมตัวเลขและข้อมูลสำคัญถ้ามี
+- ถ้ามีข้อมูลที่ขัดแย้งกัน ให้ระบุให้ชัดเจน
+- อย่าคัดลอกคำตอบเดิมทั้งหมด
+- ตอบเป็นภาษาไทย`
+      : `Question: ${question}
 ${questionBody ? `\nDetails: ${questionBody}` : ''}
 
 Create a summary answer from the knowledge base:
@@ -5335,7 +5501,7 @@ Create a summary answer from the knowledge base:
 - Include important numbers and data if available
 - If there are conflicting information, clearly state them
 - Do NOT copy the original answer word-for-word
-- Answer in Thai language`;
+- Answer in English`;
 
     let aiGeneratedAnswer = '';
     let aiModelUsed = 'gemma-3-4b-it';
@@ -5399,6 +5565,8 @@ Create a summary answer from the knowledge base:
       'ยังไม่มีข้อมูล',
       'No data available',
       'no verified',
+      'No verified answer available',
+      'Please wait for expert verification',
       'กรุณารอผู้เชี่ยวชาญมายืนยัน'
     ];
     
@@ -5420,23 +5588,31 @@ Create a summary answer from the knowledge base:
         
         // Show self-verified answer if exists
         if (isCurrentSelfVerified && currentAnswer) {
-          aiGeneratedAnswer += `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
+          aiGeneratedAnswer += isThaiQuestion 
+            ? `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`
+            : `**Verified Answer (by ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
         }
         
         // Show answers from similar verified questions
         const similarSources = sourcesUsed.filter((s: any) => s.type === 'similar_verified');
         if (similarSources.length > 0) {
-          aiGeneratedAnswer += '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n';
+          aiGeneratedAnswer += isThaiQuestion 
+            ? '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n'
+            : '**Information from similar questions:**\n\n';
           similarSources.forEach((source: any, idx: number) => {
             const similarity = source.similarity ? Math.round(source.similarity * 100) : 0;
-            aiGeneratedAnswer += `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`;
+            aiGeneratedAnswer += isThaiQuestion
+              ? `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`
+              : `• From question "${source.question}" (${similarity}% similarity)\n`;
           });
           aiGeneratedAnswer += '\n';
         }
         
         // Show expert verifications if any
         if (expertVerifications.rows.length > 0) {
-          aiGeneratedAnswer += '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n';
+          aiGeneratedAnswer += isThaiQuestion 
+            ? '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n'
+            : '**Expert comments:**\n\n';
           expertVerifications.rows.forEach((v) => {
             const dept = v.requested_departments?.[0] || '';
             aiGeneratedAnswer += `• **${v.commenter_name}${dept ? ` (${dept})` : ''}:** ${v.comment}\n`;
@@ -5445,7 +5621,9 @@ Create a summary answer from the knowledge base:
         
         aiGeneratedAnswer = aiGeneratedAnswer.trim();
       } else {
-        aiGeneratedAnswer = 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+        aiGeneratedAnswer = isThaiQuestion 
+          ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
+          : 'No verified answer available in the knowledge base yet. Please wait for expert verification.';
       }
     }
 

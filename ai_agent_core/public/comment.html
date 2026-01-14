@@ -871,6 +871,7 @@
                     const question = source.question || '';
                     const verifiedBy = source.verifiedBy || '';
                     const similarity = source.similarity ? Math.round(source.similarity * 100) : null;
+                    const fileName = source.fileName || '';
                     
                     let sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
                     let sourceLabel = 'Verified Answer';
@@ -883,15 +884,31 @@
                         sourceLabel = 'Similar Question';
                     } else if (type === 'similar_unverified') {
                         sourceIcon = '<i class="fas fa-clock" style="color: #ffc107;"></i>';
-                        sourceLabel = 'Similar Question (รอยืนยัน)';
+                        sourceLabel = 'Similar Question (Pending)';
                     } else if (type === 'expert_verification') {
                         sourceIcon = '<i class="fas fa-user-tie" style="color: #ffc107;"></i>';
                         sourceLabel = 'Expert Verification';
+                    } else if (type === 'attachment_image') {
+                        sourceIcon = '<i class="fas fa-image" style="color: #6f42c1;"></i>';
+                        sourceLabel = 'Attached Image';
+                    } else if (type === 'attachment_document') {
+                        sourceIcon = '<i class="fas fa-file-pdf" style="color: #dc3545;"></i>';
+                        sourceLabel = 'Attached Document';
                     }
                     
-                    const questionLink = questionId ? 
-                        `<a href="comment.html?id=${questionId}" class="source-question-link" target="_blank">${question || 'View Question'}</a>` : 
-                        (question || 'Unknown source');
+                    // Build display text based on available data
+                    let displayText = '';
+                    if (questionId && question) {
+                        displayText = `<a href="comment.html?id=${questionId}" class="source-question-link" target="_blank">${question}</a>`;
+                    } else if (question) {
+                        displayText = question;
+                    } else if (fileName) {
+                        displayText = `<i class="fas fa-file"></i> ${fileName}`;
+                    } else if (verifiedBy) {
+                        displayText = `Verified by ${verifiedBy}`;
+                    } else {
+                        displayText = sourceLabel;
+                    }
                     
                     const similarityBadge = similarity ? `<span class="source-similarity-badge">${similarity}% match</span>` : '';
                     
@@ -903,7 +920,7 @@
                                 ${similarityBadge}
                             </div>
                             <div class="ai-source-question" style="font-size: 13px; color: ${itemText};">
-                                ${questionLink}
+                                ${displayText}
                             </div>
                             ${verifiedBy ? `<div class="ai-source-verified-by" style="font-size: 11px; color: ${itemTextMuted}; margin-top: 4px;"><i class="fas fa-user" style="margin-right: 4px;"></i>${verifiedBy}</div>` : ''}
                         </div>
@@ -914,12 +931,12 @@
                     <div class="ai-sources" style="margin-top: 12px;">
                         <div onclick="toggleSourcesDetails()" class="ai-sources-toggle" style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 12px; border-radius: 6px; background: ${sourcesBg}; border: 1px solid ${sourcesBorder}; color: ${sourcesText};">
                             <i class="fas fa-database" style="color: #017374;"></i>
-                            <span>อ้างอิงจาก ${sourcesCount} คำตอบที่ยืนยันแล้ว</span>
+                            <span>Referenced from ${sourcesCount} verified answer${sourcesCount > 1 ? 's' : ''}</span>
                             <i class="fas fa-chevron-down" id="sourcesToggleIcon" style="margin-left: auto; transition: transform 0.3s;"></i>
                         </div>
                         <div id="sourcesDetailsList" class="ai-sources-details" style="display: none; margin-top: 8px; padding: 10px; border-radius: 8px; background: ${sourcesBg}; border: 1px solid ${sourcesBorder};">
                             <div class="ai-sources-title" style="font-weight: 600; margin-bottom: 10px; font-size: 13px; color: ${sourcesText};">
-                                <i class="fas fa-list"></i> แหล่งอ้างอิง:
+                                <i class="fas fa-list"></i> Sources:
                             </div>
                             ${sourcesListHtml}
                         </div>

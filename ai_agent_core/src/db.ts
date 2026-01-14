@@ -2127,6 +2127,10 @@ async function initializeAISuggestionsTables() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='group_confidence') THEN
           ALTER TABLE ai_learning_analysis ADD COLUMN group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1);
         END IF;
+        -- Add ai_answer_embedding column for fast Hybrid Judge
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_suggestions' AND column_name='ai_answer_embedding') THEN
+          ALTER TABLE ai_suggestions ADD COLUMN ai_answer_embedding VECTOR(1024);
+        END IF;
       END $$;
     `);
 
@@ -2165,16 +2169,22 @@ async function saveAISuggestion(
     aiModelUsed?: string;
     aiConfidence?: number;
     sourcesUsed?: any[];
+    aiAnswerEmbedding?: number[];  // 🆕 Pre-computed embedding for fast Hybrid Judge
   }
 ) {
   try {
+    // Include embedding if provided
+    const embeddingParam = options?.aiAnswerEmbedding && options.aiAnswerEmbedding.length === 1024
+      ? `[${options.aiAnswerEmbedding.join(',')}]`
+      : null;
+    
     const result = await pool.query(
       `INSERT INTO ai_suggestions (
         verified_answer_id, ai_generated_answer, source_type,
         original_chat_message, original_ai_response, 
-        ai_model_used, ai_confidence, sources_used
+        ai_model_used, ai_confidence, sources_used, ai_answer_embedding
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
       RETURNING id`,
       [
         verifiedAnswerId,
@@ -2184,11 +2194,12 @@ async function saveAISuggestion(
         options?.originalAiResponse || null,
         options?.aiModelUsed || null,
         options?.aiConfidence || 0,
-        JSON.stringify(options?.sourcesUsed || [])
+        JSON.stringify(options?.sourcesUsed || []),
+        embeddingParam
       ]
     );
     
-    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}`);
+    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}${embeddingParam ? ' (with embedding)' : ''}`);
     return { success: true, suggestionId: result.rows[0].id };
   } catch (error) {
     console.error('Error saving AI suggestion:', error);
