@@ -2692,11 +2692,11 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
     try:
         # Use the pre-loaded Jina embedding model (FAST - no reload)
         if model is not None:
-            print(f"⚡ Using PRE-LOADED Jina model for embedding (instant)...")
+            print(f"⚡ Using PRE-LOADED Jina model (LOCAL) for embedding (instant)...")
             embedding = model.encode(text, task='retrieval')
             return embedding.tolist()
         else:
-            print("⚠️ Model not initialized (model=None). Using Jinna API fallback ...")
+            print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
             embedding_list = get_image_embedding_jinna_api(search_text=text)
             if embedding_list and len(embedding_list) > 0:
                 return embedding_list
