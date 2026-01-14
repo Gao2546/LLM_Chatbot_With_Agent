@@ -50,6 +50,7 @@ sentence-transformers
 bitsandbytes
 accelerate
 einops
+modelscope
 
 # LangChain Ecosystem
 langchain-core
@@ -78,3 +79,6 @@ matplotlib
 
 # Optional: LLM Client (for vLLM/OpenAI compatible APIs)
 openai
+
+# Note: Removed einops, docling, unstructured[pdf] due to Windows path length issues
+# These can be installed separately if needed

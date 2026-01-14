@@ -77,7 +77,7 @@ router.post('/login', async (req, res) => {
 
     // Create a session
     req.session.user = { id: user.id, username: user.username, socketId: socketId, isGuest: false };
-    console.log("Auth: session has create")
+    console.log(`Auth: Session created for user ${user.username} (ID: ${user.id})`)
 
     // await createUserFolder(user.id); // comment it in new patch
 
@@ -149,6 +149,7 @@ router.get('/logout', async (req, res) => {
   else{
     await setCurrentChatId(userId, null);
     await setUserActiveStatus(userId, false);
+    req.session.user.isGuest = true;
   }
   req.session.destroy((err: any) => {
     if (err) {
@@ -201,7 +202,7 @@ router.get('/session', (req, res) => {
       loggedIn: true,
       username: req.session.user.username,
       userId: req.session.user.id,
-      isGuest: (req.session.user as any).isGuest,
+      isGuest: (req.session.user as any).isGuest ?? true,
       chatIds: (req.session.user as any).chatIds ?? [],
       currChatId: (req.session.user as any).currentChatId ?? null,
       currentChatMode: (req.session.user as any).currentChatMode ?? null, // Return mode

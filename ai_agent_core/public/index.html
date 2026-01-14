@@ -1,19 +1,33 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>AI Agent with MCP</title>
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712108.png">
+    <!-- Inline script to set theme BEFORE CSS loads to prevent flash -->
+    <script>
+        (function() {
+            const storedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', storedTheme);
+        })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
 </head>
-<body>
+<body data-theme="dark">
+    <!-- Inline script to apply theme to body immediately -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.body.setAttribute('data-theme', theme);
+        })();
+    </script>
     <div class="auth-container">
         <span id="usernameDisplay" style="display: none; margin-right: 10px;"></span>
         <button id="themeToggleBtn">
-            <i class="fas fa-sun"></i> <span>Light Mode</span>
+            <i class="fas fa-moon"></i> <span>Dark Mode</span>
         </button>
         <a href="auth/login" class="login-button" id="loginBtn">Login</a>
     </div>
@@ -42,13 +56,14 @@
             <div class="btn-sidebar-container" display="none"></div>
             <button id="newChatButton">New Chat</button>
             <button id="preprocessButton"><i class="fas fa-file-import"></i> Preprocess File</button>
+            <button id="communityButton" onclick="window.location.href='/community.html'"><i class="fas fa-comments"></i> Q&A Community</button>
             <div class="mode-selector-container">
-                <label for="modeSelector">Mode:</label>
+                <label for="modeSelector">Mode</label>
                 <select id="modeSelector">
                     </select>
             </div>
             <div class="model-selector-container">
-                <label for="modelSelector">Model:</label>
+                <label for="modelSelector">Model</label>
                 <select id="modelSelector">
                     </select>
             </div>

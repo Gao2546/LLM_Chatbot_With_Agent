@@ -273,6 +273,8 @@ COPY --chown=chatllm:chatllm ./ /app/
 # Environment variables for the app
 ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     HOME=/home/chatllm \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics \
     DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \
     PGDATABASE=ai_agent \
     PGUSER=athip \
