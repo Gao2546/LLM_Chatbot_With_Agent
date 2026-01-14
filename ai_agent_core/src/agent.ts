@@ -175,7 +175,7 @@ export default async function agentRouters(ios: SocketIOServer) {
         return res.status(400).json({ error: 'Question required' });
       }
 
-      // สร้าง embedding (สำหรับ verified_answers ต้อง 1024 dimensions)
+      // สร้าง embedding (สำหรับ verified_answers ใช้ 2048 dimensions)
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       console.log(`Calling embedding API at ${API_SERVER_URL}/encode_embedding...`);
       
@@ -185,7 +185,8 @@ export default async function agentRouters(ios: SocketIOServer) {
           `${API_SERVER_URL}/encode_embedding`,
           { 
             text: question,
-            dimensions: 1024  // ← ต้องเป็น 1024 dimensions
+            dimensions: 2048,
+            is_query: true  // ← ใช้ retrieval.query สำหรับค้นหา (cross-lingual support)
           },
           { timeout: 30000 } // 30 second timeout
         );
@@ -209,12 +210,12 @@ export default async function agentRouters(ios: SocketIOServer) {
       }
 
       // ตรวจสอบ dimensions
-      if (embedding.length !== 1024) {
-        console.warn(`Warning: Expected 1024 dimensions, got ${embedding.length}. Proceeding anyway...`);
+      if (embedding.length !== 2048) {
+        console.warn(`Warning: Expected 2048 dimensions, got ${embedding.length}. Proceeding anyway...`);
       }
 
       // ค้นหา
-      const results = await searchVerifiedAnswers(embedding, threshold || 0.7, limit || 5);
+      const results = await searchVerifiedAnswers(embedding, threshold || 0.3, limit || 5);
 
       res.json({ success: true, results });
     } catch (error) {
@@ -753,18 +754,18 @@ router.post('/message', async (req : Request, res : Response) => {
           const userQuestion = userMessage || '';
           
           console.log('⏳ Requesting embedding from Python API...');
-          socket?.emit('StreamText', '⏳ กำลังประมวลผลคำถาม (loading embeddings)...\n');
+          // ไม่แสดง status message ให้ผู้ใช้
           
           const embeddingRes = await axios.post(
             `${API_SERVER_URL}/encode_embedding`,
-            { text: userQuestion, dimensions: 1024 },
+            { text: userQuestion, dimensions: 2048, is_query: true },  // ← cross-lingual search
             { timeout: 120000 }  // ⬅️ INCREASED from 30s to 120s (2 minutes)
           );
           
           if (embeddingRes.data && embeddingRes.data.embedding) {
             embedding = embeddingRes.data.embedding;
             console.log(`✅ AI Suggests: Got embedding with ${embedding.length} dimensions`);
-            socket?.emit('StreamText', '✅ Embedding ready. Searching knowledge base...\n');
+            // ไม่แสดง status message ให้ผู้ใช้
           } else {
             throw new Error('No embedding in response');
           }
@@ -781,9 +782,9 @@ router.post('/message', async (req : Request, res : Response) => {
           return res.json({ response: '❌ Embedding generation failed' });
         }
         
-        // Use threshold 0.6 (60%) to find relevant matches only
-        // Higher threshold prevents irrelevant answers from being used
-        const SIMILARITY_THRESHOLD = 0.6;
+        // Use threshold 0.3 for cross-lingual search (Thai<->English)
+        // Lower threshold allows finding semantically similar content across languages
+        const SIMILARITY_THRESHOLD = 0.3;
         console.log(`🔍 AI Suggests: Searching with embedding length=${embedding.length}, threshold=${SIMILARITY_THRESHOLD}`);
         const results = await searchVerifiedAnswers(embedding, SIMILARITY_THRESHOLD, 5);
         console.log(`🔍 AI Suggests: Search returned ${results?.length || 0} results`);
@@ -793,7 +794,7 @@ router.post('/message', async (req : Request, res : Response) => {
         let totalSources = 0;
         
         if (results && results.length > 0) {
-          // Filter out results with low similarity even if they passed threshold
+          // Filter out results with low similarity - use same threshold
           const relevantResults = results.filter((r: any) => r.similarity >= SIMILARITY_THRESHOLD);
           
           if (relevantResults.length > 0) {
@@ -813,6 +814,7 @@ router.post('/message', async (req : Request, res : Response) => {
               
               sourcesUsed.push({
                 type: 'verified_answer',
+                questionId: result.id,
                 question: result.question,
                 similarity: result.similarity
               });
@@ -830,9 +832,28 @@ router.post('/message', async (req : Request, res : Response) => {
         // 3. Build prompt for LLM
         const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
         
+        // Detect language of the question (Thai vs English/Other)
+        const detectLanguage = (text: string): 'thai' | 'english' => {
+          // Count Thai characters (Unicode range: \u0E00-\u0E7F)
+          const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+          // Count English characters
+          const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+          
+          // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
+          const totalChars = thaiChars + englishChars;
+          if (totalChars === 0) return 'english'; // Default to English if no letters
+          
+          return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+        };
+        
+        const questionLanguage = detectLanguage(userQuestion);
+        const isThaiQuestion = questionLanguage === 'thai';
+        console.log(`🌐 AI Suggests: Detected language = ${questionLanguage}`);
+        
         let systemPrompt = '';
         if (hasKnowledgeData) {
-          systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+          if (isThaiQuestion) {
+            systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
 กฎสำคัญ:
 1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
@@ -846,103 +867,192 @@ router.post('/message', async (req : Request, res : Response) => {
 ${context}
 ==========================================
 `;
+          } else {
+            systemPrompt = `You are an AI Assistant that answers questions using verified knowledge base information.
+
+Important rules:
+1. Use the knowledge base as your primary source
+2. Summarize and organize information clearly - don't copy everything
+3. Include important data, numbers, and relevant details
+4. Respond in English
+5. Use **bold** for key terms
+6. If there are multiple relevant answers, synthesize them together
+
+========== Knowledge Base Information ==========
+${context}
+================================================
+`;
+          }
         } else {
-          systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
+          if (isThaiQuestion) {
+            systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
 
 หมายเหตุ: ไม่พบข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
 กรุณาตอบตามความรู้ทั่วไป และระบุว่านี่เป็นคำตอบจาก AI โดยยังไม่ได้รับการยืนยันจากผู้เชี่ยวชาญ`;
+          } else {
+            systemPrompt = `You are an AI Assistant that helps answer questions.
+
+Note: No verified information was found in the knowledge base for this question.
+Please answer based on general knowledge and indicate that this is an AI-generated answer that has not been verified by experts.`;
+          }
         }
         
-        const userPrompt = `คำถาม: ${userQuestion}
+        const userPrompt = isThaiQuestion 
+          ? `คำถาม: ${userQuestion}
 
 ${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้อมูลในฐานความรู้:' : 'กรุณาตอบคำถาม:'}
 - เขียนเป็นย่อหน้าที่กระชับ ชัดเจน
 - รวมข้อมูลสำคัญและตัวเลขที่เกี่ยวข้อง
-- ตอบเป็นภาษาไทย`;
+- ตอบเป็นภาษาไทย`
+          : `Question: ${userQuestion}
+
+${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Please answer the question:'}
+- Write in clear, concise paragraphs
+- Include important data and relevant numbers
+- Respond in English`;
 
         let aiGeneratedAnswer = '';
         let aiModelUsed = modelToUse || 'gemma-3-4b-it';
         
-        // 4. Call LLM to synthesize answer
+        // 4. Call LLM to synthesize answer WITH STREAMING
         try {
-          console.log('🤖 AI Suggests: Calling LLM to synthesize answer...');
+          console.log('🤖 AI Suggests: Calling LLM with STREAMING...');
           
           const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
           
-          // Use Google AI API
-          const aiResponse = await ai.models.generateContent({
+          // Use Google AI API with Streaming
+          const result = await ai.models.generateContentStream({
             model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
-            contents: fullPrompt
+            contents: fullPrompt,
+            config: {
+              maxOutputTokens: 100000,
+            },
           });
           
-          if (aiResponse && aiResponse.text) {
-            aiGeneratedAnswer = aiResponse.text
-              .replace(/\r\n/g, '\n')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim();
-            console.log('✅ AI Suggests: LLM generated answer successfully');
+          // Stream the response chunk by chunk
+          for await (const chunk of result) {
+            if (controller.signal.aborted) {
+              console.log('⚠️ AI Suggests: Streaming aborted');
+              break;
+            }
+            let chunkText = chunk.text;
+            if (chunkText !== undefined) {
+              aiGeneratedAnswer += chunkText;
+              // Emit each accumulated response to client (streaming effect)
+              socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+            }
           }
-        } catch (llmError: any) {
-          console.error('⚠️ AI Suggests: Google AI failed:', llmError.message);
           
-          // Fallback to Ollama
+          aiGeneratedAnswer = aiGeneratedAnswer
+            .replace(/\r\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          console.log('✅ AI Suggests: LLM streaming completed');
+          
+        } catch (llmError: any) {
+          console.error('⚠️ AI Suggests: Google AI streaming failed:', llmError.message);
+          
+          // Fallback to Ollama with Streaming
           try {
-            console.log('🔄 AI Suggests: Trying Ollama as fallback...');
+            console.log('🔄 AI Suggests: Trying Ollama with streaming...');
             const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 model: 'gemma3:4b',
                 prompt: `${systemPrompt}\n\n${userPrompt}`,
-                stream: false
+                stream: true  // Enable streaming
               })
             });
             
-            if (ollamaResponse.ok) {
-              const ollamaData = await ollamaResponse.json() as { response: string };
-              aiGeneratedAnswer = (ollamaData.response || '')
+            if (ollamaResponse.ok && ollamaResponse.body) {
+              const reader = (ollamaResponse.body as any).getReader();
+              const decoder = new TextDecoder();
+              
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                // Ollama streams JSON lines
+                const lines = chunk.split('\n').filter(line => line.trim());
+                for (const line of lines) {
+                  try {
+                    const json = JSON.parse(line);
+                    if (json.response) {
+                      aiGeneratedAnswer += json.response;
+                      socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+                    }
+                  } catch (e) {
+                    // Skip invalid JSON
+                  }
+                }
+              }
+              
+              aiGeneratedAnswer = aiGeneratedAnswer
                 .replace(/\r\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
               aiModelUsed = 'gemma3:4b (Ollama)';
-              console.log('✅ AI Suggests: Ollama generated answer');
+              console.log('✅ AI Suggests: Ollama streaming completed');
             }
           } catch (ollamaError) {
-            console.error('⚠️ AI Suggests: Ollama also failed');
+            console.error('⚠️ AI Suggests: Ollama streaming also failed');
           }
         }
         
-        // 5. Build final response
+        // 5. Build final response and add footer
         let finalResponse = '';
         
         if (aiGeneratedAnswer) {
           finalResponse = aiGeneratedAnswer;
           
-          // Add sources reference (without model name for chat page)
+          // Add sources reference footer with streaming
+          let footer = '';
           if (totalSources > 0) {
-            finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`;
+            footer = isThaiQuestion 
+              ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`
+              : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}*`;
           } else {
-            finalResponse += `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`;
+            footer = isThaiQuestion
+              ? `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`
+              : `\n\n---\n⚠️ *No data found in knowledge base - AI answer not yet verified*`;
           }
+          finalResponse += footer;
+          
+          // Stream the footer (since AI answer was already streamed)
+          socket?.emit('StreamText', finalResponse);
+          
         } else {
-          // Fallback if LLM fails completely
+          // Fallback if LLM fails completely - no streaming happened
           if (totalSources > 0) {
-            finalResponse = '## 🔍 ผลลัพธ์จากฐานความรู้\n\n';
+            finalResponse = isThaiQuestion 
+              ? '## 🔍 ผลลัพธ์จากฐานความรู้\n\n'
+              : '## 🔍 Results from Knowledge Base\n\n';
             results.forEach((result: any, idx: number) => {
               const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
               finalResponse += `### ${idx + 1}. ${result.question}\n`;
-              finalResponse += `**ความคล้าย:** ${similarity}%\n\n`;
+              finalResponse += isThaiQuestion 
+                ? `**ความคล้าย:** ${similarity}%\n\n`
+                : `**Similarity:** ${similarity}%\n\n`;
               finalResponse += `${result.answer}\n\n---\n\n`;
             });
           } else {
-            finalResponse = '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n';
-            finalResponse += 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n';
-            finalResponse += '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง';
+            finalResponse = isThaiQuestion 
+              ? '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n'
+              : '## ℹ️ No matching answers found\n\n';
+            finalResponse += isThaiQuestion
+              ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n'
+              : 'No verified answers in the knowledge base yet.\n\n';
+            finalResponse += isThaiQuestion
+              ? '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง'
+              : '**Suggestion:** Try using **Ask** mode to get a direct AI answer';
           }
+          // Send fallback response (not streamed)
+          socket?.emit('StreamText', finalResponse);
         }
         
         response = { text: finalResponse };
-        socket?.emit('StreamText', finalResponse);
         
         // Save to chat history
         chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
@@ -1682,10 +1792,20 @@ router.post('/edit-message', async (req, res) => {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       let embedding: number[] = [];
       
+      // Detect language of the question
+      const detectLang = (text: string): 'thai' | 'english' => {
+        const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+        const totalChars = thaiChars + englishChars;
+        if (totalChars === 0) return 'english';
+        return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+      };
+      const isThaiQuestion = detectLang(newMessage) === 'thai';
+      
       try {
         const embeddingRes = await axios.post(
           `${API_SERVER_URL}/encode_embedding`,
-          { text: newMessage, dimensions: 1024 },
+          { text: newMessage, dimensions: 2048, is_query: true },  // ← cross-lingual search
           { timeout: 30000 }
         );
         
@@ -1694,24 +1814,25 @@ router.post('/edit-message', async (req, res) => {
         }
       } catch (apiError: any) {
         console.error('AI Suggests: Failed to get embedding:', apiError.message);
-        socket?.emit('StreamText', '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้');
-        return res.json({ response: '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' });
+        const errorMsg = isThaiQuestion ? '❌ ไม่สามารถเชื่อมต่อกับ Python API Server ได้' : '❌ Cannot connect to Python API Server';
+        socket?.emit('StreamText', errorMsg);
+        return res.json({ response: errorMsg });
       }
       
-      // Search verified answers
-      const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+      // Search verified answers with lower threshold for cross-lingual
+      const results = await searchVerifiedAnswers(embedding, 0.3, 5);
       
       let context = '';
       let sourcesUsed: any[] = [];
       let totalSources = 0;
       
       if (results && results.length > 0) {
-        context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
+        context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
         results.forEach((result: any, idx: number) => {
           const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
-          context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
-          context += `[คำตอบ]: ${result.answer}\n`;
-          context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
+          context += isThaiQuestion 
+            ? `[คำถาม ${idx + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
+            : `[Question ${idx + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
           sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
           totalSources++;
         });
@@ -1719,17 +1840,33 @@ router.post('/edit-message', async (req, res) => {
       
       // Build prompt for LLM
       const hasKnowledgeData = totalSources > 0;
-      let systemPrompt = hasKnowledgeData 
-        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+      let systemPrompt = '';
+      
+      if (hasKnowledgeData) {
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
 กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
 
 ========== ข้อมูลจากฐานความรู้ ==========
 ${context}
 ==========================================`
-        : `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`;
+          : `You are an AI Assistant that answers questions using verified knowledge base data.
+
+Rules: Use knowledge base as primary source, summarize clearly, answer in English
+
+========== Knowledge Base Data ==========
+${context}
+==========================================`;
+      } else {
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`
+          : `You are an AI Assistant. No data found in knowledge base. Answer based on general knowledge and indicate it has not been verified.`;
+      }
       
-      const userPrompt = `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`;
+      const userPrompt = isThaiQuestion 
+        ? `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`
+        : `Question: ${newMessage}\n\nGenerate answer:`;
       
       let aiGeneratedAnswer = '';
       let aiModelUsed = modelToUse || 'gemma-3-4b-it';
@@ -1765,10 +1902,12 @@ ${context}
       // Build final response
       let finalResponse = aiGeneratedAnswer || (totalSources > 0 
         ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
-        : 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask');
+        : (isThaiQuestion ? 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask' : 'No answers found in knowledge base. Try Ask mode'));
       
       if (aiGeneratedAnswer && totalSources > 0) {
-        finalResponse += `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
+        finalResponse += isThaiQuestion
+          ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`
+          : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}* | 🤖 *${aiModelUsed.replace('{_Google_API_}', '')}*`;
       }
       
       response = { text: finalResponse };
@@ -1781,7 +1920,7 @@ ${context}
       
     } catch (aiSuggestError: any) {
       console.error('AI Suggests Error:', aiSuggestError);
-      const errorMsg = '❌ เกิดข้อผิดพลาด: ' + aiSuggestError.message;
+      const errorMsg = '❌ Error: ' + aiSuggestError.message;
       socket?.emit('StreamText', errorMsg);
       return res.status(500).json({ error: errorMsg });
     }
@@ -2656,22 +2795,22 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
     try {
       const apiUrl = process.env.API_SERVER_URL;
       if (apiUrl) {
-        // Get question embedding
+        // Get question embedding (is_query: false = document/passage mode)
         const questionEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: question, dimensions: 1024 })
+          body: JSON.stringify({ text: question, dimensions: 2048, is_query: false })
         });
         if (questionEmbedRes.ok) {
           const embedData: any = await questionEmbedRes.json();
           questionEmbedding = embedData.embedding || [];
         }
 
-        // Get answer embedding
+        // Get answer embedding (is_query: false = document/passage mode)
         const answerEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: answer, dimensions: 1024 })
+          body: JSON.stringify({ text: answer, dimensions: 2048, is_query: false })
         });
         if (answerEmbedRes.ok) {
           const embedData: any = await answerEmbedRes.json();
@@ -2997,19 +3136,19 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
 // GET /api/search-verified-answers - Search verified answers
 router.post('/search-verified-answers', async (req: Request, res: Response) => {
   try {
-    const { question, threshold = 0.7, limit = 20 } = req.body;
+    const { question, threshold = 0.3, limit = 20 } = req.body;  // ← default 0.3 for cross-lingual
 
     if (!question || typeof question !== 'string') {
       return res.status(400).json({ success: false, error: 'Missing question parameter' });
     }
 
-    // Get embedding from Python API
+    // Get embedding from Python API (is_query: true for search)
     let questionEmbedding: number[] = [];
     try {
       const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: question })
+        body: JSON.stringify({ text: question, dimensions: 2048, is_query: true })
       });
       const embedData: any = await embedRes.json();
       questionEmbedding = embedData.embedding || [];
@@ -3055,13 +3194,13 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Missing question parameter' });
     }
 
-    // Get embedding from Python API
+    // Get embedding from Python API (is_query: true for search)
     let questionEmbedding: number[] = [];
     try {
       const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: question })
+        body: JSON.stringify({ text: question, dimensions: 2048, is_query: true })
       });
       const embedData: any = await embedRes.json();
       questionEmbedding = embedData.embedding || [];
@@ -3070,8 +3209,8 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, error: 'Could not generate embedding' });
     }
 
-    // Search similar verified answers
-    const results = await searchVerifiedAnswers(questionEmbedding, 0.7, 5);
+    // Search similar verified answers with cross-lingual threshold
+    const results = await searchVerifiedAnswers(questionEmbedding, 0.3, 5);
 
     res.json({ success: true, results });
 
@@ -3719,11 +3858,11 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
       console.log('🔄 Generating embeddings...');
       const fullQuestionText = `${question}\n\n${answer}`;
       
-      // Generate question embedding
+      // Generate question embedding (is_query: false = document mode)
       const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullQuestionText })
+        body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: false })
       });
       if (qEmbedRes.ok) {
         const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
@@ -3731,11 +3870,11 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
         console.log('✅ Question embedding generated, length:', questionEmbedding.length);
       }
       
-      // Generate answer embedding
+      // Generate answer embedding (is_query: false = document mode)
       const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: answer })
+        body: JSON.stringify({ text: answer, dimensions: 2048, is_query: false })
       });
       if (aEmbedRes.ok) {
         const aEmbedData = await aEmbedRes.json() as { embedding: number[] };
@@ -4032,11 +4171,11 @@ ${expertCommentsForSynthesis}
 
           let synthesizedAnswer = '';
           
-          // Try using Google Gemini for synthesis
+          // Try using Google Gemini for synthesis (⚡ FASTEST MODEL)
           try {
-            console.log('🤖 Calling Gemini for answer synthesis...');
+            console.log('🤖 Calling Gemma-3-4B for answer synthesis (FASTEST)...');
             const geminiResult = await ai.models.generateContent({
-              model: 'gemini-2.0-flash-exp',
+              model: 'gemma-3-4b-it',
               contents: synthesisPrompt,
               config: {
                 maxOutputTokens: 2000,
@@ -4045,7 +4184,7 @@ ${expertCommentsForSynthesis}
             });
             
             synthesizedAnswer = geminiResult.text || '';
-            console.log(`✅ Gemini synthesis complete: ${synthesizedAnswer.length} characters`);
+            console.log(`✅ Gemma-3-4B synthesis complete: ${synthesizedAnswer.length} characters`);
           } catch (llmError) {
             console.warn('Gemini synthesis failed, trying Ollama:', llmError);
             
@@ -4085,7 +4224,7 @@ ${expertCommentsForSynthesis}
               
               const finalAnswer = `${synthesizedAnswer}\n\n---\n\n*คำตอบนี้ถูกสังเคราะห์จากความเห็นของผู้เชี่ยวชาญ ${allVerifications.rows.length} ท่าน: ${verifierNames}*`;
               
-              // Get embedding for synthesized answer
+              // Get embedding for synthesized answer (is_query: false = document mode)
               let sumAnswerEmbedding: number[] = [];
               try {
                 const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
@@ -4094,7 +4233,8 @@ ${expertCommentsForSynthesis}
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ 
                     text: synthesizedAnswer,
-                    dimensions: 1024
+                    dimensions: 2048,
+                    is_query: false  // ← document mode for storing
                   })
                 });
                 
@@ -4108,7 +4248,7 @@ ${expertCommentsForSynthesis}
               }
               
               // Update sum_verified_answer and sum_verified_answer_embedding (NOT the original answer)
-              if (sumAnswerEmbedding.length === 1024) {
+              if (sumAnswerEmbedding.length === 2048) {
                 await pool.query(
                   `UPDATE verified_answers 
                    SET sum_verified_answer = $1, 
@@ -4174,10 +4314,10 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
 
           let judgeResult: any = null;
           
-          // Use Google Gemini Flash for fast LLM Judge (much faster than Ollama)
+          // Use Google Gemma-3-4B for FASTEST LLM Judge (⚡ MAXIMUM SPEED)
           try {
             const geminiResult = await ai.models.generateContent({
-              model: 'gemini-2.0-flash',
+              model: 'gemma-3-4b-it',
               contents: judgePrompt,
               config: {
                 maxOutputTokens: 1000,
@@ -4857,7 +4997,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullQuestionText })
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })  // ← search mode
     });
 
     if (!embeddingResponse.ok) {
@@ -5010,11 +5150,11 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     console.log(`📋 Question title: ${question.substring(0, 50)}...`);
     console.log(`📋 Question body length: ${questionBody.length} chars`);
 
-    // Generate embedding for the FULL question (title + body)
+    // Generate embedding for the FULL question (title + body) - search mode
     const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullQuestionText })
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })  // ← search mode
     });
 
     if (!embeddingResponse.ok) {
@@ -5277,11 +5417,52 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     const hasKnowledgeData = totalSources > 0 && context && context.trim().length > 0;
     const hasAttachments = attachmentContext && attachmentContext.trim().length > 0;
     
+    // Detect language of the question (Thai vs English/Other)
+    const detectLanguage = (text: string): 'thai' | 'english' => {
+      // Count Thai characters (Unicode range: \u0E00-\u0E7F)
+      const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+      // Count English characters
+      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+      
+      // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
+      const totalChars = thaiChars + englishChars;
+      if (totalChars === 0) return 'english'; // Default to English if no letters
+      
+      return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+    };
+    
+    const questionLanguage = detectLanguage(question + ' ' + questionBody);
+    const isThaiQuestion = questionLanguage === 'thai';
+    console.log(`🌐 AI Suggestion: Detected language = ${questionLanguage}`);
+    
     // Build system prompt with priority: Knowledge Base > Attachments
     let systemPrompt = '';
     
     if (hasKnowledgeData || hasAttachments) {
-      systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
+      if (isThaiQuestion) {
+        systemPrompt = `คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
+
+กฎลำดับความสำคัญ:
+1. **ลำดับที่ 1 (สูงสุด)**: ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
+2. **ลำดับที่ 2 (รอง)**: ใช้ไฟล์แนบเป็นข้อมูลเสริม
+3. หากข้อมูลจากฐานความรู้และไฟล์แนบขัดแย้งกัน ให้ใช้ข้อมูลจากฐานความรู้
+4. หากมีเฉพาะไฟล์แนบ (ไม่มีฐานความรู้) ให้ใช้ข้อมูลจากไฟล์แนบแต่ระบุว่ามาจากไฟล์แนบ
+
+กฎการตอบ:
+1. ใช้คำตอบที่ยืนยันแล้วและความเห็นผู้เชี่ยวชาญเป็นแหล่งข้อมูลหลัก
+2. ใช้เนื้อหาจากไฟล์แนบเป็นข้อมูลเสริม
+3. เรียบเรียงและสรุปข้อมูลให้ชัดเจน - อย่าคัดลอกทั้งหมด
+4. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่กล่าวถึง
+5. ตอบเป็นภาษาไทย
+
+รูปแบบการตอบ:
+- เขียนเป็นย่อหน้าต่อเนื่อง กระชับและชัดเจน
+- ใช้ **ตัวหนา** สำหรับคำสำคัญ
+- ใช้หัวข้อย่อยเมื่อเหมาะสม
+- ไม่เว้นบรรทัดว่างหลายบรรทัดติดกัน
+`;
+      } else {
+        systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
 
 IMPORTANT PRIORITY RULES:
 1. **PRIORITY 1 (HIGHEST)**: Use KNOWLEDGE BASE data as the main source of truth
@@ -5294,7 +5475,7 @@ Rules:
 2. Use attached file content as SECONDARY/supporting information
 3. Rephrase and summarize the information clearly - do NOT copy word-for-word
 4. Include all important data, numbers, and specifications mentioned
-5. Answer in Thai language
+5. Answer in English
 
 Response format:
 - Write in continuous paragraphs, concise and clear
@@ -5302,9 +5483,16 @@ Response format:
 - Use bullet points for lists when appropriate
 - Do not leave multiple blank lines in a row
 `;
+      }
 
       if (hasKnowledgeData) {
-        systemPrompt += `
+        systemPrompt += isThaiQuestion 
+          ? `
+========== ข้อมูลฐานความรู้ (ลำดับที่ 1 - ใช้ก่อน!) ==========
+${context}
+=============================================================
+`
+          : `
 ========== KNOWLEDGE BASE DATA (PRIORITY 1 - USE THIS FIRST!) ==========
 ${context}
 ========================================================================
@@ -5312,22 +5500,47 @@ ${context}
       }
 
       if (hasAttachments) {
-        systemPrompt += `
+        systemPrompt += isThaiQuestion
+          ? `
+========== ข้อมูลจากไฟล์แนบ (ลำดับที่ 2 - ข้อมูลเสริม) ==========
+${attachmentContext}
+================================================================
+`
+          : `
 ========== ATTACHED FILES DATA (PRIORITY 2 - SUPPLEMENTARY) ==========
 ${attachmentContext}
 ======================================================================
 `;
       }
     } else {
-      systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+      if (isThaiQuestion) {
+        systemPrompt = `คุณคือ AI assistant ยังไม่มีข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
 
-Since there is NO data available, respond with exactly:
+เนื่องจากไม่มีข้อมูล ให้ตอบว่า:
 "ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยัน"
 
+อย่าสร้างข้อมูลขึ้นมาเอง`;
+      } else {
+        systemPrompt = `You are an AI assistant. There is no verified data in the knowledge base for this question yet.
+
+Since there is NO data available, respond with exactly:
+"No verified answer available in the knowledge base yet. Please wait for expert verification."
+
 Do not make up any information.`;
+      }
     }
 
-    const userPrompt = `Question: ${question}
+    const userPrompt = isThaiQuestion 
+      ? `คำถาม: ${question}
+${questionBody ? `\nรายละเอียด: ${questionBody}` : ''}
+
+สร้างคำตอบสรุปจากฐานความรู้:
+- เขียนเป็นย่อหน้าที่กระชับ มีประเด็นหลักชัดเจน
+- รวมตัวเลขและข้อมูลสำคัญถ้ามี
+- ถ้ามีข้อมูลที่ขัดแย้งกัน ให้ระบุให้ชัดเจน
+- อย่าคัดลอกคำตอบเดิมทั้งหมด
+- ตอบเป็นภาษาไทย`
+      : `Question: ${question}
 ${questionBody ? `\nDetails: ${questionBody}` : ''}
 
 Create a summary answer from the knowledge base:
@@ -5335,7 +5548,7 @@ Create a summary answer from the knowledge base:
 - Include important numbers and data if available
 - If there are conflicting information, clearly state them
 - Do NOT copy the original answer word-for-word
-- Answer in Thai language`;
+- Answer in English`;
 
     let aiGeneratedAnswer = '';
     let aiModelUsed = 'gemma-3-4b-it';
@@ -5399,6 +5612,8 @@ Create a summary answer from the knowledge base:
       'ยังไม่มีข้อมูล',
       'No data available',
       'no verified',
+      'No verified answer available',
+      'Please wait for expert verification',
       'กรุณารอผู้เชี่ยวชาญมายืนยัน'
     ];
     
@@ -5420,23 +5635,31 @@ Create a summary answer from the knowledge base:
         
         // Show self-verified answer if exists
         if (isCurrentSelfVerified && currentAnswer) {
-          aiGeneratedAnswer += `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
+          aiGeneratedAnswer += isThaiQuestion 
+            ? `**คำตอบที่ยืนยันแล้ว (โดย ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`
+            : `**Verified Answer (by ${currentCreatedBy}):**\n\n${currentAnswer}\n\n`;
         }
         
         // Show answers from similar verified questions
         const similarSources = sourcesUsed.filter((s: any) => s.type === 'similar_verified');
         if (similarSources.length > 0) {
-          aiGeneratedAnswer += '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n';
+          aiGeneratedAnswer += isThaiQuestion 
+            ? '**ข้อมูลจากคำถามที่คล้ายกัน:**\n\n'
+            : '**Information from similar questions:**\n\n';
           similarSources.forEach((source: any, idx: number) => {
             const similarity = source.similarity ? Math.round(source.similarity * 100) : 0;
-            aiGeneratedAnswer += `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`;
+            aiGeneratedAnswer += isThaiQuestion
+              ? `• จากคำถาม "${source.question}" (ความคล้าย ${similarity}%)\n`
+              : `• From question "${source.question}" (${similarity}% similarity)\n`;
           });
           aiGeneratedAnswer += '\n';
         }
         
         // Show expert verifications if any
         if (expertVerifications.rows.length > 0) {
-          aiGeneratedAnswer += '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n';
+          aiGeneratedAnswer += isThaiQuestion 
+            ? '**ความเห็นจากผู้เชี่ยวชาญ:**\n\n'
+            : '**Expert comments:**\n\n';
           expertVerifications.rows.forEach((v) => {
             const dept = v.requested_departments?.[0] || '';
             aiGeneratedAnswer += `• **${v.commenter_name}${dept ? ` (${dept})` : ''}:** ${v.comment}\n`;
@@ -5445,7 +5668,9 @@ Create a summary answer from the knowledge base:
         
         aiGeneratedAnswer = aiGeneratedAnswer.trim();
       } else {
-        aiGeneratedAnswer = 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+        aiGeneratedAnswer = isThaiQuestion 
+          ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
+          : 'No verified answer available in the knowledge base yet. Please wait for expert verification.';
       }
     }
 
@@ -6072,11 +6297,11 @@ router.post('/update-missing-embeddings', async (req: Request, res: Response) =>
       try {
         const fullText = `${q.question}\n\n${q.answer}`;
         
-        // Generate question embedding
+        // Generate question embedding (is_query: false = document mode for storing)
         const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: fullText })
+          body: JSON.stringify({ text: fullText, dimensions: 2048, is_query: false })
         });
         
         if (!qEmbedRes.ok) {
@@ -6088,11 +6313,11 @@ router.post('/update-missing-embeddings', async (req: Request, res: Response) =>
         const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
         const questionEmbedding = qEmbedData.embedding || [];
         
-        // Generate answer embedding
+        // Generate answer embedding (is_query: false = document mode for storing)
         const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: q.answer })
+          body: JSON.stringify({ text: q.answer, dimensions: 2048, is_query: false })
         });
         
         let answerEmbedding: number[] = [];

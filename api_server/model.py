@@ -1788,20 +1788,22 @@ def encode_embedding():
     Request body:
     {
         "text": "ข้อความที่ต้องการ embedding",
-        "dimensions": 1024  # optional (default: 1024 สำหรับ verified_answers)
+        "dimensions": 2048,  # optional (default: 2048 สำหรับ verified_answers)
+        "is_query": false   # optional - true=ค้นหา, false=บันทึกเอกสาร (cross-lingual support)
     }
     """
     try:
         data = request.json
         text = data.get('text', '')
-        dimensions = data.get('dimensions', 1024)  # Default: 1024
+        dimensions = data.get('dimensions', 2048)  # Default: 2048
+        is_query = data.get('is_query', False)  # Default: False (document mode)
         
         if not text:
             return jsonify({'error': 'No text provided'}), 400
         
         # ใช้ encode_text_for_embedding จาก utils
-        # มันจะ auto-select model ตามจำนวน dimensions
-        embedding = encode_text_for_embedding(text, target_dimensions=dimensions)
+        # is_query=True ใช้ retrieval.query, False ใช้ retrieval.passage
+        embedding = encode_text_for_embedding(text, target_dimensions=dimensions, is_query=is_query)
         
         # ตรวจสอบ dimensions ที่ได้กลับมา
         actual_dimensions = len(embedding)

@@ -172,9 +172,9 @@ CREATE TABLE IF NOT EXISTS verified_answers (
     sum_verified_answer TEXT,
     tags TEXT[],
     verification_type VARCHAR(50) DEFAULT 'staging',
-    question_embedding VECTOR(1024),
-    answer_embedding VECTOR(1024),
-    sum_verified_answer_embedding VECTOR(1024),
+    question_embedding VECTOR(2048),
+    answer_embedding VECTOR(2048),
+    sum_verified_answer_embedding VECTOR(2048),
     views INT DEFAULT 0,
     requested_departments TEXT[],
     notify_me BOOLEAN DEFAULT FALSE,
@@ -185,14 +185,9 @@ CREATE TABLE IF NOT EXISTS verified_answers (
 `;
 
 const createVerifiedAnswersIndexQuery = `
-CREATE INDEX IF NOT EXISTS idx_verified_answers_embedding 
-ON verified_answers USING ivfflat (question_embedding vector_cosine_ops);
-
-CREATE INDEX IF NOT EXISTS idx_verified_answers_answer_embedding 
-ON verified_answers USING ivfflat (answer_embedding vector_cosine_ops);
-
-CREATE INDEX IF NOT EXISTS idx_verified_answers_sum_embedding 
-ON verified_answers USING ivfflat (sum_verified_answer_embedding vector_cosine_ops);
+-- pgvector does not support indexes for > 2000 dimensions
+-- Using sequential scan for 2048-dim vectors
+SELECT 1;
 `;
 
 const createAnswerVerificationsTableQuery = `
@@ -362,7 +357,7 @@ BEGIN
         SELECT 1 FROM information_schema.columns
         WHERE table_name='verified_answers' AND column_name='sum_verified_answer_embedding'
     ) THEN
-        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer_embedding VECTOR(1024);
+        ALTER TABLE verified_answers ADD COLUMN sum_verified_answer_embedding VECTOR(2048);
     END IF;
 END
 $$;
@@ -1377,10 +1372,11 @@ async function triggerNotificationsForQuestion(
  * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
  * Searches for verified answers using vector similarity
  * Searches both question_embedding AND answer_embedding for better matching
+ * NOTE: threshold default = 0.3 สำหรับ cross-lingual search (ไทย<->อังกฤษ)
  */
 async function searchVerifiedAnswers(
   questionEmbedding: number[],
-  threshold: number = 0.7,
+  threshold: number = 0.3,  // ← ลดจาก 0.7 เป็น 0.3 สำหรับ cross-lingual
   limit: number = 5
 ) {
   try {
@@ -2127,6 +2123,10 @@ async function initializeAISuggestionsTables() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_learning_analysis' AND column_name='group_confidence') THEN
           ALTER TABLE ai_learning_analysis ADD COLUMN group_confidence FLOAT CHECK (group_confidence >= 0 AND group_confidence <= 1);
         END IF;
+        -- Add ai_answer_embedding column for fast Hybrid Judge
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ai_suggestions' AND column_name='ai_answer_embedding') THEN
+          ALTER TABLE ai_suggestions ADD COLUMN ai_answer_embedding VECTOR(2048);
+        END IF;
       END $$;
     `);
 
@@ -2165,16 +2165,22 @@ async function saveAISuggestion(
     aiModelUsed?: string;
     aiConfidence?: number;
     sourcesUsed?: any[];
+    aiAnswerEmbedding?: number[];  // 🆕 Pre-computed embedding for fast Hybrid Judge
   }
 ) {
   try {
+    // Include embedding if provided
+    const embeddingParam = options?.aiAnswerEmbedding && options.aiAnswerEmbedding.length === 2048
+      ? `[${options.aiAnswerEmbedding.join(',')}]`
+      : null;
+    
     const result = await pool.query(
       `INSERT INTO ai_suggestions (
         verified_answer_id, ai_generated_answer, source_type,
         original_chat_message, original_ai_response, 
-        ai_model_used, ai_confidence, sources_used
+        ai_model_used, ai_confidence, sources_used, ai_answer_embedding
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
       RETURNING id`,
       [
         verifiedAnswerId,
@@ -2184,11 +2190,12 @@ async function saveAISuggestion(
         options?.originalAiResponse || null,
         options?.aiModelUsed || null,
         options?.aiConfidence || 0,
-        JSON.stringify(options?.sourcesUsed || [])
+        JSON.stringify(options?.sourcesUsed || []),
+        embeddingParam
       ]
     );
     
-    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}`);
+    console.log(`✅ AI suggestion saved for question ${verifiedAnswerId}${embeddingParam ? ' (with embedding)' : ''}`);
     return { success: true, suggestionId: result.rows[0].id };
   } catch (error) {
     console.error('Error saving AI suggestion:', error);
