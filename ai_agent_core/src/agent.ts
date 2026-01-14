@@ -646,7 +646,7 @@ router.post('/message', async (req : Request, res : Response) => {
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
-          threshold_page: 0.5,
+          threshold_page: 0.8,
           threshold_text: 0.8,
           documentSearchMethod: documentSearchMethod,
         }),

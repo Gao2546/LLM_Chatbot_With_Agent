@@ -868,7 +868,7 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     if not LOCAL:
         response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
-        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:4b-instruct", prompt=prompt, system_prompt=system_prompt)
+        response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b-instruct", prompt=prompt, system_prompt=system_prompt)
     return response
 
 # ==============================================================================
@@ -1269,13 +1269,13 @@ If a specific user question is provided and this page contains no relevant infor
                              "If the image contains text, extract and summarize it...")
             # Prompt for OpenRouter VLM
             final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-            vlm_response += ollama_describe_image(
+            vlm_response_L = ollama_describe_image(
                 image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
-                model="qwen3-vl:4b-instruct",
+                model="qwen3-vl:2b-instruct",
                 prompt=final_user_prompt,
                 system_prompt=vlm_system_prompt
                 )
-            vlm_response = "\n\n".join(vlm_response) + "\n\n"
+            vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
 
     print(vlm_response)
     print("✅ VLM processing complete.")
@@ -1875,10 +1875,10 @@ def get_image_embedding_jinna_api_local(
     global _JINA_MODEL_INSTANCE
 
     # 1. Input Validation
-    if text and image_bytes_list:
+    if (text or search_text) and image_bytes_list:
         print("Error: Provide either 'text' OR 'image_bytes_list', not both.")
         return None
-    if not text and not image_bytes_list:
+    if not text and not search_text and not image_bytes_list:
         print("Error: Must provide either 'text' or 'image_bytes_list'.")
         return None
 
@@ -2692,14 +2692,14 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
     try:
         # Use the pre-loaded Jina embedding model (FAST - no reload)
         if model is not None:
-            print(f"⚡ Using PRE-LOADED Jina model for embedding (instant)...")
+            print(f"⚡ Using PRE-LOADED Jina model (LOCAL) for embedding (instant)...")
             embedding = model.encode(text, task='retrieval')
             return embedding.tolist()
         else:
-            print("⚠️ Model not initialized (model=None). Using Ollama fallback (slower, 3-5 seconds)...")
-            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+            print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
+            embedding_list = get_image_embedding_jinna_api(search_text=text)
             if embedding_list and len(embedding_list) > 0:
-                return embedding_list[0]
+                return embedding_list
             else:
                 raise ValueError("Ollama returned empty embedding")
             
