@@ -175,7 +175,7 @@ export default async function agentRouters(ios: SocketIOServer) {
         return res.status(400).json({ error: 'Question required' });
       }
 
-      // สร้าง embedding (สำหรับ verified_answers ต้อง 1024 dimensions)
+      // สร้าง embedding (สำหรับ verified_answers ใช้ 2048 dimensions)
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       console.log(`Calling embedding API at ${API_SERVER_URL}/encode_embedding...`);
       
@@ -185,7 +185,8 @@ export default async function agentRouters(ios: SocketIOServer) {
           `${API_SERVER_URL}/encode_embedding`,
           { 
             text: question,
-            dimensions: 1024  // ← ต้องเป็น 1024 dimensions
+            dimensions: 2048,
+            is_query: true  // ← ใช้ retrieval.query สำหรับค้นหา (cross-lingual support)
           },
           { timeout: 30000 } // 30 second timeout
         );
@@ -209,12 +210,12 @@ export default async function agentRouters(ios: SocketIOServer) {
       }
 
       // ตรวจสอบ dimensions
-      if (embedding.length !== 1024) {
-        console.warn(`Warning: Expected 1024 dimensions, got ${embedding.length}. Proceeding anyway...`);
+      if (embedding.length !== 2048) {
+        console.warn(`Warning: Expected 2048 dimensions, got ${embedding.length}. Proceeding anyway...`);
       }
 
       // ค้นหา
-      const results = await searchVerifiedAnswers(embedding, threshold || 0.7, limit || 5);
+      const results = await searchVerifiedAnswers(embedding, threshold || 0.3, limit || 5);
 
       res.json({ success: true, results });
     } catch (error) {
@@ -753,18 +754,18 @@ router.post('/message', async (req : Request, res : Response) => {
           const userQuestion = userMessage || '';
           
           console.log('⏳ Requesting embedding from Python API...');
-          socket?.emit('StreamText', '⏳ กำลังประมวลผลคำถาม (loading embeddings)...\n');
+          // ไม่แสดง status message ให้ผู้ใช้
           
           const embeddingRes = await axios.post(
             `${API_SERVER_URL}/encode_embedding`,
-            { text: userQuestion, dimensions: 1024 },
+            { text: userQuestion, dimensions: 2048, is_query: true },  // ← cross-lingual search
             { timeout: 120000 }  // ⬅️ INCREASED from 30s to 120s (2 minutes)
           );
           
           if (embeddingRes.data && embeddingRes.data.embedding) {
             embedding = embeddingRes.data.embedding;
             console.log(`✅ AI Suggests: Got embedding with ${embedding.length} dimensions`);
-            socket?.emit('StreamText', '✅ Embedding ready. Searching knowledge base...\n');
+            // ไม่แสดง status message ให้ผู้ใช้
           } else {
             throw new Error('No embedding in response');
           }
@@ -781,9 +782,9 @@ router.post('/message', async (req : Request, res : Response) => {
           return res.json({ response: '❌ Embedding generation failed' });
         }
         
-        // Use threshold 0.6 (60%) to find relevant matches only
-        // Higher threshold prevents irrelevant answers from being used
-        const SIMILARITY_THRESHOLD = 0.6;
+        // Use threshold 0.3 for cross-lingual search (Thai<->English)
+        // Lower threshold allows finding semantically similar content across languages
+        const SIMILARITY_THRESHOLD = 0.3;
         console.log(`🔍 AI Suggests: Searching with embedding length=${embedding.length}, threshold=${SIMILARITY_THRESHOLD}`);
         const results = await searchVerifiedAnswers(embedding, SIMILARITY_THRESHOLD, 5);
         console.log(`🔍 AI Suggests: Search returned ${results?.length || 0} results`);
@@ -793,7 +794,7 @@ router.post('/message', async (req : Request, res : Response) => {
         let totalSources = 0;
         
         if (results && results.length > 0) {
-          // Filter out results with low similarity even if they passed threshold
+          // Filter out results with low similarity - use same threshold
           const relevantResults = results.filter((r: any) => r.similarity >= SIMILARITY_THRESHOLD);
           
           if (relevantResults.length > 0) {
@@ -913,73 +914,117 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         let aiGeneratedAnswer = '';
         let aiModelUsed = modelToUse || 'gemma-3-4b-it';
         
-        // 4. Call LLM to synthesize answer
+        // 4. Call LLM to synthesize answer WITH STREAMING
         try {
-          console.log('🤖 AI Suggests: Calling LLM to synthesize answer...');
+          console.log('🤖 AI Suggests: Calling LLM with STREAMING...');
           
           const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
           
-          // Use Google AI API
-          const aiResponse = await ai.models.generateContent({
+          // Use Google AI API with Streaming
+          const result = await ai.models.generateContentStream({
             model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
-            contents: fullPrompt
+            contents: fullPrompt,
+            config: {
+              maxOutputTokens: 100000,
+            },
           });
           
-          if (aiResponse && aiResponse.text) {
-            aiGeneratedAnswer = aiResponse.text
-              .replace(/\r\n/g, '\n')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim();
-            console.log('✅ AI Suggests: LLM generated answer successfully');
+          // Stream the response chunk by chunk
+          for await (const chunk of result) {
+            if (controller.signal.aborted) {
+              console.log('⚠️ AI Suggests: Streaming aborted');
+              break;
+            }
+            let chunkText = chunk.text;
+            if (chunkText !== undefined) {
+              aiGeneratedAnswer += chunkText;
+              // Emit each accumulated response to client (streaming effect)
+              socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+            }
           }
-        } catch (llmError: any) {
-          console.error('⚠️ AI Suggests: Google AI failed:', llmError.message);
           
-          // Fallback to Ollama
+          aiGeneratedAnswer = aiGeneratedAnswer
+            .replace(/\r\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          console.log('✅ AI Suggests: LLM streaming completed');
+          
+        } catch (llmError: any) {
+          console.error('⚠️ AI Suggests: Google AI streaming failed:', llmError.message);
+          
+          // Fallback to Ollama with Streaming
           try {
-            console.log('🔄 AI Suggests: Trying Ollama as fallback...');
+            console.log('🔄 AI Suggests: Trying Ollama with streaming...');
             const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 model: 'gemma3:4b',
                 prompt: `${systemPrompt}\n\n${userPrompt}`,
-                stream: false
+                stream: true  // Enable streaming
               })
             });
             
-            if (ollamaResponse.ok) {
-              const ollamaData = await ollamaResponse.json() as { response: string };
-              aiGeneratedAnswer = (ollamaData.response || '')
+            if (ollamaResponse.ok && ollamaResponse.body) {
+              const reader = (ollamaResponse.body as any).getReader();
+              const decoder = new TextDecoder();
+              
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                // Ollama streams JSON lines
+                const lines = chunk.split('\n').filter(line => line.trim());
+                for (const line of lines) {
+                  try {
+                    const json = JSON.parse(line);
+                    if (json.response) {
+                      aiGeneratedAnswer += json.response;
+                      socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+                    }
+                  } catch (e) {
+                    // Skip invalid JSON
+                  }
+                }
+              }
+              
+              aiGeneratedAnswer = aiGeneratedAnswer
                 .replace(/\r\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
               aiModelUsed = 'gemma3:4b (Ollama)';
-              console.log('✅ AI Suggests: Ollama generated answer');
+              console.log('✅ AI Suggests: Ollama streaming completed');
             }
           } catch (ollamaError) {
-            console.error('⚠️ AI Suggests: Ollama also failed');
+            console.error('⚠️ AI Suggests: Ollama streaming also failed');
           }
         }
         
-        // 5. Build final response
+        // 5. Build final response and add footer
         let finalResponse = '';
         
         if (aiGeneratedAnswer) {
           finalResponse = aiGeneratedAnswer;
           
-          // Add sources reference (without model name for chat page)
+          // Add sources reference footer with streaming
+          let footer = '';
           if (totalSources > 0) {
-            finalResponse += isThaiQuestion 
+            footer = isThaiQuestion 
               ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`
               : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}*`;
           } else {
-            finalResponse += isThaiQuestion
+            footer = isThaiQuestion
               ? `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`
               : `\n\n---\n⚠️ *No data found in knowledge base - AI answer not yet verified*`;
           }
+          finalResponse += footer;
+          
+          // Stream the footer (since AI answer was already streamed)
+          socket?.emit('StreamText', finalResponse);
+          
         } else {
-          // Fallback if LLM fails completely
+          // Fallback if LLM fails completely - no streaming happened
           if (totalSources > 0) {
             finalResponse = isThaiQuestion 
               ? '## 🔍 ผลลัพธ์จากฐานความรู้\n\n'
@@ -1003,10 +1048,11 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
               ? '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง'
               : '**Suggestion:** Try using **Ask** mode to get a direct AI answer';
           }
+          // Send fallback response (not streamed)
+          socket?.emit('StreamText', finalResponse);
         }
         
         response = { text: finalResponse };
-        socket?.emit('StreamText', finalResponse);
         
         // Save to chat history
         chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
@@ -1759,7 +1805,7 @@ router.post('/edit-message', async (req, res) => {
       try {
         const embeddingRes = await axios.post(
           `${API_SERVER_URL}/encode_embedding`,
-          { text: newMessage, dimensions: 1024 },
+          { text: newMessage, dimensions: 2048, is_query: true },  // ← cross-lingual search
           { timeout: 30000 }
         );
         
@@ -1773,8 +1819,8 @@ router.post('/edit-message', async (req, res) => {
         return res.json({ response: errorMsg });
       }
       
-      // Search verified answers
-      const results = await searchVerifiedAnswers(embedding, 0.5, 5);
+      // Search verified answers with lower threshold for cross-lingual
+      const results = await searchVerifiedAnswers(embedding, 0.3, 5);
       
       let context = '';
       let sourcesUsed: any[] = [];
@@ -2749,22 +2795,22 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
     try {
       const apiUrl = process.env.API_SERVER_URL;
       if (apiUrl) {
-        // Get question embedding
+        // Get question embedding (is_query: false = document/passage mode)
         const questionEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: question, dimensions: 1024 })
+          body: JSON.stringify({ text: question, dimensions: 2048, is_query: false })
         });
         if (questionEmbedRes.ok) {
           const embedData: any = await questionEmbedRes.json();
           questionEmbedding = embedData.embedding || [];
         }
 
-        // Get answer embedding
+        // Get answer embedding (is_query: false = document/passage mode)
         const answerEmbedRes = await fetch(`${apiUrl}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: answer, dimensions: 1024 })
+          body: JSON.stringify({ text: answer, dimensions: 2048, is_query: false })
         });
         if (answerEmbedRes.ok) {
           const embedData: any = await answerEmbedRes.json();
@@ -3090,19 +3136,19 @@ router.get('/get-all-verified-answers', async (req: Request, res: Response) => {
 // GET /api/search-verified-answers - Search verified answers
 router.post('/search-verified-answers', async (req: Request, res: Response) => {
   try {
-    const { question, threshold = 0.7, limit = 20 } = req.body;
+    const { question, threshold = 0.3, limit = 20 } = req.body;  // ← default 0.3 for cross-lingual
 
     if (!question || typeof question !== 'string') {
       return res.status(400).json({ success: false, error: 'Missing question parameter' });
     }
 
-    // Get embedding from Python API
+    // Get embedding from Python API (is_query: true for search)
     let questionEmbedding: number[] = [];
     try {
       const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: question })
+        body: JSON.stringify({ text: question, dimensions: 2048, is_query: true })
       });
       const embedData: any = await embedRes.json();
       questionEmbedding = embedData.embedding || [];
@@ -3148,13 +3194,13 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Missing question parameter' });
     }
 
-    // Get embedding from Python API
+    // Get embedding from Python API (is_query: true for search)
     let questionEmbedding: number[] = [];
     try {
       const embedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: question })
+        body: JSON.stringify({ text: question, dimensions: 2048, is_query: true })
       });
       const embedData: any = await embedRes.json();
       questionEmbedding = embedData.embedding || [];
@@ -3163,8 +3209,8 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, error: 'Could not generate embedding' });
     }
 
-    // Search similar verified answers
-    const results = await searchVerifiedAnswers(questionEmbedding, 0.7, 5);
+    // Search similar verified answers with cross-lingual threshold
+    const results = await searchVerifiedAnswers(questionEmbedding, 0.3, 5);
 
     res.json({ success: true, results });
 
@@ -3812,11 +3858,11 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
       console.log('🔄 Generating embeddings...');
       const fullQuestionText = `${question}\n\n${answer}`;
       
-      // Generate question embedding
+      // Generate question embedding (is_query: false = document mode)
       const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullQuestionText })
+        body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: false })
       });
       if (qEmbedRes.ok) {
         const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
@@ -3824,11 +3870,11 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
         console.log('✅ Question embedding generated, length:', questionEmbedding.length);
       }
       
-      // Generate answer embedding
+      // Generate answer embedding (is_query: false = document mode)
       const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: answer })
+        body: JSON.stringify({ text: answer, dimensions: 2048, is_query: false })
       });
       if (aEmbedRes.ok) {
         const aEmbedData = await aEmbedRes.json() as { embedding: number[] };
@@ -4178,7 +4224,7 @@ ${expertCommentsForSynthesis}
               
               const finalAnswer = `${synthesizedAnswer}\n\n---\n\n*คำตอบนี้ถูกสังเคราะห์จากความเห็นของผู้เชี่ยวชาญ ${allVerifications.rows.length} ท่าน: ${verifierNames}*`;
               
-              // Get embedding for synthesized answer
+              // Get embedding for synthesized answer (is_query: false = document mode)
               let sumAnswerEmbedding: number[] = [];
               try {
                 const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
@@ -4187,7 +4233,8 @@ ${expertCommentsForSynthesis}
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ 
                     text: synthesizedAnswer,
-                    dimensions: 1024
+                    dimensions: 2048,
+                    is_query: false  // ← document mode for storing
                   })
                 });
                 
@@ -4201,7 +4248,7 @@ ${expertCommentsForSynthesis}
               }
               
               // Update sum_verified_answer and sum_verified_answer_embedding (NOT the original answer)
-              if (sumAnswerEmbedding.length === 1024) {
+              if (sumAnswerEmbedding.length === 2048) {
                 await pool.query(
                   `UPDATE verified_answers 
                    SET sum_verified_answer = $1, 
@@ -4950,7 +4997,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullQuestionText })
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })  // ← search mode
     });
 
     if (!embeddingResponse.ok) {
@@ -5103,11 +5150,11 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
     console.log(`📋 Question title: ${question.substring(0, 50)}...`);
     console.log(`📋 Question body length: ${questionBody.length} chars`);
 
-    // Generate embedding for the FULL question (title + body)
+    // Generate embedding for the FULL question (title + body) - search mode
     const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullQuestionText })
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })  // ← search mode
     });
 
     if (!embeddingResponse.ok) {
@@ -6250,11 +6297,11 @@ router.post('/update-missing-embeddings', async (req: Request, res: Response) =>
       try {
         const fullText = `${q.question}\n\n${q.answer}`;
         
-        // Generate question embedding
+        // Generate question embedding (is_query: false = document mode for storing)
         const qEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: fullText })
+          body: JSON.stringify({ text: fullText, dimensions: 2048, is_query: false })
         });
         
         if (!qEmbedRes.ok) {
@@ -6266,11 +6313,11 @@ router.post('/update-missing-embeddings', async (req: Request, res: Response) =>
         const qEmbedData = await qEmbedRes.json() as { embedding: number[] };
         const questionEmbedding = qEmbedData.embedding || [];
         
-        // Generate answer embedding
+        // Generate answer embedding (is_query: false = document mode for storing)
         const aEmbedRes = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: q.answer })
+          body: JSON.stringify({ text: q.answer, dimensions: 2048, is_query: false })
         });
         
         let answerEmbedding: number[] = [];
