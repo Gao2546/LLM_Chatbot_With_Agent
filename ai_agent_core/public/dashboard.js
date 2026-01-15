@@ -91,11 +91,7 @@ async function loadDashboard() {
 async function loadSummaryMetrics() {
     try {
         // Get AI learning analytics
-        const [analyticsResponse, pendingResponse, unverifiedResponse] = await Promise.all([
-            fetch('/api/knowledge-group-analytics'),
-            fetch('/api/filter-questions?type=pending-review&limit=1'),
-            fetch('/api/filter-questions?type=unverified&limit=1')
-        ]);
+        const analyticsResponse = await fetch('/api/knowledge-group-analytics');
         
         if (!analyticsResponse.ok) {
             throw new Error('Failed to fetch analytics');
@@ -109,28 +105,15 @@ async function loadSummaryMetrics() {
         }
         
         const groups = result.data.groupDistribution || [];
+        const summary = result.data.summary || {};
         
-        // Calculate summary stats from AI analytics
-        let totalQuestions = 0;
-        let totalRejected = 0;
-        let totalAccepted = 0;
+        // Use summary stats from AI analytics (includes pending from ai_suggestions)
+        const totalQuestions = summary.totalQuestions || groups.reduce((sum, g) => sum + (parseInt(g.total_questions) || 0), 0);
+        const totalRejected = summary.totalRejected || groups.reduce((sum, g) => sum + (parseInt(g.rejected_count) || 0), 0);
+        const totalAccepted = summary.totalAccepted || groups.reduce((sum, g) => sum + (parseInt(g.accepted_count) || 0), 0);
         
-        groups.forEach(group => {
-            totalQuestions += parseInt(group.total_questions) || 0;
-            totalRejected += parseInt(group.rejected_count) || 0;
-            totalAccepted += parseInt(group.accepted_count) || 0;
-        });
-        
-        // Get pending count from verified_answers (pending-review + unverified)
-        let totalPending = 0;
-        if (pendingResponse.ok) {
-            const pendingData = await pendingResponse.json();
-            totalPending += parseInt(pendingData.totalCount) || 0;
-        }
-        if (unverifiedResponse.ok) {
-            const unverifiedData = await unverifiedResponse.json();
-            totalPending += parseInt(unverifiedData.totalCount) || 0;
-        }
+        // Get pending count from ai_suggestions (decision = 'pending')
+        const totalPending = summary.totalPending || groups.reduce((sum, g) => sum + (parseInt(g.pending_count) || 0), 0);
         
         // Update main stats
         document.getElementById('totalQuestions').textContent = totalQuestions;
@@ -541,7 +524,7 @@ function updateLastUpdatedTime() {
     if (!element) return; // Exit gracefully if element not found
     
     const now = new Date();
-    const formatted = now.toLocaleString('th-TH', {
+    const formatted = now.toLocaleString('en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
