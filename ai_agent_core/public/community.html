@@ -662,19 +662,37 @@
                         }
                     }, 100);
                 } else {
-                    // Regular semantic search by question text
-                    const res = await fetch('/api/search-verified-answers', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question: query, threshold: 0.7, limit: 20 })
+                    // Try partial text match first (fast, client-side)
+                    if (allQuestions.length === 0) {
+                        await loadQuestionsByFilter('all');
+                    }
+                    
+                    const searchLower = query.toLowerCase();
+                    const textMatches = allQuestions.filter(q => {
+                        const questionText = (q.question || '').toLowerCase();
+                        const answerText = (q.final_answer || '').toLowerCase();
+                        return questionText.includes(searchLower) || answerText.includes(searchLower);
                     });
-                    const data = await res.json();
-                    allQuestions = (data.results || []).map((q, idx) => ({
-                        ...q,
-                        id: q.id || idx,
-                        views: q.views || 0
-                    }));
-                    renderQuestions();
+                    
+                    // If we found text matches, use them
+                    if (textMatches.length > 0) {
+                        allQuestions = textMatches;
+                        renderQuestions();
+                    } else {
+                        // Otherwise fall back to semantic search
+                        const res = await fetch('/api/search-verified-answers', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ question: query, threshold: 0.5, limit: 20 })
+                        });
+                        const data = await res.json();
+                        allQuestions = (data.results || []).map((q, idx) => ({
+                            ...q,
+                            id: q.id || idx,
+                            views: q.views || 0
+                        }));
+                        renderQuestions();
+                    }
                 }
             } catch (e) {
                 console.error('Search error:', e);

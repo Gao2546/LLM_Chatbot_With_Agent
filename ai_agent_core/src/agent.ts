@@ -6208,18 +6208,30 @@ router.get('/missing-knowledge-topics', async (req: Request, res: Response) => {
  */
 router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
   try {
-    const [groupAnalytics, confidenceDistribution] = await Promise.all([
+    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts] = await Promise.all([
       getKnowledgeGroupAnalytics(),
-      getConfidenceDistribution()
+      getConfidenceDistribution(),
+      // Get direct counts from ai_suggestions table
+      pool.query(`
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count,
+          COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
+          COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count
+        FROM ai_suggestions
+      `)
     ]);
 
-    // Calculate summary stats
+    // Calculate summary stats from groupAnalytics (for group distribution)
     const totalQuestions = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.total_questions || 0), 0);
-    const totalRejected = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.rejected_count || 0), 0);
-    const totalAccepted = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.accepted_count || 0), 0);
-    const totalPending = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.pending_count || 0), 0);
     const totalHighConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.high_conf_count || 0), 0);
     const totalLowConf = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.low_conf_count || 0), 0);
+    
+    // Get pending/accepted/rejected directly from ai_suggestions table
+    const aiCounts = aiSuggestionsCounts.rows[0] || {};
+    const totalPending = parseInt(aiCounts.pending_count) || 0;
+    const totalAccepted = parseInt(aiCounts.accepted_count) || 0;
+    const totalRejected = parseInt(aiCounts.rejected_count) || 0;
     const totalDecisions = totalRejected + totalAccepted;
     
     res.json({
@@ -6228,7 +6240,7 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
         groupDistribution: groupAnalytics,
         confidenceDistribution,
         summary: {
-          totalQuestions,
+          totalQuestions: parseInt(aiCounts.total) || totalQuestions,
           totalPending,
           totalRejected,
           totalAccepted,
