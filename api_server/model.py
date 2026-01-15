@@ -1134,20 +1134,26 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            legacy_results = search_similar_documents_by_active_user(
-                query_text=search_text,
-                user_id=user_id,
-                top_k=top_k_text,
-                threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
-            )
+            for text in [search_text, queryT]:
+                legacy_results = search_similar_documents_by_active_user(
+                    query_text=text,
+                    user_id=user_id,
+                    top_k=top_k_text,
+                    threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                )
+                if legacy_results:
+                    break
 
             # 2. New Page Image Search
-            page_search_results = search_similar_pages_by_active_user(
-                query_text=search_text,
-                user_id=user_id,
-                top_k=top_k_pages,
-                threshold=threshold_page * float(np.log(np.exp(1) + i)),
-            )
+            for text in [search_text, queryT]:
+                page_search_results = search_similar_pages_by_active_user(
+                    query_text=text,
+                    user_id=user_id,
+                    top_k=top_k_pages,
+                    threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                )
+                if page_search_results:
+                    break
 
             if legacy_results or page_search_results:
                 break
@@ -1158,21 +1164,27 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            legacy_results = search_similar_documents_by_active_user_all(
-                query_text=search_text,
-                user_id=user_id,
-                top_k=top_k_text,
-                threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
-            )
+            for text in [search_text, queryT]:
+                legacy_results = search_similar_documents_by_active_user_all(
+                    query_text=text,
+                    user_id=user_id,
+                    top_k=top_k_text,
+                    threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                )
+                if legacy_results:
+                    break
 
             # 2. New Page Image Search
-            page_search_results = search_similar_pages_by_active_user_all(
-                query_text=search_text,
-                user_id=user_id,
-                top_k=top_k_pages,
-                threshold=threshold_page * float(np.log(np.exp(1) + i)),
-            )
-
+            for text in [search_text, queryT]:
+                page_search_results = search_similar_pages_by_active_user_all(
+                    query_text=text,
+                    user_id=user_id,
+                    top_k=top_k_pages,
+                    threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                )
+                if page_search_results:
+                    break
+                
             if legacy_results or page_search_results:
                 break
 
@@ -1196,22 +1208,28 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             if has_legacy:
-                legacy_results = search_similar_documents_by_chat(
-                    query_text=search_text, 
-                    user_id=user_id, 
-                    chat_history_id=chat_history_id, 
-                    top_k=top_k_text,
-                    threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
-                )
+                for text in [search_text, queryT]:
+                    legacy_results = search_similar_documents_by_chat(
+                        query_text=text, 
+                        user_id=user_id, 
+                        chat_history_id=chat_history_id, 
+                        top_k=top_k_text,
+                        threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                    )
+                    if legacy_results:
+                        break
 
             if has_pages:
-                page_search_results = search_similar_pages(
-                    query_text=search_text, 
-                    user_id=user_id, 
-                    chat_history_id=chat_history_id, 
-                    top_k=top_k_pages, 
-                    threshold=threshold_page * float(np.log(np.exp(1) + i)),
-                )
+                for text in [search_text, queryT]:
+                    page_search_results = search_similar_pages(
+                        query_text=text, 
+                        user_id=user_id, 
+                        chat_history_id=chat_history_id, 
+                        top_k=top_k_pages, 
+                        threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                    )
+                    if page_search_results:
+                        break
             if legacy_results or page_search_results or ( not has_legacy and  not has_pages):
                 break
 

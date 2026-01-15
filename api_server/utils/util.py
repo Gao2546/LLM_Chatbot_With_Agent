@@ -1719,7 +1719,8 @@ Requirements:
     payload = {
         "model": model_name,
         "task": task_type, # Use "text-matching" as shown in the API example for similarity
-        "input": input_data
+        "input": input_data,
+        "dimensions": 2048
     }
 
     try:
