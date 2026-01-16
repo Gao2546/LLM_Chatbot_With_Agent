@@ -236,18 +236,22 @@ export default async function agentRouters(ios: SocketIOServer) {
 
 // Initialize IFX GPT Client
 // Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
-const ifxCertPath = process.env.IFXGPT_CERT_PATH;
+const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
 const ifxToken = process.env.IFXGPT_TOKEN;
 const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
 
+// 1. Create the Agent with the correct 'ca' property
+const agent = new https.Agent({
+  ca: fs.readFileSync(ifxCertPath), // Correct: 'ca' is for Trust, 'cert' is for Identity
+});
+
+// 2. Initialize Client
+// We cast the config to 'any' to bypass the "httpAgent does not exist" TS error.
 const ifxClient = new OpenAI({
   apiKey: ifxToken,
   baseURL: ifxBaseUrl,
-  // This handles the corporate CA bundle certificate
-  // httpAgent: new https.Agent({
-  //   ca: ifxCertPath ? fs.readFileSync(ifxCertPath) : undefined,
-  // }),
-});
+  httpAgent: agent, 
+} as any);
 
 
 async function IFXGPTInference(
