@@ -253,6 +253,8 @@ RUN groupadd -r chatllm && \
 # Set working directory
 WORKDIR /app
 
+COPY ca-bundle.crt .
+
 # Copy the requirements file into the container at /app
 COPY ./requirements.txt .
 
@@ -292,7 +294,7 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     MINIO_USE_SSL=false \
     IS_DOCKER=true \
     LOCAL=True \
-    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/home/athip/psu/infineon/LLM_Chatbot_With_Agent/test_api/ca-bundle.crt \
+    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/app/ca-bundle.crt \
     WINDOWS_USER=yuthaworawit \
     WINDOWS_PASSWORD="Gao Gao2546"
 
