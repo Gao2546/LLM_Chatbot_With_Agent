@@ -68,8 +68,8 @@ minio
 # langchain-text-splitters
 
 # Document Processing & OCR
-PyMuPDF
-pillow
+PyMuPDF==1.26.6
+pillow==11.3.0
 docling
 docling-core
 # unstructured[pdf]
