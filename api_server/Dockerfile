@@ -213,9 +213,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     gnupg \
     ca-certificates \
-    tesseract-ocr \
-    tesseract-ocr-tha \
-    libtesseract-dev \
+    # tesseract-ocr \
+    # tesseract-ocr-tha \
+    # libtesseract-dev \
     libglib2.0-0 \
     libsm6 \
     libxrender1 \
@@ -230,19 +230,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 2. Install Chrome and ChromeDriver as ROOT
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | \
-    gpg --dearmor -o /etc/apt/trusted.gpg.d/google.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-    > /etc/apt/sources.list.d/google-chrome.list && \
-    apt-get update && apt-get install -y google-chrome-stable && \
-    CHROME_VERSION=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+' || true) && \
-    CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d'.' -f1 || echo "114") && \
-    CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_MAJOR_VERSION" || echo "114.0.5735.90") && \
-    wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
-    unzip /tmp/chromedriver.zip -d /usr/local/bin && \
-    chmod +x /usr/local/bin/chromedriver && \
-    rm /tmp/chromedriver.zip && \
-    rm -rf /var/lib/apt/lists/*
+# RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | \
+#     gpg --dearmor -o /etc/apt/trusted.gpg.d/google.gpg && \
+#     echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+#     > /etc/apt/sources.list.d/google-chrome.list && \
+#     apt-get update && apt-get install -y google-chrome-stable && \
+#     CHROME_VERSION=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+' || true) && \
+#     CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d'.' -f1 || echo "114") && \
+#     CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_MAJOR_VERSION" || echo "114.0.5735.90") && \
+#     wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
+#     unzip /tmp/chromedriver.zip -d /usr/local/bin && \
+#     chmod +x /usr/local/bin/chromedriver && \
+#     rm /tmp/chromedriver.zip && \
+#     rm -rf /var/lib/apt/lists/*
 
 # 3. Create non-root user and setup directories
 RUN groupadd -r chatllm && \
