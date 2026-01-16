@@ -37,7 +37,7 @@
 
 
 # Tool
-dotenv
+python-dotenv
 wheel
 
 # Web Framework & Server
@@ -68,8 +68,8 @@ minio
 # langchain-text-splitters
 
 # Document Processing & OCR
-pymupdf
-Pillow
+PyMuPDF
+pillow
 docling
 docling-core
 # unstructured[pdf]
