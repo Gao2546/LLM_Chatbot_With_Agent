@@ -65,7 +65,7 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     PORT=3000 \
     LOCAL=False \
     IFXGPT=True \
-    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/app/ca-bundle.crt \
+    IFXGPT_CERT_PATH=/app/ca-bundle.crt \
     WINDOWS_USER=yuthaworawit \
     WINDOWS_PASSWORD="Gao Gao2546"
 
