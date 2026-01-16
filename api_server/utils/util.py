@@ -885,7 +885,7 @@ def summarize_text_with_llm(text: str) -> str:
     # Using a fast and cost-effective model for summarization tasks
     if not LOCAL:
         if IFXGPT:
-            IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+            IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="gpt-5-mini")
             pass
         else:
             summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
@@ -912,7 +912,7 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     # Call the object detection API with the image bytes
     if not LOCAL:
         if IFXGPT:
-            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct")
+            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="gpt-5-mini")
         else:
             response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
@@ -1309,7 +1309,7 @@ If a specific user question is provided and this page contains no relevant infor
                     prompt=final_user_prompt,
                     system_prompt=vlm_system_prompt, # The user's detailed instructions go here
                     image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                    model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+                    model_name= "gpt-5-mini" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
                 ) + "\n\n"
             else:
                 vlm_response += DeepInfraInference(
@@ -1746,7 +1746,12 @@ Requirements:
         if search_text == None:
             if not LOCAL:
                 if IFXGPT:
-                    pass
+                    search_text = IFXGPTInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name="gpt-5-mini" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
+                    )
                 else:
                     search_text = DeepInfraInference(
                         prompt=create_search_prompt,
@@ -1969,7 +1974,10 @@ Output only the descriptive paragraph. No introductory text.
                 # Ensure LOCAL and helper functions are defined in your outer scope
                 if not LOCAL:
                     if IFXGPT:
-                        pass
+                        search_text = IFXGPTInference(
+                            prompt=create_search_prompt,
+                            model_name="gpt-5-mini" 
+                        )
                     else:
                         search_text = DeepInfraInference(
                             prompt=create_search_prompt,
@@ -3018,7 +3026,7 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
     # Step 1: Encode the query text using the *CLIP* model
     if not LOCAL:
         if IFXGPT: # Embedding
-            pass
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
@@ -3190,7 +3198,7 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
         if IFXGPT: # Embedding
-            pass
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
@@ -3329,7 +3337,7 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
         if IFXGPT: # Embedding
-            pass
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
@@ -3886,7 +3894,14 @@ Provide your response in Markdown format, following the tagging guidelines provi
     # Use OpenRouterInference, which now accepts a list of images
     if not LOCAL:
         if IFXGPT:
-            pass
+            vlm_response = IFXGPTInference(
+            # vlm_response = DeepInfraInference(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                image_bytes_list=image_bytes_list,
+                model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+            print("IFXGPT VLM response received.")
         else:
             # system_prompt = ("You're an image expert."
             #                  "If the image contains text, extract and summarize it...")
