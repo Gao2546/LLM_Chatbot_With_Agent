@@ -291,7 +291,10 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
     IS_DOCKER=true \
-    LOCAL=True
+    LOCAL=True \
+    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/home/athip/psu/infineon/LLM_Chatbot_With_Agent/test_api/ca-bundle.crt \
+    WINDOWS_USER=yuthaworawit \
+    WINDOWS_PASSWORD="Gao Gao2546"
 
 EXPOSE 5000
 

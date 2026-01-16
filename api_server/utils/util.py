@@ -48,6 +48,9 @@ from minio import Minio
 from minio.error import S3Error
 from typing import List, Optional, Dict, Any, Union
 
+import openai
+import httpx
+
 
 # from vllm import LLM, SamplingParams
 # from vllm.config import PoolerConfig
@@ -56,9 +59,47 @@ from typing import List, Optional, Dict, Any, Union
 dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
+IFXGPT = os.getenv("IFXGPT", True)
 API_OLLAMA = os.getenv("API_OLLAMA", "http://127.0.0.1:11434/api/generate")
 
+# IFX GPT API
+cert_path = os.getenv('YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH')   
+window_user = os.getenv('WINDOWS_USER')
+window_password = os.getenv('WINDOWS_PASSWORD') 
+token = os.getenv("TOKEN")
+basic_auth = False
+
 LOCAL = True if LOCAL == "True" else False
+IFXGPT = True if IFXGPT == "True" else False
+
+def generate_base64_string(username, password):   
+    """   
+    To Encode username & password strings into base64   
+    """   
+   
+    sample_string = username + ":" + password   
+    sample_string_bytes = sample_string.encode("ascii")   
+   
+    base64_bytes = base64.b64encode(sample_string_bytes)   
+    base64_string = base64_bytes.decode("ascii")   
+    return base64_string   
+   
+if basic_auth:   
+    token = generate_base64_string(window_user, window_password)     
+    headers = {      
+    'Authorization': f"Basic {token}"      
+    }   
+else:    
+    token = '<generated-token-from-url>'    
+    headers = {     
+        'Authorization': f"Bearer {token}",      }      
+   
+client = openai.OpenAI(     
+            api_key=token,     
+            base_url='https://gpt4ifx.icp.infineon.com',      
+            default_headers=headers,     
+            http_client = httpx.Client(verify=cert_path)   
+            )    
 
 # Function to calculate parameter memory
 def get_model_memory(model):
@@ -843,7 +884,11 @@ def summarize_text_with_llm(text: str) -> str:
     
     # Using a fast and cost-effective model for summarization tasks
     if not LOCAL:
-        summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+        if IFXGPT:
+            IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+            pass
+        else:
+            summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
     else:
         summary = ollama_generate_text(prompt=prompt, system_prompt=system_prompt, model="gemma3:4b")[0]
     return summary
@@ -866,7 +911,10 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
     # Call the object detection API with the image bytes
     if not LOCAL:
-        response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
+        if IFXGPT:
+            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct")
+        else:
+            response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
         response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b-instruct", prompt=prompt, system_prompt=system_prompt)
     return response
@@ -1256,12 +1304,20 @@ If a specific user question is provided and this page contains no relevant infor
             break
 
         if not LOCAL:
-            vlm_response += DeepInfraInference(
-                prompt=final_user_prompt,
-                system_prompt=vlm_system_prompt, # The user's detailed instructions go here
-                image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
-            ) + "\n\n"
+            if IFXGPT:
+                vlm_response += IFXGPTInference(
+                    prompt=final_user_prompt,
+                    system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+                    image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+                    model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+                ) + "\n\n"
+            else:
+                vlm_response += DeepInfraInference(
+                    prompt=final_user_prompt,
+                    system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+                    image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+                    model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+                ) + "\n\n"
             print(vlm_response)
         else :
              # System prompt for OpenRouter VLM
@@ -1689,12 +1745,15 @@ Requirements:
         print("Requesting Jina v4 embedding (Type: Text)...")
         if search_text == None:
             if not LOCAL:
-                search_text = DeepInfraInference(
-                    prompt=create_search_prompt,
-                    # system_prompt=system_prompt,
-                    # image_bytes_list=image_bytes_list,
-                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
-                )
+                if IFXGPT:
+                    pass
+                else:
+                    search_text = DeepInfraInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
+                    )
 
             else :
                 search_text = ollama_generate_text(
@@ -1909,10 +1968,13 @@ Output only the descriptive paragraph. No introductory text.
             if search_text == None:
                 # Ensure LOCAL and helper functions are defined in your outer scope
                 if not LOCAL:
-                    search_text = DeepInfraInference(
-                        prompt=create_search_prompt,
-                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
-                    )
+                    if IFXGPT:
+                        pass
+                    else:
+                        search_text = DeepInfraInference(
+                            prompt=create_search_prompt,
+                            model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+                        )
                 else:
                     search_text = ollama_generate_text(
                         prompt=create_search_prompt,
@@ -2955,7 +3017,10 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
     """
     # Step 1: Encode the query text using the *CLIP* model
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        if IFXGPT: # Embedding
+            pass
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     if not query_embedding:
@@ -3124,7 +3189,10 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        if IFXGPT: # Embedding
+            pass
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
@@ -3260,7 +3328,10 @@ def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        if IFXGPT: # Embedding
+            pass
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else:
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
@@ -3814,18 +3885,21 @@ Provide your response in Markdown format, following the tagging guidelines provi
 
     # Use OpenRouterInference, which now accepts a list of images
     if not LOCAL:
-        # system_prompt = ("You're an image expert."
-        #                  "If the image contains text, extract and summarize it...")
-        # # Prompt for OpenRouter VLM
-        # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-        vlm_response = OpenRouterInference(
-        # vlm_response = DeepInfraInference(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            image_bytes_list=image_bytes_list,
-            model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-        )
-        print("DeepInfra VLM response received.")
+        if IFXGPT:
+            pass
+        else:
+            # system_prompt = ("You're an image expert."
+            #                  "If the image contains text, extract and summarize it...")
+            # # Prompt for OpenRouter VLM
+            # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+            vlm_response = OpenRouterInference(
+            # vlm_response = DeepInfraInference(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                image_bytes_list=image_bytes_list,
+                model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+            print("DeepInfra VLM response received.")
         print(vlm_response)
     else:
         #  # System prompt for OpenRouter VLM
@@ -4033,6 +4107,64 @@ def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str
             result.append(embeddings[idx])
             idx += 1
     return result
+
+
+
+def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
+    """
+    Perform inference using the Infineon IFX GPT (OpenAI Client).
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    user_content = [{"type": "text", "text": prompt}]
+
+    if image_bytes_list:
+        for image_bytes in image_bytes_list:
+            try:
+                # Guess mime type
+                mime_type, _ = mimetypes.guess_type("image.png") # Default
+                img = Image.open(io.BytesIO(image_bytes))
+                if img.format:
+                    mime_type = f"image/{img.format.lower()}"
+                
+                base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                data_url = f"data:{mime_type};base64,{base64_image}"
+                
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                })
+            except Exception as e:
+                print(f"Error encoding image for IFXGPT: {e}")
+
+    messages.append({"role": "user", "content": user_content})
+
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=0.0
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling IFX GPT: {e}"
+
+def IFXGPTEmbedding(inputs: List[str], model_name: str = "sfr-embedding-mistral") -> List[List[float]]:
+    """
+    Generate embeddings using Infineon IFX GPT.
+    """
+    try:
+        response = client.embeddings.create(
+            model=model_name,
+            input=inputs
+        )
+        # Extract embeddings and maintain order
+        return [item.embedding for item in response.data]
+    except Exception as e:
+        print(f"Error calling IFX GPT Embeddings: {e}")
+        return []
 
 
 # ==============================================================================

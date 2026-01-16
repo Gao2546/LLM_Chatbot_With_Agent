@@ -65,27 +65,27 @@ def to_data_url(path: str) -> str:
     # adjust mime if needed: image/jpeg, image/webp, ...
     return f"data:image/png;base64,{b64}"
 
-# img = to_data_url("C:/Users/yuthaworawit/llm_project/cat.png")
+img = to_data_url("C:/Users/yuthaworawit/llm_project/cat.png")
 
-# resp = client.chat.completions.create(
-#     model="gpt-5.2",   # use whatever model name your endpoint supports
-#     messages=[
-#         {"role": "system", "content": "You are a helpful assistant."},
-#         {"role": "user", "content": "Hello! Can you help me with chat?"},
-#     ],
-#     temperature=0.2,
-# )
-# print(resp.choices[0].message.content)
+resp = client.chat.completions.create(
+    model="gpt-5.2",   # use whatever model name your endpoint supports
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello! Can you help me with chat?"},
+    ],
+    temperature=0.2,
+)
+print(resp.choices[0].message.content)
 
-# resp = client.chat.completions.create(
-#     model="gpt-5.2",  # must be vision-capable on your gateway
-#     messages=[{
-#         "role": "user",
-#         "content": [
-#             {"type": "text", "text": "What is it?"},
-#             {"type": "image_url", "image_url": {"url": img}},  # img = https://... or data:image/...;base64,...
-#         ],
-#     }],
-# )
+resp = client.chat.completions.create(
+    model="gpt-5.2",  # must be vision-capable on your gateway
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What is it?"},
+            {"type": "image_url", "image_url": {"url": img}},  # img = https://... or data:image/...;base64,...
+        ],
+    }],
+)
 
-# print(resp.choices[0].message.content)
+print(resp.choices[0].message.content)
