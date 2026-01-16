@@ -36,15 +36,15 @@
 #------------------------------------------------------------------------------------------------------------
 
 
+# Tool
+dotenv
+wheel
+
 # Web Framework & Server
 Flask
 requests
 python-dotenv
 httpx
-
-# Tool
-dotenv
-wheel
 
 # Database & Storage
 psycopg2-binary
