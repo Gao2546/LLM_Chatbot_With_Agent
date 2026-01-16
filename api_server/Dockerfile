@@ -295,7 +295,8 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     IS_DOCKER=true \
     LOCAL=False \
     IFXGPT=True \
-    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/app/ca-bundle.crt \
+    IFXGPT_CERT_PATH=/app/ca-bundle.crt \
+    NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt \
     WINDOWS_USER=yuthaworawit \
     WINDOWS_PASSWORD="Gao Gao2546"
 
