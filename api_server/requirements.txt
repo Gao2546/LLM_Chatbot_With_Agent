@@ -44,7 +44,6 @@ httpx
 
 # Tool
 dotenv
-base64
 
 # Database & Storage
 psycopg2-binary
