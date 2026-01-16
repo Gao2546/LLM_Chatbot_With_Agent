@@ -1869,12 +1869,14 @@ if __name__ == '__main__':
     # path_keys = os.popen("find ../ -name '.key'").read().split("\n")[0]
     # with open(path_keys, "r") as f:
     #     key = f.read().strip()
-    APP_URL = os.getenv("API_APP", "http://localhost:5000")
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not os.environ.get("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = api_key
 
-    model_name = "google/embeddinggemma-300m"
+    
+    # APP_URL = os.getenv("API_APP", "http://localhost:5000")
+    # api_key = os.getenv("OPENAI_API_KEY")
+    # if not os.environ.get("OPENAI_API_KEY"):
+    #     os.environ["OPENAI_API_KEY"] = api_key
+
+    # model_name = "google/embeddinggemma-300m"
 
     
     # Configure quantization (new method)
