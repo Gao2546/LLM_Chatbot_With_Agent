@@ -1746,38 +1746,38 @@ def detect_objects_route():
         'duration_sec': round(sto - st, 3)
     })
 
-class GemmaEmbeddings(Embeddings):
-    def __init__(self, model_name: str = "google/embeddinggemma-300m", quantized: bool = True):
-        self.model_name = model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+# class GemmaEmbeddings(Embeddings):
+#     def __init__(self, model_name: str = "google/embeddinggemma-300m", quantized: bool = True):
+#         self.model_name = model_name
+#         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        if quantized:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-            self.model = AutoModel.from_pretrained(
-                model_name,
-                device_map="auto",
-                quantization_config=bnb_config,
-            )
-        else:
-            self.model = AutoModel.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
+#         if quantized:
+#             bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+#             self.model = AutoModel.from_pretrained(
+#                 model_name,
+#                 device_map="auto",
+#                 quantization_config=bnb_config,
+#             )
+#         else:
+#             self.model = AutoModel.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.device = next(self.model.parameters()).device
+#         self.device = next(self.model.parameters()).device
 
-    def _embed(self, texts):
-        inputs = self.tokenizer(
-            texts, padding=True, truncation=True, return_tensors="pt"
-        ).to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Mean pooling
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-        return embeddings.cpu().numpy()
+#     def _embed(self, texts):
+#         inputs = self.tokenizer(
+#             texts, padding=True, truncation=True, return_tensors="pt"
+#         ).to(self.device)
+#         with torch.no_grad():
+#             outputs = self.model(**inputs)
+#             # Mean pooling
+#             embeddings = outputs.last_hidden_state.mean(dim=1)
+#         return embeddings.cpu().numpy()
 
-    def embed_documents(self, texts):
-        return self._embed(texts).tolist()
+#     def embed_documents(self, texts):
+#         return self._embed(texts).tolist()
 
-    def embed_query(self, text):
-        return self._embed([text])[0].tolist()
+#     def embed_query(self, text):
+#         return self._embed([text])[0].tolist()
 
 
 # === VERIFIED ANSWERS ENDPOINT ===
