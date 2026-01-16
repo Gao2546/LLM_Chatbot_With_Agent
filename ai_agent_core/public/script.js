@@ -1949,7 +1949,10 @@ function populateModes(returnDefault = false) {
 // Added returnDefault parameter to get the default value without modifying the DOM
 function populateModels(returnDefault = false) {
     const models = [
-        { id: '01:18m', name: '01:18m' },
+        { id: '{_IFXGPT_API_}gpt-5.2', name: 'gpt-5.2' },
+        { id: '{_IFXGPT_API_}gpt-5.1-chat', name: 'gpt-5.1-chat' },
+        { id: '{_IFXGPT_API_}gpt-5-mini', name: 'gpt-5-mini' },
+        { id: '{_IFXGPT_API_}claudesonnet4.5', name: 'claudesonnet4.5' },
         // { id: '{_Ollama_API_}deepcoder:1.5b', name: 'deepcoder:1.5b' },
         // { id: '{_Ollama_API_}deepcoder:14b', name: 'deepcoder:14b' },
         // { id: '{_Ollama_API_}deepseek-coder:1.3b', name: 'deepseek-coder:1.3b' },
