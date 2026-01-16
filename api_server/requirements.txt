@@ -39,7 +39,6 @@
 # Tool
 dotenv
 wheel
-swing
 
 # Web Framework & Server
 Flask
