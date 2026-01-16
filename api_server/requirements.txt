@@ -44,6 +44,7 @@ httpx
 
 # Tool
 dotenv
+wheel
 
 # Database & Storage
 psycopg2-binary
