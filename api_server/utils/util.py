@@ -4166,7 +4166,7 @@ def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List
     except Exception as e:
         return f"Error calling IFX GPT: {e}"
 
-def IFXGPTEmbedding(inputs: List[str], model_name: str = "sfr-embedding-mistral") -> List[List[float]]:
+def IFXGPTEmbedding(inputs: List[str], model_name: str = "multilingual-e5-large-instruct") -> List[List[float]]:
     """
     Generate embeddings using Infineon IFX GPT.
     """
