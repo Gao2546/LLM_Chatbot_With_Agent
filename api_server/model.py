@@ -108,13 +108,14 @@ if project_root not in sys.path:
 app = Flask(__name__)
 
 def clear_gpu():
-    import torch
-    import gc
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        print("Cleared GPU memory.")
-    gc.collect()
+    pass
+    # import torch
+    # import gc
+    # if torch.cuda.is_available():
+    #     torch.cuda.empty_cache()
+    #     torch.cuda.ipc_collect()
+    #     print("Cleared GPU memory.")
+    # gc.collect()
 
 
 def init_driver():
