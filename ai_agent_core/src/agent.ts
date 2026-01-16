@@ -68,6 +68,8 @@ import fs = require('fs');
 import { get } from 'http';
 import { json } from 'stream/consumers';
 import { error } from 'console';
+import { OpenAI } from 'openai';
+import https from 'https';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -229,6 +231,59 @@ export default async function agentRouters(ios: SocketIOServer) {
   // Removed old /get-verifications/:answerId route - use GET /api/get-verifications/:questionId instead
   
   return router;
+}
+
+
+// Initialize IFX GPT Client
+// Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
+const ifxCertPath = process.env.IFXGPT_CERT_PATH;
+const ifxToken = process.env.IFXGPT_TOKEN;
+const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
+
+const ifxClient = new OpenAI({
+  apiKey: ifxToken,
+  baseURL: ifxBaseUrl,
+  // This handles the corporate CA bundle certificate
+  // httpAgent: new https.Agent({
+  //   ca: ifxCertPath ? fs.readFileSync(ifxCertPath) : undefined,
+  // }),
+});
+
+
+async function IFXGPTInference(
+  messages: any[], 
+  model: string, 
+  socket: any, 
+  controller: AbortController
+): Promise<string> {
+  let fullText = "";
+  
+  try {
+    const stream = await ifxClient.chat.completions.create({
+      model: model,
+      messages: messages,
+      stream: true,
+      temperature: 0.0,
+    });
+
+    for await (const chunk of stream) {
+      if (controller.signal.aborted) break;
+      
+      const content = chunk.choices[0]?.delta?.content || "";
+      if (content) {
+        fullText += content;
+        // Strip prefix if necessary (mirroring your existing logic)
+        if (fullText.startsWith("assistance:")) {
+          fullText = fullText.slice("assistance:".length).trimStart();
+        }
+        socket?.emit("StreamText", fullText);
+      }
+    }
+    return fullText;
+  } catch (error) {
+    console.error("Error in IFXGPT Inference:", error);
+    throw error;
+  }
 }
 
 function buildMessages(setting_prompt: string, question: string) {
@@ -1503,6 +1558,38 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         return res.status(500).json({ error: `Failed to communicate with MyModel model: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
+
+    // Inside router.post('/message') and router.post('/edit-message')
+
+   else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
+    try {
+      console.log("Calling IFX GPT API (internal OpenAI)...");
+      
+      const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
+      
+      // Use your existing buildMessages function
+      const messageHistory = buildMessages(
+        modeToUse === "code" ? setting_prompt : "You are a helpful assistant", 
+        question_backup
+      );
+    
+      // Call our new helper
+      const result = await IFXGPTInference(
+        messageHistory,
+        internalModelName,
+        socket,
+        controller
+      );
+    
+      response = { text: result };
+    
+    } catch (err) {
+      console.error("Error calling IFX GPT API:", err);
+      return res.status(500).json({
+        error: `Internal API Error: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+  }
 
 
     if (!response){

@@ -40,6 +40,7 @@ RUN apt-get update && \
 
 # Setup ai_agent_core
 COPY package.json ./
+COPY ca-bundle.crt ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
 COPY build/setting.txt ./build/setting.txt
@@ -62,7 +63,10 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
     PORT=3000 \
-    LOCAL=True
+    LOCAL=True \
+    YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH=/app/ca-bundle.crt \
+    WINDOWS_USER=yuthaworawit \
+    WINDOWS_PASSWORD="Gao Gao2546"
 
 # Setup mcp_BrowserBase build output (e.g., dist or build folder)
 # Change `/dist` to your actual build output if needed
