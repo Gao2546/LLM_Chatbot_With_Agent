@@ -32,10 +32,19 @@
 # # mlx-vlm
 # minio
 
+
+#------------------------------------------------------------------------------------------------------------
+
+
 # Web Framework & Server
 Flask
 requests
 python-dotenv
+httpx
+
+# Tool
+dotenv
+base64
 
 # Database & Storage
 psycopg2-binary
