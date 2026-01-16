@@ -47,7 +47,7 @@ python-dotenv
 httpx
 
 # Database & Storage
-psycopg2-binary
+psycopg2 --no-binary
 minio
 
 # AI/ML - Core & Transformers
