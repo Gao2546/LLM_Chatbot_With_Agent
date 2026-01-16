@@ -19,25 +19,25 @@ from PIL import Image
 # from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 
 # New imports for Docling and concurrent processing
-from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
-from docling.datamodel.base_models import InputFormat
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.base_models import DocumentStream
-from docling_core.types.doc import DocItemLabel
-import concurrent.futures
-from docling.pipeline.vlm_pipeline import VlmPipeline
-from docling.datamodel.pipeline_options import (
-    VlmPipelineOptions,
-    PdfPipelineOptions,
-    TesseractCliOcrOptions,
-    TesseractOcrOptions,
-    RapidOcrOptions,
-)
-from modelscope import snapshot_download
-from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-from docling.datamodel import vlm_model_specs
-from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
-from docling.pipeline.vlm_pipeline import VlmPipeline
+# from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
+# from docling.datamodel.base_models import InputFormat
+# from docling.document_converter import DocumentConverter, PdfFormatOption
+# from docling.datamodel.base_models import DocumentStream
+# from docling_core.types.doc import DocItemLabel
+# import concurrent.futures
+# from docling.pipeline.vlm_pipeline import VlmPipeline
+# from docling.datamodel.pipeline_options import (
+#     VlmPipelineOptions,
+#     PdfPipelineOptions,
+#     TesseractCliOcrOptions,
+#     TesseractOcrOptions,
+#     RapidOcrOptions,
+# )
+# from modelscope import snapshot_download
+# from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+# from docling.datamodel import vlm_model_specs
+# from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
+# from docling.pipeline.vlm_pipeline import VlmPipeline
 
 import base64
 import io

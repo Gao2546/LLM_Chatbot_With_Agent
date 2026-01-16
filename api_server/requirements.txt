@@ -70,8 +70,8 @@ minio
 # Document Processing & OCR
 PyMuPDF==1.26.6
 pillow==11.3.0
-docling
-docling-core
+# docling
+# docling-core
 # unstructured[pdf]
 beautifulsoup4
 
