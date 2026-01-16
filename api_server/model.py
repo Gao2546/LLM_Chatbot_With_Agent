@@ -12,30 +12,30 @@ import multiprocessing
 import numpy as np
 
 # Third-party libraries
-import bs4
+# import bs4
 import dotenv
-import torch
+# import torch
 import fitz # NEW IMPORT
-from duckduckgo_search import DDGS
+# from duckduckgo_search import DDGS
 from flask import Flask, jsonify, request, send_from_directory
-from googlesearch import search
+# from googlesearch import search
 from pandas import options
-from selenium import webdriver
-from selenium.common.exceptions import NoAlertPresentException, UnexpectedAlertPresentException
-from selenium.webdriver.common.alert import Alert
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
+# from selenium import webdriver
+# from selenium.common.exceptions import NoAlertPresentException, UnexpectedAlertPresentException
+# from selenium.webdriver.common.alert import Alert
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.chrome.service import Service
+# from webdriver_manager.chrome import ChromeDriverManager
+# from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+# from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
 # LangChain and related libraries
-from langchain_core.embeddings import Embeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from langchain_core.embeddings import Embeddings
+# from langchain_core.vectorstores import InMemoryVectorStore
+# from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain_openai import OpenAIEmbeddings
+# from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Local imports (assuming 'utils' is a local package/directory)
 from utils.util import (

@@ -42,35 +42,35 @@ psycopg2-binary
 minio
 
 # AI/ML - Core & Transformers
-torch
-torchvision
-torchaudio
-transformers
-sentence-transformers
-bitsandbytes
-accelerate
-einops
-modelscope
+# torch
+# torchvision
+# torchaudio
+# transformers
+# sentence-transformers
+# bitsandbytes
+# accelerate
+# einops
+# modelscope
 
 # LangChain Ecosystem
-langchain-core
-langchain-huggingface
-langchain-openai
-langchain-text-splitters
+# langchain-core
+# langchain-huggingface
+# langchain-openai
+# langchain-text-splitters
 
 # Document Processing & OCR
 pymupdf
 Pillow
 docling
 docling-core
-unstructured[pdf]
+# unstructured[pdf]
 beautifulsoup4
 
 # Search & Web Scraping
-duckduckgo-search
-googlesearch-python
-selenium
-webdriver-manager
+# duckduckgo-search
+# googlesearch-python
+# selenium
+# webdriver-manager
 
 # Data Science & Utilities
 numpy

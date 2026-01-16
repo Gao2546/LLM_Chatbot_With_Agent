@@ -13,9 +13,9 @@ import mimetypes # For guessing mime types
 import numpy as np
 
 from PIL import Image
-from sentence_transformers import SentenceTransformer
-from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
-import torch
+# from sentence_transformers import SentenceTransformer
+# from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
+# import torch
 # from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 
 # New imports for Docling and concurrent processing
@@ -41,8 +41,8 @@ from docling.pipeline.vlm_pipeline import VlmPipeline
 
 import base64
 import io
-from unstructured.partition.auto import partition
-from unstructured.documents.elements import Image as UnstructuredImage
+# from unstructured.partition.auto import partition
+# from unstructured.documents.elements import Image as UnstructuredImage
 
 from minio import Minio
 from minio.error import S3Error
@@ -83,8 +83,8 @@ def clear_gpu():
 # ==============================================================================
 #  DATABASE & MINIO CLIENT SETUP
 # ==============================================================================
-clear_gpu()
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# clear_gpu()
+# device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Initialize model variable (will be set below if LOCAL=True)
 model = None
@@ -119,7 +119,7 @@ if LOCAL:
         print(f"❌ Failed to load Jina model: {e}")
         model = None
 else:
-    print("📡 Running in REMOTE mode (will use Ollama/API for embeddings)")
+    print("📡 Running in REMOTE mode (will use IFXGPT/API for embeddings)")
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
