@@ -408,7 +408,7 @@ def extract_images_from_doc_with_unstructured(doc_bytes: bytes, filename: str) -
 #  LEGACY: VLM & CONTENT EXTRACTION (No changes from your code)
 # ==============================================================================
 
-def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str) -> ApiVlmOptions:
+def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str):
     """
     Helper function to create ApiVlmOptions specifically for DeepInfra's OpenAI-compatible endpoint.
     """
@@ -436,7 +436,7 @@ def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str) -> ApiV
     )
     return options
 
-def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str) -> ApiVlmOptions:
+def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str):
     """
     Helper function to create ApiVlmOptions specifically for OpenRouter's API.
     """
@@ -465,7 +465,7 @@ def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str) -> Api
     return options
 
 
-def generate_vlm_pipeline_options(mode: str = 'local', **kwargs) -> VlmPipelineOptions:
+def generate_vlm_pipeline_options(mode: str = 'local', **kwargs):
     """
     Generates pipeline_options for the Docling VLM pipeline based on the specified mode.
     """
