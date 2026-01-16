@@ -63,7 +63,7 @@ IFXGPT = os.getenv("IFXGPT", True)
 API_OLLAMA = os.getenv("API_OLLAMA", "http://127.0.0.1:11434/api/generate")
 
 # IFX GPT API
-cert_path = os.getenv('YOUR-DOWNLOADED-CA-BUNDLE-CERT-PATH')   
+cert_path = os.getenv('IFXGPT_CERT_PATH')   
 window_user = os.getenv('WINDOWS_USER')
 window_password = os.getenv('WINDOWS_PASSWORD') 
 token = os.getenv("TOKEN")
@@ -4160,7 +4160,7 @@ def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.0
+            temperature=1.0
         )
         return response.choices[0].message.content
     except Exception as e:
