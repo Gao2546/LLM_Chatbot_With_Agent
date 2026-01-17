@@ -261,28 +261,38 @@ async function IFXGPTInference(
 ): Promise<string> {
   let fullText = "";
 
-  const stream: any = await ifxClient.chat.completions.create({
+  // const stream: any = await ifxClient.chat.completions.create({
+  //   model,
+  //   messages,
+  //   stream: true,
+  //   temperature: 1.0,
+  // });
+
+  // // IMPORTANT: iterator is a function -> call it
+  // for await (const chunk of stream.iterator()) {
+  //   if (controller.signal.aborted) break;
+
+  //   const content =
+  //     chunk?.choices?.[0]?.delta?.content ??
+  //     chunk?.choices?.[0]?.message?.content ??
+  //     chunk?.choices?.[0]?.text ??
+  //     "";
+
+  //   if (content) {
+  //     fullText += content;
+  //     socket?.emit("StreamText", fullText);
+  //   }
+  // }
+
+  const resp = await ifxClient.chat.completions.create({
     model,
     messages,
-    stream: true,
+    stream: false,
     temperature: 1.0,
   });
 
-  // IMPORTANT: iterator is a function -> call it
-  for await (const chunk of stream.iterator()) {
-    if (controller.signal.aborted) break;
-
-    const content =
-      chunk?.choices?.[0]?.delta?.content ??
-      chunk?.choices?.[0]?.message?.content ??
-      chunk?.choices?.[0]?.text ??
-      "";
-
-    if (content) {
-      fullText += content;
-      socket?.emit("StreamText", fullText);
-    }
-  }
+  console.log("non-stream resp:", JSON.stringify(resp));
+  fullText = JSON.stringify(resp);
 
   return fullText;
 }
