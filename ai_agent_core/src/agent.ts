@@ -1612,6 +1612,9 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         modeToUse === "code" ? setting_prompt : "You are a helpful assistant", 
         question_backup
       );
+
+      console.log("Message :");
+      console.log(messageHistory);
     
       // Call our new helper
       const result = await IFXGPTInference(
