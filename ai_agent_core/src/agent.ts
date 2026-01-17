@@ -269,6 +269,10 @@ async function IFXGPTInference(
       temperature: 1.0,
     });
 
+    console.log("stream type:", typeof stream);
+    console.log("has async iterator:", !!(stream as any)?.[Symbol.asyncIterator]);
+    console.log("keys:", Object.keys(stream as any));
+
     for await (const chunk of stream) {
       if (controller.signal.aborted) break;
       console.log("chunk : ");
@@ -292,20 +296,36 @@ async function IFXGPTInference(
 }
 
 function buildMessages(setting_prompt: string, question: string) {
-  const messages: { role: string; content: string }[] = [];
-  messages.push({ role: "system", content: setting_prompt });
+  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+    { role: "system", content: setting_prompt },
+  ];
 
-  const parts = question.includes("<DATA_SECTION>")
-    ? question.split("\n<DATA_SECTION>\n").filter(s => s.trim() !== "")
-    : [question.trim()];
+  const normalized = question.trim();
+
+  const parts = normalized.includes("<DATA_SECTION>")
+    ? normalized.split("<DATA_SECTION>").map(s => s.trim()).filter(Boolean)
+    : [normalized];
+
+  let addedAny = false;
 
   for (const part of parts) {
-    if (part.startsWith("user:")) {
-      messages.push({ role: "user", content: part.replace(/^user:\s*/, "") });
-    } else if (part.startsWith("assistance:")) {
-      messages.push({ role: "assistant", content: part.replace(/^assistance:\s*/, "") });
+    if (/^user\s*:/.test(part)) {
+      messages.push({ role: "user", content: part.replace(/^user\s*:\s*/i, "") });
+      addedAny = true;
+    } else if (/^(assistant|assistance)\s*:/.test(part)) {
+      messages.push({ role: "assistant", content: part.replace(/^(assistant|assistance)\s*:\s*/i, "") });
+      addedAny = true;
+    } else {
+      // fallback: treat as user content
+      messages.push({ role: "user", content: part });
+      addedAny = true;
     }
   }
+
+  if (!addedAny) {
+    messages.push({ role: "user", content: normalized });
+  }
+
   return messages;
 }
 
