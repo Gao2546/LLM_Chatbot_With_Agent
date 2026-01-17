@@ -38,6 +38,8 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y bash
 
+RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates
+
 # Setup ai_agent_core
 COPY package.json ./
 COPY ca-bundle.crt ./
@@ -66,6 +68,7 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     LOCAL=False \
     IFXGPT=True \
     IFXGPT_CERT_PATH=/app/ca-bundle.crt \
+    NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt \
     WINDOWS_USER=yuthaworawit \
     WINDOWS_PASSWORD="Gao Gao2546"
 

@@ -240,19 +240,16 @@ const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
 const ifxToken = process.env.IFXGPT_TOKEN;
 const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
 
-// 1. Create the Agent with the correct 'ca' property
-const agent = new https.Agent({
-  ca: fs.readFileSync(ifxCertPath), // Correct: 'ca' is for Trust, 'cert' is for Identity
+const httpsAgent = new https.Agent({
+  ca: fs.readFileSync(ifxCertPath),
 });
 
-console.log(agent);
-
-// 2. Initialize Client
-// We cast the config to 'any' to bypass the "httpAgent does not exist" TS error.
 const ifxClient = new OpenAI({
-  // apiKey: ifxToken,
+  apiKey: ifxToken,
   baseURL: ifxBaseUrl,
-  httpAgent: agent, 
+  // สำคัญ: ใช้ httpsAgent
+  httpAgent: undefined,
+  httpsAgent,
 } as any);
 
 
