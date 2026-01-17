@@ -386,16 +386,13 @@ async function findFilteredMessage(all: any[], model: string) {
 const SETTING_PROMPT = process.env.SETTING_PROMPT ?? `You are assistanct`;
 
 // 2) Build the same "question" string your app sends (conversation section)
-const question = [
-  "user: Hello",
-  "",
-  "document:",
-  "",
-  "If there is insufficient information to answer the user's question, tell the user what information you need.",
-].join("\n");
+const question = "user: 'Say 'OK'.'"
+
 
 // 3) Build messages using your existing builder
 const messages = buildMessages(SETTING_PROMPT, question);
+
+console.log("build message : ", messages);
 
 // 4) Run the filter debugger
 await findFilteredMessage(messages, "gpt-5.2");
