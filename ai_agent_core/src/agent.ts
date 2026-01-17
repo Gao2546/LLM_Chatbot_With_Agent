@@ -268,18 +268,9 @@ async function IFXGPTInference(
     temperature: 1.0,
   });
 
-  if (!stream?.iterator || typeof stream.iterator !== "function") {
-    throw new Error("Stream object has no iterator() function");
-  }
-
-  // iterator() returns an async generator (async iterable / iterator)
-  const gen: any = stream.iterator();
-
-  while (!controller.signal.aborted) {
-    const { value: chunk, done } = await gen.next();
-    if (done) break;
-
-    console.log("chunk:", JSON.stringify(chunk));
+  // IMPORTANT: iterator is a function -> call it
+  for await (const chunk of stream.iterator()) {
+    if (controller.signal.aborted) break;
 
     const content =
       chunk?.choices?.[0]?.delta?.content ??
