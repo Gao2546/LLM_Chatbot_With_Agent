@@ -357,6 +357,50 @@ export async function IFXGPTInference(
   }
 }
 
+
+async function testPrompt(messages: any[], model: string) {
+  return ifxClient.chat.completions.create({ model, messages, stream: false, temperature: 1 });
+}
+
+async function findFilteredMessage(all: any[], model: string) {
+  // Try progressively adding messages until it breaks
+  const ok: any[] = [];
+  for (const m of all) {
+    ok.push(m);
+    try {
+      await testPrompt(ok, model);
+      console.log("OK up to:", m.role, m.content.slice(0, 80));
+    } catch (e: any) {
+      if (e?.code === "content_filter" || e?.error?.code === "content_filter") {
+        console.log("FILTER TRIGGERED BY:", m.role);
+        console.log(m.content);
+        return;
+      }
+      throw e;
+    }
+  }
+  console.log("No filter triggered.");
+}
+
+// 1) Put your REAL long system prompt here (the one you load as "Setting Prompt Loaded")
+const SETTING_PROMPT = process.env.SETTING_PROMPT ?? `PASTE YOUR LONG SYSTEM PROMPT HERE`;
+
+// 2) Build the same "question" string your app sends (conversation section)
+const question = [
+  "user: Hello",
+  "",
+  "document:",
+  "",
+  "If there is insufficient information to answer the user's question, tell the user what information you need.",
+].join("\n");
+
+// 3) Build messages using your existing builder
+const messages = buildMessages(SETTING_PROMPT, question);
+
+// 4) Run the filter debugger
+await findFilteredMessage(messages, "gpt-5.2");
+
+
 function buildMessages(setting_prompt: string, question: string) {
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: setting_prompt },
