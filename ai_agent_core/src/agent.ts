@@ -271,6 +271,8 @@ async function IFXGPTInference(
 
     for await (const chunk of stream) {
       if (controller.signal.aborted) break;
+      console.log("chunk : ");
+      console.log(chunk);
       
       const content = chunk.choices[0]?.delta?.content || "";
       if (content) {
@@ -1585,6 +1587,8 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
       );
     
       response = { text: result };
+      console.log("IFXGPT_Response : ");
+      console.log(result);
     
     } catch (err) {
       console.error("Error calling IFX GPT API:", err);
