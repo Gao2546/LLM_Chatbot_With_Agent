@@ -400,6 +400,21 @@ const messages = buildMessages(SETTING_PROMPT, question);
 // 4) Run the filter debugger
 await findFilteredMessage(messages, "gpt-5.2");
 
+console.log("Only System :")
+await findFilteredMessage(
+  [{ role: "system", content: SETTING_PROMPT }],
+  "gpt-5.2"
+);
+
+console.log("System and User :")
+await findFilteredMessage(
+  [
+    { role: "system", content: SETTING_PROMPT },
+    { role: "user", content: "Say 'OK'." }
+  ],
+  "gpt-5.2"
+);
+
 
 function buildMessages(setting_prompt: string, question: string) {
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
