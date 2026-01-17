@@ -383,7 +383,7 @@ async function findFilteredMessage(all: any[], model: string) {
 }
 
 // 1) Put your REAL long system prompt here (the one you load as "Setting Prompt Loaded")
-const SETTING_PROMPT = process.env.SETTING_PROMPT ?? `PASTE YOUR LONG SYSTEM PROMPT HERE`;
+const SETTING_PROMPT = process.env.SETTING_PROMPT ?? `You are assistanct`;
 
 // 2) Build the same "question" string your app sends (conversation section)
 const question = [
