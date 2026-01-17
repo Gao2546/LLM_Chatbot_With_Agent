@@ -253,7 +253,7 @@ const ifxClient = new OpenAI({
 } as any);
 
 
-async function IFXGPTInference(
+export async function IFXGPTInference(
   messages: any[],
   model: string,
   socket: any,
@@ -261,40 +261,53 @@ async function IFXGPTInference(
 ): Promise<string> {
   let fullText = "";
 
-  // const stream: any = await ifxClient.chat.completions.create({
-  //   model,
-  //   messages,
-  //   stream: true,
-  //   temperature: 1.0,
-  // });
+  try {
+    const stream: any = await ifxClient.chat.completions.create({
+      model,
+      messages,
+      stream: true,
+      temperature: 1.0,
+      // signal: controller.signal, // enable if your ifxClient supports it
+    });
 
-  // // IMPORTANT: iterator is a function -> call it
-  // for await (const chunk of stream.iterator()) {
-  //   if (controller.signal.aborted) break;
+    // IMPORTANT for your client: iterator is a function -> call it
+    for await (const chunk of stream.iterator()) {
+      if (controller.signal.aborted) break;
 
-  //   const content =
-  //     chunk?.choices?.[0]?.delta?.content ??
-  //     chunk?.choices?.[0]?.message?.content ??
-  //     chunk?.choices?.[0]?.text ??
-  //     "";
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        chunk?.choices?.[0]?.text ??
+        "";
 
-  //   if (content) {
-  //     fullText += content;
-  //     socket?.emit("StreamText", fullText);
-  //   }
-  // }
+      if (content) {
+        fullText += content;
 
-  const resp = await ifxClient.chat.completions.create({
-    model,
-    messages,
-    stream: false,
-    temperature: 1.0,
-  });
+        // optional: strip your legacy prefix if it appears
+        if (fullText.startsWith("assistance:")) {
+          fullText = fullText.slice("assistance:".length).trimStart();
+        }
 
-  console.log("non-stream resp:", JSON.stringify(resp));
-  fullText = JSON.stringify(resp);
+        socket?.emit("StreamText", fullText);
+      }
+    }
 
-  return fullText;
+    return fullText;
+  } catch (e: any) {
+    // Azure/OpenAI content filtering
+    if (e?.code === "content_filter" || e?.error?.code === "content_filter") {
+      const msg =
+        "Your prompt was blocked by the content policy. Please rephrase and try again.";
+      socket?.emit("StreamText", msg);
+      return "";
+    }
+
+    // aborted is not really an error for streaming
+    if (controller.signal.aborted) return fullText;
+
+    console.error("Error in IFXGPT Inference:", e);
+    throw e;
+  }
 }
 
 function buildMessages(setting_prompt: string, question: string) {
