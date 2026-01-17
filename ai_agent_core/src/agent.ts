@@ -268,23 +268,17 @@ async function IFXGPTInference(
     temperature: 1.0,
   });
 
-  const it: AsyncIterator<any> | undefined = stream?.iterator;
-
-  if (!it || typeof it.next !== "function") {
-    console.log("Not a streaming iterator. Response:", stream);
-    const text =
-      stream?.choices?.[0]?.message?.content ??
-      stream?.choices?.[0]?.text ??
-      "";
-    if (text) socket?.emit("StreamText", text);
-    return text;
+  if (!stream?.iterator || typeof stream.iterator !== "function") {
+    throw new Error("Stream object has no iterator() function");
   }
 
-  while (!controller.signal.aborted) {
-    const res = await it.next(); // { value, done }
-    if (!res || res.done) break;
+  // iterator() returns an async generator (async iterable / iterator)
+  const gen: any = stream.iterator();
 
-    const chunk = res.value;
+  while (!controller.signal.aborted) {
+    const { value: chunk, done } = await gen.next();
+    if (done) break;
+
     console.log("chunk:", JSON.stringify(chunk));
 
     const content =
