@@ -267,7 +267,6 @@ async function IFXGPTInference(
       messages,
       stream: true,
       temperature: 1.0,
-      timeout: 120
     });
 
     const iterable = stream.iterator ?? stream; // support both shapes
