@@ -245,10 +245,12 @@ const agent = new https.Agent({
   ca: fs.readFileSync(ifxCertPath), // Correct: 'ca' is for Trust, 'cert' is for Identity
 });
 
+console.log(agent);
+
 // 2. Initialize Client
 // We cast the config to 'any' to bypass the "httpAgent does not exist" TS error.
 const ifxClient = new OpenAI({
-  apiKey: ifxToken,
+  // apiKey: ifxToken,
   baseURL: ifxBaseUrl,
   httpAgent: agent, 
 } as any);
@@ -267,7 +269,7 @@ async function IFXGPTInference(
       model: model,
       messages: messages,
       stream: true,
-      temperature: 0.0,
+      temperature: 1.0,
     });
 
     for await (const chunk of stream) {
