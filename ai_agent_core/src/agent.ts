@@ -253,42 +253,45 @@ const ifxClient = new OpenAI({
 } as any);
 
 
-async function IFXGPTInference(
-  messages: any[], 
-  model: string, 
-  socket: any, 
-  controller: AbortController
-): Promise<string> {
+function toAsyncIterable<T>(it: AsyncIterator<T>): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]() {
+      return it;
+    },
+  };
+}
+
+async function IFXGPTInference(messages: any[], model: string, socket: any, controller: AbortController) {
   let fullText = "";
-  
-  try {
-    const stream: any = await ifxClient.chat.completions.create({
-      model,
-      messages,
-      stream: true,
-      temperature: 1.0,
-    });
 
-    const iterable = stream.iterator ?? stream; // support both shapes
+  const stream: any = await ifxClient.chat.completions.create({
+    model,
+    messages,
+    stream: true,
+    temperature: 1.0,
+    // signal: controller.signal, // include if your client supports it
+  });
 
-    for await (const chunk of iterable) {
-      console.log("chunk:", chunk);
+  const it: AsyncIterator<any> = stream.iterator ?? stream;
 
-      const content =
-        chunk?.choices?.[0]?.delta?.content ??
-        chunk?.choices?.[0]?.message?.content ??
-        "";
+  for await (const chunk of toAsyncIterable(it)) {
+    if (controller.signal.aborted) break;
 
-      if (content) {
-        fullText += content;
-        socket?.emit("StreamText", fullText);
-      }
+    console.log("chunk:", JSON.stringify(chunk));
+
+    const content =
+      chunk?.choices?.[0]?.delta?.content ??
+      chunk?.choices?.[0]?.message?.content ??
+      chunk?.choices?.[0]?.text ??
+      "";
+
+    if (content) {
+      fullText += content;
+      socket?.emit("StreamText", fullText);
     }
-    return fullText;
-  } catch (error) {
-    console.error("Error in IFXGPT Inference:", error);
-    throw error;
   }
+
+  return fullText;
 }
 
 function buildMessages(setting_prompt: string, question: string) {
