@@ -262,29 +262,26 @@ async function IFXGPTInference(
   let fullText = "";
   
   try {
-    const stream = await ifxClient.chat.completions.create({
-      model: model,
-      messages: messages,
+    const stream: any = await ifxClient.chat.completions.create({
+      model,
+      messages,
       stream: true,
       temperature: 1.0,
+      timeout: 120
     });
 
-    console.log("stream type:", typeof stream);
-    console.log("has async iterator:", !!(stream as any)?.[Symbol.asyncIterator]);
-    console.log("keys:", Object.keys(stream as any));
+    const iterable = stream.iterator ?? stream; // support both shapes
 
-    for await (const chunk of stream) {
-      if (controller.signal.aborted) break;
-      console.log("chunk : ");
-      console.log(chunk);
-      
-      const content = chunk.choices[0]?.delta?.content || "";
+    for await (const chunk of iterable) {
+      console.log("chunk:", chunk);
+
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        "";
+
       if (content) {
         fullText += content;
-        // Strip prefix if necessary (mirroring your existing logic)
-        if (fullText.startsWith("assistance:")) {
-          fullText = fullText.slice("assistance:".length).trimStart();
-        }
         socket?.emit("StreamText", fullText);
       }
     }
