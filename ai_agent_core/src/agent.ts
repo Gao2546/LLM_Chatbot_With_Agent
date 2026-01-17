@@ -253,15 +253,12 @@ const ifxClient = new OpenAI({
 } as any);
 
 
-function toAsyncIterable<T>(it: AsyncIterator<T>): AsyncIterable<T> {
-  return {
-    [Symbol.asyncIterator]() {
-      return it;
-    },
-  };
-}
-
-async function IFXGPTInference(messages: any[], model: string, socket: any, controller: AbortController) {
+async function IFXGPTInference(
+  messages: any[],
+  model: string,
+  socket: any,
+  controller: AbortController
+): Promise<string> {
   let fullText = "";
 
   const stream: any = await ifxClient.chat.completions.create({
@@ -269,14 +266,25 @@ async function IFXGPTInference(messages: any[], model: string, socket: any, cont
     messages,
     stream: true,
     temperature: 1.0,
-    // signal: controller.signal, // include if your client supports it
   });
 
-  const it: AsyncIterator<any> = stream.iterator ?? stream;
+  const it: AsyncIterator<any> | undefined = stream?.iterator;
 
-  for await (const chunk of toAsyncIterable(it)) {
-    if (controller.signal.aborted) break;
+  if (!it || typeof it.next !== "function") {
+    console.log("Not a streaming iterator. Response:", stream);
+    const text =
+      stream?.choices?.[0]?.message?.content ??
+      stream?.choices?.[0]?.text ??
+      "";
+    if (text) socket?.emit("StreamText", text);
+    return text;
+  }
 
+  while (!controller.signal.aborted) {
+    const res = await it.next(); // { value, done }
+    if (!res || res.done) break;
+
+    const chunk = res.value;
     console.log("chunk:", JSON.stringify(chunk));
 
     const content =
