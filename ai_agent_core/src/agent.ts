@@ -261,18 +261,36 @@ export async function IFXGPTInference(
 ): Promise<string> {
   let fullText = "";
 
+  console.log("Calling IFX GPT API (internal OpenAI)...");
+  console.log("Message :", messages);
+
   try {
     const stream: any = await ifxClient.chat.completions.create({
       model,
       messages,
       stream: true,
       temperature: 1.0,
-      // signal: controller.signal, // enable if your ifxClient supports it
     });
 
-    // IMPORTANT for your client: iterator is a function -> call it
-    for await (const chunk of stream.iterator()) {
-      if (controller.signal.aborted) break;
+    const it = stream.iterator(); // IMPORTANT: iterator is a function
+
+    // Wait for first chunk (or timeout)
+    const first = await Promise.race([
+      it.next(),
+      new Promise<{ done: true; value?: any }>((_, reject) =>
+        setTimeout(() => reject(new Error("Stream timeout: no first chunk within 8s")), 8000)
+      ),
+    ]);
+
+    // If stream ended immediately
+    if (!first || first.done) {
+      throw new Error("Stream ended immediately without data");
+    }
+
+    // Process first chunk
+    {
+      const chunk = first.value;
+      console.log("first chunk:", JSON.stringify(chunk));
 
       const content =
         chunk?.choices?.[0]?.delta?.content ??
@@ -282,19 +300,32 @@ export async function IFXGPTInference(
 
       if (content) {
         fullText += content;
+        socket?.emit("StreamText", fullText);
+      }
+    }
 
-        // optional: strip your legacy prefix if it appears
-        if (fullText.startsWith("assistance:")) {
-          fullText = fullText.slice("assistance:".length).trimStart();
-        }
+    // Process remaining chunks
+    while (!controller.signal.aborted) {
+      const { value: chunk, done } = await it.next();
+      if (done) break;
 
+      console.log("chunk:", JSON.stringify(chunk));
+
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        chunk?.choices?.[0]?.text ??
+        "";
+
+      if (content) {
+        fullText += content;
         socket?.emit("StreamText", fullText);
       }
     }
 
     return fullText;
   } catch (e: any) {
-    // Azure/OpenAI content filtering
+    // content filter
     if (e?.code === "content_filter" || e?.error?.code === "content_filter") {
       const msg =
         "Your prompt was blocked by the content policy. Please rephrase and try again.";
@@ -302,11 +333,27 @@ export async function IFXGPTInference(
       return "";
     }
 
-    // aborted is not really an error for streaming
-    if (controller.signal.aborted) return fullText;
+    // If streaming fails, try non-streaming to see what server returns
+    try {
+      console.log("Streaming failed:", e?.message ?? e);
+      console.log("Falling back to non-streaming...");
 
-    console.error("Error in IFXGPT Inference:", e);
-    throw e;
+      const resp = await ifxClient.chat.completions.create({
+        model,
+        messages,
+        stream: false,
+        temperature: 1.0,
+      });
+
+      console.log("non-stream resp:", JSON.stringify(resp));
+
+      const text = resp?.choices?.[0]?.message?.content ?? "";
+      if (text) socket?.emit("StreamText", text);
+      return text;
+    } catch (e2) {
+      console.error("Non-streaming also failed:", e2);
+      throw e2;
+    }
   }
 }
 
