@@ -1713,7 +1713,7 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
       // Use your existing buildMessages function
       const messageHistory = buildMessages(
         modeToUse === "code" ? setting_prompt : "You are a helpful assistant", 
-        question_backup
+        userMessage
       );
 
       console.log("Message :");
