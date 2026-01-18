@@ -2943,11 +2943,14 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
     - Joins with 'uploaded_files' to filter by 'chat_history_id'.
     """
     # Step 1: Encode the query text to a vector
-    query_embedding = encode_text_for_embedding(query_text)
-    # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    # query_embedding = encode_text_for_embedding(query_text)
+    if not LOCAL:
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
     conn = None
@@ -3140,13 +3143,16 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
     # Encode query
 
     # Encoding using Qwen3-0.6b-embedding
-    query_embedding = encode_text_for_embedding(text=query_text)
+    # query_embedding = encode_text_for_embedding(text=query_text)
 
     # Encode using jinna Text-Image-Embedding
-    # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    if not LOCAL:
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"  
 
     conn = None
@@ -3281,11 +3287,14 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
     Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
     """
     # Encode query
-    query_embedding = encode_text_for_embedding(query_text)
-    # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    # query_embedding = encode_text_for_embedding(query_text)
+    if not LOCAL:
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
 
     conn = None
