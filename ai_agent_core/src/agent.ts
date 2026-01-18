@@ -358,92 +358,56 @@ export async function IFXGPTInference(
 }
 
 
-async function testPrompt(messages: any[], model: string) {
-  return ifxClient.chat.completions.create({ model, messages, stream: false, temperature: 1 });
-}
+// function buildMessages(setting_prompt: string, question: string) {
+//   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+//     { role: "system", content: setting_prompt },
+//   ];
 
-async function findFilteredMessage(all: any[], model: string) {
-  // Try progressively adding messages until it breaks
-  const ok: any[] = [];
-  for (const m of all) {
-    ok.push(m);
-    try {
-      await testPrompt(ok, model);
-      console.log("OK up to:", m.role, m.content.slice(0, 80));
-    } catch (e: any) {
-      if (e?.code === "content_filter" || e?.error?.code === "content_filter") {
-        console.log("FILTER TRIGGERED BY:", m.role);
-        console.log(m.content);
-        return;
-      }
-      throw e;
-    }
-  }
-  console.log("No filter triggered.");
-}
+//   const normalized = question.trim();
 
-// 1) Put your REAL long system prompt here (the one you load as "Setting Prompt Loaded")
-const SETTING_PROMPT = process.env.SETTING_PROMPT ?? `You are assistanct`;
+//   const parts = normalized.includes("<DATA_SECTION>")
+//     ? normalized.split("<DATA_SECTION>").map(s => s.trim()).filter(Boolean)
+//     : [normalized];
 
-// 2) Build the same "question" string your app sends (conversation section)
-const question = "user: 'Say 'OK'.'"
+//   let addedAny = false;
 
+//   for (const part of parts) {
+//     if (/^user\s*:/.test(part)) {
+//       messages.push({ role: "user", content: part.replace(/^user\s*:\s*/i, "") });
+//       addedAny = true;
+//     } else if (/^(assistant|assistance)\s*:/.test(part)) {
+//       messages.push({ role: "assistant", content: part.replace(/^(assistant|assistance)\s*:\s*/i, "") });
+//       addedAny = true;
+//     } else {
+//       // fallback: treat as user content
+//       messages.push({ role: "user", content: part });
+//       addedAny = true;
+//     }
+//   }
 
-// 3) Build messages using your existing builder
-const messages = buildMessages(SETTING_PROMPT, question);
+//   if (!addedAny) {
+//     messages.push({ role: "user", content: normalized });
+//   }
 
-console.log("build message : ", messages);
-
-// 4) Run the filter debugger
-await findFilteredMessage(messages, "gpt-5.2");
-
-console.log("Only System :")
-await findFilteredMessage(
-  [{ role: "system", content: SETTING_PROMPT }],
-  "gpt-5.2"
-);
-
-console.log("System and User :")
-await findFilteredMessage(
-  [
-    { role: "system", content: SETTING_PROMPT },
-    { role: "user", content: "Say 'OK'." }
-  ],
-  "gpt-5.2"
-);
+//   return messages;
+// }
 
 
 function buildMessages(setting_prompt: string, question: string) {
-  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: setting_prompt },
-  ];
+  const messages: { role: string; content: string }[] = [];
+  messages.push({ role: "system", content: setting_prompt });
 
-  const normalized = question.trim();
-
-  const parts = normalized.includes("<DATA_SECTION>")
-    ? normalized.split("<DATA_SECTION>").map(s => s.trim()).filter(Boolean)
-    : [normalized];
-
-  let addedAny = false;
+  const parts = question.includes("<DATA_SECTION>")
+    ? question.split("\n<DATA_SECTION>\n").filter(s => s.trim() !== "")
+    : [question.trim()];
 
   for (const part of parts) {
-    if (/^user\s*:/.test(part)) {
-      messages.push({ role: "user", content: part.replace(/^user\s*:\s*/i, "") });
-      addedAny = true;
-    } else if (/^(assistant|assistance)\s*:/.test(part)) {
-      messages.push({ role: "assistant", content: part.replace(/^(assistant|assistance)\s*:\s*/i, "") });
-      addedAny = true;
-    } else {
-      // fallback: treat as user content
-      messages.push({ role: "user", content: part });
-      addedAny = true;
+    if (part.startsWith("user:")) {
+      messages.push({ role: "user", content: part.replace(/^user:\s*/, "") });
+    } else if (part.startsWith("assistance:")) {
+      messages.push({ role: "assistant", content: part.replace(/^assistance:\s*/, "") });
     }
   }
-
-  if (!addedAny) {
-    messages.push({ role: "user", content: normalized });
-  }
-
   return messages;
 }
 
