@@ -1085,260 +1085,374 @@ def OpenRouterInference(prompt: str, system_prompt: str = "", image_bytes_list: 
 
 
 
+# def extract_and_process_content(file_storage, option: str = 'describe', pipeline_mode: str = 'ocr', with_images: bool = True) -> str:
+#     """
+#     UPDATED: This function now processes files by converting them to images 
+#     and sending them to a VLM for analysis.
+    
+#     - For PDFs: Converts each page to an image and sends all page images.
+#     - For Images: Sends the single image.
+#     - Other types (DOCX, TXT, etc.) fall back to the legacy OCR text extraction.
+#     """
+    
+#     # --- Step 1: Get file bytes ---
+#     if isinstance(file_storage, bytes):
+#         file_bytes = file_storage
+#         file_storage = io.BytesIO(file_bytes)
+#         file_storage.filename = "temp_file.pdf" # Mock filename
+#     else:
+#         file_storage.seek(0)
+#         file_bytes = file_storage.read()
+#         file_storage.seek(0) # Reset pointer
+        
+#     if not file_storage.filename:
+#         # Try to guess type if no filename
+#         file_storage.filename = "temp_file.bin"
+
+#     file_ext = os.path.splitext(file_storage.filename)[1].lower()
+#     image_bytes_list = []
+    
+#     # --- Step 2: Convert file to list of images ---
+    
+#     if file_ext == '.pdf':
+#         print(f"Processing PDF '{file_storage.filename}': Converting pages to images...")
+#         try:
+#             pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+#             page_count = len(pdf_document)
+#             print(f"PDF has {page_count} pages.")
+            
+#             for page_num_0_idx in range(page_count):
+#                 page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
+#                 if page_image_bytes:
+#                     image_bytes_list.append(page_image_bytes)
+#                 else:
+#                     print(f"⚠️ Warning: Could not convert page {page_num_0_idx + 1}")
+            
+#             pdf_document.close()
+#             print(f"✅ Successfully converted {len(image_bytes_list)} pages to images.")
+            
+#         except Exception as e:
+#             return f"Error opening or converting PDF: {e}"
+            
+
+#     elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
+#         print(f"Processing single image: '{file_storage.filename}'")
+#         image_bytes_list.append(file_bytes)
+        
+#     else:
+#         # Fallback for unsupported types: Try the old OCR logic
+#         # This preserves functionality for DOCX, TXT, etc.
+#         print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
+#         # --- ORIGINAL OCR/TEXT EXTRACTION LOGIC (Simplified) ---
+#         try:
+#             doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
+#             # print("Downloading RapidOCR models")
+#             # download_path = snapshot_download(repo_id="RapidAI/RapidOCR")
+#             # det_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "det", "ch_PP-OCRv5_server_det.onnx")
+#             # rec_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "rec", "ch_PP-OCRv5_rec_server_infer.onnx")
+#             # cls_model_path = os.path.join(download_path, "onnx", "PP-OCRv4", "cls", "ch_ppocr_mobile_v2.0_cls_infer.onnx")
+            
+#             # ocr_options = RapidOcrOptions(
+#             #     det_model_path=det_model_path, rec_model_path=rec_model_path, cls_model_path=cls_model_path
+#             # )
+#             # pipeline_options = PdfPipelineOptions()
+#             # pipeline_options.do_ocr = True
+#             # pipeline_options.do_table_structure = True
+#             # pipeline_options.table_structure_options.do_cell_matching = True
+#             # pipeline_options.ocr_options = ocr_options
+
+#             # pipeline_options_word = WordPipelineOptions()
+#             # pipeline_options_powerpoint = PowerPointPipelineOptions()
+#             # pipeline_options_excel = ExcelPipelineOptions()
+            
+#             # Use a generic converter for fallback
+#             converter = DocumentConverter(
+#                 # format_options={
+#                 #     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+#                 #     InputFormat.DOCX: PdfFormatOption(pipeline_options=pipeline_options_word), 
+#                 #     InputFormat.PPTX: PdfFormatOption(pipeline_options=pipeline_options_powerpoint),
+#                 #     InputFormat.XLSX: PdfFormatOption(pipeline_options=pipeline_options_excel),
+#                 #     # InputFormat.XLS: PdfFormatOption(pipeline_options=pipeline_options),
+#                 #     # InputFormat.TXT: PdfFormatOption(pipeline_options=pipeline_options),
+#                 # }
+#             )
+            
+#             result = converter.convert(doc_stream)
+#             doc = result.document
+#             full_content = doc.export_to_markdown()
+            
+#             if option == 'summarize':
+#                 return summarize_text_with_llm(full_content)
+#             else:
+#                 return full_content
+                
+#         except Exception as e:
+#             return f"Error during legacy OCR fallback: {e}"
+#         # --- END OF FALLBACK ---
+
+#     if not image_bytes_list:
+#         return "Error: No images were successfully extracted or converted from the file."
+
+#     # --- Step 3: Define VLM Prompt ---
+#     # (This is the detailed instruction prompt from your original code)
+#     vlm_system_prompt = (
+# """You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
+
+# **Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
+
+# Your response must be a single, complete Markdown document representing the source file.
+
+# ### Your Guiding Principles
+
+# 1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
+
+# 2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
+
+#       * Headings (e.g., `# Title`, `## Subtitle`)
+#       * Paragraphs (plain text)
+#       * Lists (bulleted `*` or numbered `1.`)
+#       * Code blocks (using \`\`\` fences)
+#       * Bold (`**text**`) and Italic (`*text*`) styling.
+#       * Any and all text labels, captions, or annotations, in the exact place they appear.
+
+# 3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
+
+#       * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
+#       * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
+#       * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
+#           * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
+#           * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
+#       * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
+#       * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
+
+# 4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
+
+#       * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
+#         ```markdown
+#         <table>
+#         | Header 1 | Header 2 |
+#         |---|---|
+#         | Data 1 | Data 2 |
+#         </table>
+#         ```
+#       * **Charts:**
+#         ```markdown
+#         <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
+#         ```
+#       * **Images/Photos:**
+#         ```markdown
+#         <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
+#         ```
+#       * **Diagrams/Schematics (Your Most Important Tag):**
+#         ```markdown
+#         <diagram>
+#         A hyper-detailed, connection-by-connection transcription of the schematic.
+#         **Component 1 (e.g., Arduino):**
+#         * Pin 1 connects to...
+#         * Pin 2 connects to Resistor R1...
+#         **Component 2 (e.g., 7-Segment Display):**
+#         * Pin 'A' connects to the other end of Resistor R1...
+#         * Pin 'Common' connects to GND...
+#         (This transcription must trace all connections literally from the image.)
+#         </diagram>
+#         ```
+#       * **Logos:**
+#         ```markdown
+#         <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
+#         ```
+#       * **Signatures:**
+#         ```markdown
+#         <signature>A handwritten, illegible signature in blue ink.</signature>
+#         ```
+#       * **Stamps:**
+#         ```markdown
+#         <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
+#         ```
+
+# -----
+
+# ### *** Note ***
+# You must extract all content from the document.
+
+# ### Gold-Standard Example (Your Target Quality)
+
+# The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
+
+# **Your required output must be exactly in this format and at this level of detail:**
+
+# ```markdown
+# <diagram>
+# A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
+
+# **Connections from Arduino Board:**
+
+# * **To 7-Segment Display (via 300-ohm resistors):**
+#     * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
+#     * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
+#     * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
+#     * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
+#     * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
+#     * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
+#     * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
+# * **To Dip Switch 1 (Pull-Up Configuration):**
+#     * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
+#     * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
+#     * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
+#     * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
+#     * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
+
+# **Component Connections:**
+
+# * **7-Segment Display:**
+#     * Segments A, B, C, D, E, F, and G are connected as described above.
+#     * The common cathode pin (at the bottom) is connected to GND.
+# * **Dip Switch 1 ("ดิปสวิตช์1"):**
+#     * This is an 8-position switch block.
+#     * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
+#     * The other side of all 8 switches is connected to a common GND line.
+# * **Pull-Up Resistors (10K-ohm x 8):**
+#     * There are 8 10K-ohm resistors.
+#     * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
+#     * The other end of all 8 resistors is connected to a common +5V line.
+
+# **Power Pins:**
+# * The Arduino board shows a "USB JACK".
+# * A power pin block shows 3.3V, 5V, GND, GND, VIN.
+# * Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
+# </diagram>
+
+# รูปที่ 1
+
+# Lab 1
+# Dip Switch and 7-Segment
+
+# อุปกรณ์
+# 1. Arduino Board
+# 2. Digital Experiment Board
+# 3. 7-Segment Board
+
+# Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
+# 1.1 ต่อวงจร ตามรูปที่ 1
+# 1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
+# ```""")
+    
+#     vlm_system_prompt = (
+# """You are an expert Document Analyst AI converting images to structured Markdown.
+
+# **CORE DIRECTIVE: Extract content sequentially and verbatim. NO summarization, interpretation, or omission.**
+
+# ### Operational Rules
+# 1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
+# 2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
+# 3.  **Visual Deconstruction (CRITICAL):**
+#     *   Convert visuals into literal text descriptions inside specific tags.
+#     *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
+
+# ### Required Tags
+# *   `<diagram>`: Detailed schematic connection tracing.
+# *   `<table>`: Markdown tables.
+# *   `<chart>`: Type, axes, legend, and data points.
+# *   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+
+# ### Relevance Filter
+# If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
+# """)
+#     # Add context about the images
+#     page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
+#     reference_text = "\n".join(page_references)
+
+#     # This prompt is sent as the 'user' message
+#     final_user_prompt = f"""
+
+#     I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
+
+#     Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
+
+#     # --- Step 4: Call OpenRouterInference ---
+#     print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
+
+#     vlm_response = ""
+#     batch_size = 10
+#     for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
+#         print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
+#         if (i)*batch_size >= len(image_bytes_list):
+#             break
+
+#         if not LOCAL:
+#             if IFXGPT:
+#                 vlm_response += IFXGPTInference(
+#                     prompt=final_user_prompt,
+#                     system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+#                     image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+#                     model_name= "gpt-5-mini" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+#                 ) + "\n\n"
+#             else:
+#                 vlm_response += DeepInfraInference(
+#                     prompt=final_user_prompt,
+#                     system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+#                     image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+#                     model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+#                 ) + "\n\n"
+#             print(vlm_response)
+#         else :
+#              # System prompt for OpenRouter VLM
+#             vlm_system_prompt = ("You're an image expert."
+#                              "If the image contains text, extract and summarize it...")
+#             # Prompt for OpenRouter VLM
+#             final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+#             vlm_response_L = ollama_describe_image(
+#                 image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
+#                 model="qwen3-vl:2b-instruct",
+#                 prompt=final_user_prompt,
+#                 system_prompt=vlm_system_prompt
+#                 )
+#             vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
+
+#     print(vlm_response)
+#     print("✅ VLM processing complete.")
+
+#     # --- Step 5: Handle "summarize" option ---
+#     if option == 'summarize':
+#         print("Summarizing VLM output...")
+#         return summarize_text_with_llm(vlm_response)
+#     else: # 'describe'
+#         return vlm_response
+
+
 def extract_and_process_content(file_storage, option: str = 'describe', pipeline_mode: str = 'ocr', with_images: bool = True) -> str:
     """
-    UPDATED: This function now processes files by converting them to images 
+    UPDATED (Memory Optimized): Processes files by converting them to images 
     and sending them to a VLM for analysis.
     
-    - For PDFs: Converts each page to an image and sends all page images.
+    - For PDFs: Processes in BATCHES to save memory (does not load all pages at once).
     - For Images: Sends the single image.
-    - Other types (DOCX, TXT, etc.) fall back to the legacy OCR text extraction.
+    - Other types: Fallback to legacy OCR.
     """
-    
+    import gc  # Garbage collector for explicit memory management
+
     # --- Step 1: Get file bytes ---
     if isinstance(file_storage, bytes):
         file_bytes = file_storage
         file_storage = io.BytesIO(file_bytes)
-        file_storage.filename = "temp_file.pdf" # Mock filename
+        file_storage.filename = "temp_file.pdf"
     else:
         file_storage.seek(0)
         file_bytes = file_storage.read()
-        file_storage.seek(0) # Reset pointer
-        
+        file_storage.seek(0)
+
     if not file_storage.filename:
-        # Try to guess type if no filename
         file_storage.filename = "temp_file.bin"
 
     file_ext = os.path.splitext(file_storage.filename)[1].lower()
-    image_bytes_list = []
     
-    # --- Step 2: Convert file to list of images ---
-    
-    if file_ext == '.pdf':
-        print(f"Processing PDF '{file_storage.filename}': Converting pages to images...")
-        try:
-            pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
-            page_count = len(pdf_document)
-            print(f"PDF has {page_count} pages.")
-            
-            for page_num_0_idx in range(page_count):
-                page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
-                if page_image_bytes:
-                    image_bytes_list.append(page_image_bytes)
-                else:
-                    print(f"⚠️ Warning: Could not convert page {page_num_0_idx + 1}")
-            
-            pdf_document.close()
-            print(f"✅ Successfully converted {len(image_bytes_list)} pages to images.")
-            
-        except Exception as e:
-            return f"Error opening or converting PDF: {e}"
-            
+    # Define batch size (tune this based on your VRAM/RAM limits)
+    BATCH_SIZE = 10 
+    vlm_response = ""
 
-    elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
-        print(f"Processing single image: '{file_storage.filename}'")
-        image_bytes_list.append(file_bytes)
-        
-    else:
-        # Fallback for unsupported types: Try the old OCR logic
-        # This preserves functionality for DOCX, TXT, etc.
-        print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
-        # --- ORIGINAL OCR/TEXT EXTRACTION LOGIC (Simplified) ---
-        try:
-            doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
-            # print("Downloading RapidOCR models")
-            # download_path = snapshot_download(repo_id="RapidAI/RapidOCR")
-            # det_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "det", "ch_PP-OCRv5_server_det.onnx")
-            # rec_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "rec", "ch_PP-OCRv5_rec_server_infer.onnx")
-            # cls_model_path = os.path.join(download_path, "onnx", "PP-OCRv4", "cls", "ch_ppocr_mobile_v2.0_cls_infer.onnx")
-            
-            # ocr_options = RapidOcrOptions(
-            #     det_model_path=det_model_path, rec_model_path=rec_model_path, cls_model_path=cls_model_path
-            # )
-            # pipeline_options = PdfPipelineOptions()
-            # pipeline_options.do_ocr = True
-            # pipeline_options.do_table_structure = True
-            # pipeline_options.table_structure_options.do_cell_matching = True
-            # pipeline_options.ocr_options = ocr_options
-
-            # pipeline_options_word = WordPipelineOptions()
-            # pipeline_options_powerpoint = PowerPointPipelineOptions()
-            # pipeline_options_excel = ExcelPipelineOptions()
-            
-            # Use a generic converter for fallback
-            converter = DocumentConverter(
-                # format_options={
-                #     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-                #     InputFormat.DOCX: PdfFormatOption(pipeline_options=pipeline_options_word), 
-                #     InputFormat.PPTX: PdfFormatOption(pipeline_options=pipeline_options_powerpoint),
-                #     InputFormat.XLSX: PdfFormatOption(pipeline_options=pipeline_options_excel),
-                #     # InputFormat.XLS: PdfFormatOption(pipeline_options=pipeline_options),
-                #     # InputFormat.TXT: PdfFormatOption(pipeline_options=pipeline_options),
-                # }
-            )
-            
-            result = converter.convert(doc_stream)
-            doc = result.document
-            full_content = doc.export_to_markdown()
-            
-            if option == 'summarize':
-                return summarize_text_with_llm(full_content)
-            else:
-                return full_content
-                
-        except Exception as e:
-            return f"Error during legacy OCR fallback: {e}"
-        # --- END OF FALLBACK ---
-
-    if not image_bytes_list:
-        return "Error: No images were successfully extracted or converted from the file."
-
-    # --- Step 3: Define VLM Prompt ---
-    # (This is the detailed instruction prompt from your original code)
-    vlm_system_prompt = (
-"""You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
-
-**Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
-
-Your response must be a single, complete Markdown document representing the source file.
-
-### Your Guiding Principles
-
-1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
-
-2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
-
-      * Headings (e.g., `# Title`, `## Subtitle`)
-      * Paragraphs (plain text)
-      * Lists (bulleted `*` or numbered `1.`)
-      * Code blocks (using \`\`\` fences)
-      * Bold (`**text**`) and Italic (`*text*`) styling.
-      * Any and all text labels, captions, or annotations, in the exact place they appear.
-
-3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
-
-      * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
-      * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
-      * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
-          * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
-          * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
-      * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
-      * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
-
-4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
-
-      * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
-        ```markdown
-        <table>
-        | Header 1 | Header 2 |
-        |---|---|
-        | Data 1 | Data 2 |
-        </table>
-        ```
-      * **Charts:**
-        ```markdown
-        <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
-        ```
-      * **Images/Photos:**
-        ```markdown
-        <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
-        ```
-      * **Diagrams/Schematics (Your Most Important Tag):**
-        ```markdown
-        <diagram>
-        A hyper-detailed, connection-by-connection transcription of the schematic.
-        **Component 1 (e.g., Arduino):**
-        * Pin 1 connects to...
-        * Pin 2 connects to Resistor R1...
-        **Component 2 (e.g., 7-Segment Display):**
-        * Pin 'A' connects to the other end of Resistor R1...
-        * Pin 'Common' connects to GND...
-        (This transcription must trace all connections literally from the image.)
-        </diagram>
-        ```
-      * **Logos:**
-        ```markdown
-        <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
-        ```
-      * **Signatures:**
-        ```markdown
-        <signature>A handwritten, illegible signature in blue ink.</signature>
-        ```
-      * **Stamps:**
-        ```markdown
-        <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
-        ```
-
------
-
-### *** Note ***
-You must extract all content from the document.
-
-### Gold-Standard Example (Your Target Quality)
-
-The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
-
-**Your required output must be exactly in this format and at this level of detail:**
-
-```markdown
-<diagram>
-A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
-
-**Connections from Arduino Board:**
-
-* **To 7-Segment Display (via 300-ohm resistors):**
-    * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
-    * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
-    * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
-    * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
-    * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
-    * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
-    * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
-* **To Dip Switch 1 (Pull-Up Configuration):**
-    * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
-    * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
-    * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
-    * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
-    * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
-    * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
-    * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
-    * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
-
-**Component Connections:**
-
-* **7-Segment Display:**
-    * Segments A, B, C, D, E, F, and G are connected as described above.
-    * The common cathode pin (at the bottom) is connected to GND.
-* **Dip Switch 1 ("ดิปสวิตช์1"):**
-    * This is an 8-position switch block.
-    * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
-    * The other side of all 8 switches is connected to a common GND line.
-* **Pull-Up Resistors (10K-ohm x 8):**
-    * There are 8 10K-ohm resistors.
-    * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
-    * The other end of all 8 resistors is connected to a common +5V line.
-
-**Power Pins:**
-* The Arduino board shows a "USB JACK".
-* A power pin block shows 3.3V, 5V, GND, GND, VIN.
-* Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
-</diagram>
-
-รูปที่ 1
-
-Lab 1
-Dip Switch and 7-Segment
-
-อุปกรณ์
-1. Arduino Board
-2. Digital Experiment Board
-3. 7-Segment Board
-
-Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
-1.1 ต่อวงจร ตามรูปที่ 1
-1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
-```""")
-    
+    # --- Step 2: Define VLM Prompt (Static Part) ---
     vlm_system_prompt = (
 """You are an expert Document Analyst AI converting images to structured Markdown.
 
@@ -1346,80 +1460,125 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 
 ### Operational Rules
 1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
-2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
-3.  **Visual Deconstruction (CRITICAL):**
-    *   Convert visuals into literal text descriptions inside specific tags.
-    *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
-
-### Required Tags
-*   `<diagram>`: Detailed schematic connection tracing.
-*   `<table>`: Markdown tables.
-*   `<chart>`: Type, axes, legend, and data points.
-*   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting.
+3.  **Visual Deconstruction:** Convert visuals into literal text descriptions inside specific tags (<diagram>, <table>, <chart>, <image>).
+4.  **Schematics:** Provide hyper-detailed, pin-by-pin connection traces.
 
 ### Relevance Filter
-If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
+If a specific user question is provided and this page contains no relevant information, do not extract content of that section.
 """)
-    # Add context about the images
-    page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
-    reference_text = "\n".join(page_references)
 
-    # This prompt is sent as the 'user' message
-    final_user_prompt = f"""
+    # --- Step 3: Process based on file type ---
 
-    I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
+    if file_ext == '.pdf':
+        print(f"Processing PDF '{file_storage.filename}' in batches of {BATCH_SIZE}...")
+        try:
+            pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+            page_count = len(pdf_document)
+            print(f"PDF has {page_count} pages.")
+            
+            # Loop through the PDF in chunks
+            for start_idx in range(0, page_count, BATCH_SIZE):
+                end_idx = min(start_idx + BATCH_SIZE, page_count)
+                print(f"Processing Batch: Pages {start_idx + 1} to {end_idx}...")
+                
+                batch_images = []
+                page_references = []
 
-    Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
+                # Convert only the current batch of pages to images
+                for page_num in range(start_idx, end_idx):
+                    # convert_pdf_page_to_image must return bytes
+                    page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num, dpi=200)
+                    if page_image_bytes:
+                        batch_images.append(page_image_bytes)
+                        page_references.append(f"- Document Page {page_num + 1}")
+                    else:
+                        print(f"⚠️ Warning: Could not convert page {page_num + 1}")
 
-    # --- Step 4: Call OpenRouterInference ---
-    print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
+                if not batch_images:
+                    continue
 
-    vlm_response = ""
-    batch_size = 10
-    for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
-        print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
-        if (i)*batch_size >= len(image_bytes_list):
-            break
+                # Prepare dynamic prompt for this batch
+                reference_text = "\n".join(page_references)
+                batch_user_prompt = f"""
+                I am providing you with {len(batch_images)} images representing a section of the document: 
+                {reference_text}
+                
+                Please analyze these pages and extract the content as requested. 
+                """
 
+                # Call VLM for this batch
+                if not LOCAL:
+                    if IFXGPT:
+                        batch_res = IFXGPTInference(
+                            prompt=batch_user_prompt,
+                            system_prompt=vlm_system_prompt,
+                            image_bytes_list=batch_images,
+                            model_name="gpt-5-mini" 
+                        )
+                    else:
+                        batch_res = DeepInfraInference(
+                            prompt=batch_user_prompt,
+                            system_prompt=vlm_system_prompt,
+                            image_bytes_list=batch_images,
+                            model_name="meta-llama/Llama-4-Scout-17B-16E-Instruct"
+                        )
+                    vlm_response += batch_res + "\n\n"
+                else:
+                    # Local Ollama fallback
+                    desc_list = ollama_describe_image(
+                        image_bytes=batch_images,
+                        model="qwen3-vl:2b-instruct",
+                        prompt="Please describe the image in detail.",
+                        system_prompt="You are an image expert."
+                    )
+                    vlm_response += "\n\n".join(desc_list) + "\n\n"
+
+                # CRITICAL: Clear memory for this batch
+                del batch_images
+                gc.collect() 
+
+            pdf_document.close()
+            print("✅ PDF processing complete.")
+
+        except Exception as e:
+            return f"Error opening or converting PDF: {e}"
+
+    elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
+        # Single image path (same as before but simplified)
+        print(f"Processing single image: '{file_storage.filename}'")
+        image_bytes_list = [file_bytes]
+        
+        user_prompt = "Analyze this image and extract content."
+        
         if not LOCAL:
-            if IFXGPT:
-                vlm_response += IFXGPTInference(
-                    prompt=final_user_prompt,
-                    system_prompt=vlm_system_prompt, # The user's detailed instructions go here
-                    image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                    model_name= "gpt-5-mini" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
-                ) + "\n\n"
-            else:
-                vlm_response += DeepInfraInference(
-                    prompt=final_user_prompt,
-                    system_prompt=vlm_system_prompt, # The user's detailed instructions go here
-                    image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                    model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
-                ) + "\n\n"
-            print(vlm_response)
-        else :
-             # System prompt for OpenRouter VLM
-            vlm_system_prompt = ("You're an image expert."
-                             "If the image contains text, extract and summarize it...")
-            # Prompt for OpenRouter VLM
-            final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-            vlm_response_L = ollama_describe_image(
-                image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
-                model="qwen3-vl:2b-instruct",
-                prompt=final_user_prompt,
-                system_prompt=vlm_system_prompt
-                )
-            vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
+             # Call your inference function (simplified for brevity)
+             if IFXGPT:
+                vlm_response = IFXGPTInference(prompt=user_prompt, system_prompt=vlm_system_prompt, image_bytes_list=image_bytes_list, model_name="gpt-5-mini")
+             else:
+                vlm_response = DeepInfraInference(prompt=user_prompt, system_prompt=vlm_system_prompt, image_bytes_list=image_bytes_list, model_name="meta-llama/Llama-4-Scout-17B-16E-Instruct")
+        else:
+             res_list = ollama_describe_image(image_bytes=image_bytes_list, model="qwen3-vl:2b-instruct", prompt="Describe", system_prompt="Expert")
+             vlm_response = res_list[0]
 
-    print(vlm_response)
-    print("✅ VLM processing complete.")
+    else:
+        # Fallback for DOCX/TXT/etc using Legacy OCR
+        print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
+        try:
+            doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
+            converter = DocumentConverter() # Your legacy converter setup
+            result = converter.convert(doc_stream)
+            vlm_response = result.document.export_to_markdown()
+        except Exception as e:
+            return f"Error during legacy OCR fallback: {e}"
 
-    # --- Step 5: Handle "summarize" option ---
+    # --- Step 4: Final Output ---
     if option == 'summarize':
         print("Summarizing VLM output...")
         return summarize_text_with_llm(vlm_response)
-    else: # 'describe'
+    else:
         return vlm_response
+    
     
 # ==============================================================================
 #  OLLAMA FUNCTION (NEW)
