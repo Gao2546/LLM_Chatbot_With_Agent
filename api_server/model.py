@@ -1122,6 +1122,7 @@ def search_similar_api_unified():
         queryT = data.get('query')
         user_id = int(data.get('user_id'))
         chat_history_id = int(data.get('chat_history_id'))
+        chat_history_messages = data.get('chat_history_messages', [])
         
         top_k_text = int(data.get('top_k_text', 5))
         top_k_pages = int(data.get('top_k_pages', 5))
@@ -1150,6 +1151,7 @@ User Query: {queryT}
 Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
 Prompt Language: English
 Prompt Type: Markdown
+User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************

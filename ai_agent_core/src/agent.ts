@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import { Server as SocketIOServer } from 'socket.io';
@@ -798,6 +798,24 @@ router.post('/message', async (req : Request, res : Response) => {
     let serch_doc = ""
     // const documentSearchMethod = docSearchMethod || "none";
 
+    let chatContent = "";
+    if (currentChatId) {
+      const rows = await readChatHistory(currentChatId);
+      // REMOVED: await createChatFolder(userId, currentChatId);
+      if (rows.length > 0) {
+        chatContent = rows[0].message;
+        if (!currentChatMode) {
+           currentChatMode = rows[0].chat_mode ?? initialMode;
+           req.session.user!.currentChatMode = currentChatMode;
+        }
+        if (!currentChatModel) {
+           currentChatModel = rows[0].chat_model ?? initialModel;
+           req.session.user!.currentChatModel = currentChatModel;
+        }
+      }
+      req.session.user!.socketId = socketId;
+    }
+
     if (currentChatId){
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
@@ -807,6 +825,7 @@ router.post('/message', async (req : Request, res : Response) => {
           query: userMessage,
           user_id: userId,
           chat_history_id: currentChatId,
+          chat_history_messages: chatContent,
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
@@ -842,23 +861,23 @@ router.post('/message', async (req : Request, res : Response) => {
     console.log(serch_doc);
     console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
 
-    let chatContent = "";
-    if (currentChatId) {
-      const rows = await readChatHistory(currentChatId);
-      // REMOVED: await createChatFolder(userId, currentChatId);
-      if (rows.length > 0) {
-        chatContent = rows[0].message;
-        if (!currentChatMode) {
-           currentChatMode = rows[0].chat_mode ?? initialMode;
-           req.session.user!.currentChatMode = currentChatMode;
-        }
-        if (!currentChatModel) {
-           currentChatModel = rows[0].chat_model ?? initialModel;
-           req.session.user!.currentChatModel = currentChatModel;
-        }
-      }
-      req.session.user!.socketId = socketId;
-    }
+    // let chatContent = "";
+    // if (currentChatId) {
+    //   const rows = await readChatHistory(currentChatId);
+    //   // REMOVED: await createChatFolder(userId, currentChatId);
+    //   if (rows.length > 0) {
+    //     chatContent = rows[0].message;
+    //     if (!currentChatMode) {
+    //        currentChatMode = rows[0].chat_mode ?? initialMode;
+    //        req.session.user!.currentChatMode = currentChatMode;
+    //     }
+    //     if (!currentChatModel) {
+    //        currentChatModel = rows[0].chat_model ?? initialModel;
+    //        req.session.user!.currentChatModel = currentChatModel;
+    //     }
+    //   }
+    //   req.session.user!.socketId = socketId;
+    // }
 
     if (selectedRole == "user"){
       chatContent += (chatContent ? "\n<DATA_SECTION>\n" : "") + "user" + ": " + userMessage + "\n";
