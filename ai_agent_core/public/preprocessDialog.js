@@ -604,7 +604,7 @@ async function showPreprocessDialog() {
     option2.value = 'text';
     option2.textContent = 'Extract Text & Encode';
     
-    dropdown.appendChild(option1);
+    // dropdown.appendChild(option1);
     dropdown.appendChild(option2);
     
     configSection.appendChild(configLabel);
