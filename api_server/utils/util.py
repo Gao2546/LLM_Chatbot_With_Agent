@@ -4180,11 +4180,13 @@ def IFXGPTEmbedding(inputs: List[str], model_name: str = "multilingual-e5-large-
     Generate embeddings using Infineon IFX GPT.
     """
     try:
+        print("Text input:",inputs)
         response = client.embeddings.create(
             model=model_name,
             input=inputs
         )
         # Extract embeddings and maintain order
+        print("Embedding : ", response)
         return [item.embedding for item in response.data]
     except Exception as e:
         print(f"Error calling IFX GPT Embeddings: {e}")
