@@ -4451,7 +4451,6 @@ def IFXGPTEmbedding(
             raise RuntimeError(
                 f"Embedding count mismatch: got {len(embeddings)} for {len(clean_inputs)} inputs"
             )
-        print("Embedding: ",embeddings)
         return embeddings
 
     except Exception as e:
