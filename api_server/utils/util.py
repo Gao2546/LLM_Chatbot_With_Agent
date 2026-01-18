@@ -4175,22 +4175,51 @@ def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List
     except Exception as e:
         return f"Error calling IFX GPT: {e}"
 
-def IFXGPTEmbedding(inputs: List[str], model_name: str = "multilingual-e5-large-instruct") -> List[List[float]]:
-    """
-    Generate embeddings using Infineon IFX GPT.
-    """
+
+def IFXGPTEmbedding(
+    inputs: List[str],
+    model_name: str = "multilingual-e5-large-instruct",
+) -> List[List[float]]:
+    print("string input: ", inputs)
+    # 1) validate inputs
+    if not inputs:
+        raise ValueError("IFXGPTEmbedding: 'inputs' is empty")
+
+    # 2) sanitize (common cause: empty/whitespace chunks)
+    clean_inputs = [s.strip() for s in inputs if isinstance(s, str) and s.strip()]
+    if not clean_inputs:
+        raise ValueError("IFXGPTEmbedding: all inputs are empty/whitespace")
+
     try:
-        print("Text input:",inputs)
         response = client.embeddings.create(
             model=model_name,
-            input=inputs
+            input=clean_inputs
         )
-        # Extract embeddings and maintain order
-        print("Embedding : ", response)
-        return [item.embedding for item in response.data]
+
+        # 3) validate response
+        data = getattr(response, "data", None)
+        if not data:
+            # try to show helpful debug info
+            raise RuntimeError(f"No embedding data received. Raw response: {response}")
+
+        embeddings = []
+        for i, item in enumerate(data):
+            emb = getattr(item, "embedding", None)
+            if emb is None:
+                raise RuntimeError(f"Missing embedding at index {i}. Item: {item}")
+            embeddings.append(emb)
+
+        # 4) ensure count matches
+        if len(embeddings) != len(clean_inputs):
+            raise RuntimeError(
+                f"Embedding count mismatch: got {len(embeddings)} for {len(clean_inputs)} inputs"
+            )
+        print("Embedding: ",embeddings)
+        return embeddings
+
     except Exception as e:
-        print(f"Error calling IFX GPT Embeddings: {e}")
-        return []
+        # re-raise so caller can handle it; printing hides failures and causes downstream index errors
+        raise RuntimeError(f"IFX GPT Embeddings failed: {e}") from e
 
 
 # ==============================================================================
