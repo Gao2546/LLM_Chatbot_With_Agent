@@ -901,7 +901,7 @@ router.post('/message', async (req : Request, res : Response) => {
 
     let question : string = "";
     let question_backup
-    if ((currentChatMode) && (serch_doc != "")){
+    if ((currentChatMode) && (serch_doc != "\n\n")){
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
       question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
@@ -1713,7 +1713,7 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
       // Use your existing buildMessages function
       const messageHistory = buildMessages(
         modeToUse === "code" ? setting_prompt : "You are a helpful assistant", 
-        userMessage
+        question_backup
       );
 
       console.log("Message :");
