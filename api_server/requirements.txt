@@ -65,7 +65,7 @@ minio
 # langchain-core
 # langchain-huggingface
 # langchain-openai
-# langchain-text-splitters
+langchain-text-splitters
 
 # Document Processing & OCR
 PyMuPDF==1.26.6
@@ -74,6 +74,12 @@ pillow==11.3.0
 # docling-core
 # unstructured[pdf]
 beautifulsoup4
+python-docx
+python-pptx
+openpyxl
+xlrd
+striprtf
+odfpy
 
 # Search & Web Scraping
 # duckduckgo-search

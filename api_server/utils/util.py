@@ -51,6 +51,16 @@ from typing import List, Optional, Dict, Any, Union
 import openai
 import httpx
 
+import os
+from io import BytesIO
+from docx import Document
+from pptx import Presentation
+import openpyxl
+import xlrd
+from striprtf.striprtf import rtf_to_text
+from odf.opendocument import load
+from odf import text
+
 
 # from vllm import LLM, SamplingParams
 # from vllm.config import PoolerConfig
@@ -843,6 +853,74 @@ def open_utf8_file(file) -> str:
 #  LEGACY: EXTRACTOR FUNCTIONS (Unchanged, they call extract_and_process_content)
 # ==============================================================================
 
+def read_stream(file_stream: BytesIO, filename: str):
+    """
+    Reads text from a BytesIO stream based on the filename extension.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    content = ""
+
+    # Ensure stream is at the beginning
+    file_stream.seek(0)
+
+    try:
+        # --- Word Processing ---
+        if ext == '.docx':
+            # python-docx accepts file-like objects directly
+            doc = Document(file_stream)
+            content = "\n".join([p.text for p in doc.paragraphs])
+        
+        elif ext == '.odt':
+            # odfpy accepts file-like objects directly
+            doc = load(file_stream)
+            elements = doc.getElementsByType(text.P)
+            content = "\n".join([str(e) for e in elements])
+
+        elif ext == '.rtf':
+            # RTF is text; decode bytes to string first
+            text_content = file_stream.read().decode('utf-8', errors='ignore')
+            content = rtf_to_text(text_content)
+
+        # --- Presentations ---
+        elif ext == '.pptx':
+            # python-pptx accepts file-like objects directly
+            prs = Presentation(file_stream)
+            text_runs = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        text_runs.append(shape.text)
+            content = "\n".join(text_runs)
+
+        # --- Spreadsheets ---
+        elif ext in ['.xlsx', '.xlsm']:
+            # openpyxl accepts file-like objects directly
+            wb = openpyxl.load_workbook(file_stream, data_only=True)
+            for sheet in wb.sheetnames:
+                ws = wb[sheet]
+                for row in ws.iter_rows(values_only=True):
+                    content += " ".join([str(cell) for cell in row if cell]) + "\n"
+
+        elif ext == '.xls':
+            # xlrd needs the raw bytes passed to 'file_contents'
+            wb = xlrd.open_workbook(file_contents=file_stream.getvalue())
+            for sheet in wb.sheets():
+                for row_idx in range(sheet.nrows):
+                    row_vals = sheet.row_values(row_idx)
+                    content += " ".join([str(v) for v in row_vals if v]) + "\n"
+
+        # --- Unsupported Legacy Formats ---
+        elif ext in ['.doc', '.ppt']:
+            return f"[ERROR] .doc and .ppt (Binary) require heavy tools (LibreOffice/Antiword) and cannot be read by lightweight Python scripts."
+
+        else:
+            return f"[ERROR] Unsupported extension: {ext}"
+
+    except Exception as e:
+        return f"Error reading {filename}: {str(e)}"
+
+    return content
+
 def extract_pdf_text(file_storage, option: str = 'describe', mode: str = 'vlm_remote') -> str:
     """Extracts content from a PDF. Can describe (default) or summarize."""
     return extract_and_process_content(file_storage, option, pipeline_mode=mode, with_images=False)
@@ -898,11 +976,11 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     Extract object descriptions from an image in base64 format.
     """
     # save image bytes to a PIL Image
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    # image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     # You might want to manage temporary files more carefully in production
-    temp_image_path = f"./temp_images/temp_image_for_description_{uuid.uuid4()}.jpg"
-    os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
-    image.save(temp_image_path)
+    # temp_image_path = f"./temp_images/temp_image_for_description_{uuid.uuid4()}.jpg"
+    # os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
+    # image.save(temp_image_path)
     
     # System prompt for OpenRouter VLM
     system_prompt = ("You're an image expert."

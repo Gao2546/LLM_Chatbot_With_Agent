@@ -35,7 +35,7 @@ from pandas import options
 # from langchain_core.vectorstores import InMemoryVectorStore
 # from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_openai import OpenAIEmbeddings
-# from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Local imports (assuming 'utils' is a local package/directory)
 from utils.util import (
@@ -73,6 +73,7 @@ from utils.util import (
     DeepInfraInference,
     IFXGPTInference,
     IFXGPTEmbedding,
+    read_stream,
 )
 
 from utils.util import LOCAL
@@ -1000,32 +1001,65 @@ def process_document_api():
                 elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
                     file_text = extract_image_text(file_stream)
                 elif filename.lower().endswith(('.docx','.doc','.odt','.rtf')):
-                    file_text = extract_docx_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith(('.pptx','.ppt')):
-                    file_text = extract_pptx_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith(('.xlsx','.xlsm')):
-                    file_text = extract_excel_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith('.xls'):
-                    file_text = extract_xls_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 else:
                     # Default to TXT extractor
                     file_text = extract_txt_file(file_stream)
 
                 if file_text and file_text.strip():
-                    if IFXGPT:
-                        data_vector = IFXGPTEmbedding(inputs=[file_text])[0]
-                    else:
-                        data_vector = encode_text_for_embedding(file_text)
-                    save_vector_to_db(
-                        user_id=user_id,
-                        chat_history_id=chat_history_id,
-                        uploaded_file_id=uploaded_file_id,
-                        file_name=filename,
-                        text=file_text,
-                        embedding=data_vector,
-                        page_number=-1
+                    # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=6000,  # Conservative chunk size to stay under 8164 tokens
+                        chunk_overlap=200
                     )
-                    processed_files.append({"name": filename, "status": "indexed_as_text"})
+                    text_chunks = text_splitter.split_text(file_text)
+                    
+                    if not text_chunks:
+                        print(f"No text chunks extracted from {filename}")
+                        continue
+                    
+                    print(f"Processing {len(text_chunks)} chunks from {filename}")
+                    
+                    # Process each chunk
+                    chunk_count = 0
+                    for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                        try:
+                            # Generate embedding for this chunk
+                            if IFXGPT:
+                                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                            else:
+                                data_vector = encode_text_for_embedding(chunk_text)
+                            
+                            # Save chunk to database
+                            save_vector_to_db(
+                                user_id=user_id,
+                                chat_history_id=chat_history_id,
+                                uploaded_file_id=uploaded_file_id,
+                                file_name=filename,
+                                text=chunk_text,
+                                embedding=data_vector,
+                                page_number=chunk_idx  # Use chunk index as page number
+                            )
+                            chunk_count += 1
+                        except Exception as chunk_err:
+                            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                            continue
+                    
+                    if chunk_count > 0:
+                        processed_files.append({
+                            "name": filename,
+                            "status": "indexed_as_text",
+                            "chunks": chunk_count
+                        })
+                        print(f"Successfully saved {chunk_count} chunks from {filename}")
+                    else:
+                        print(f"Failed to process any chunks from {filename}")
                 else:
                     print(f"No text extracted from {filename}")
 
