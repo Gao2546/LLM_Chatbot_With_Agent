@@ -4178,7 +4178,7 @@ def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List
 
 def IFXGPTEmbedding(
     inputs: List[str],
-    model_name: str = "multilingual-e5-large-instruct",
+    model_name: str = "text-embedding-3-small",
 ) -> List[List[float]]:
     print("string input: ", inputs)
     # 1) validate inputs
