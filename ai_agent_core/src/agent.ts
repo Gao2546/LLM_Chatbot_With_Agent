@@ -1947,6 +1947,7 @@ router.post('/edit-message', async (req, res) => {
           query: newMessage,
           user_id: userId,
           chat_history_id: chatId,
+          chat_history_message: newChatContent,
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
@@ -1972,13 +1973,14 @@ router.post('/edit-message', async (req, res) => {
     }
     console.log(serch_doc);
     console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
-    if ((modeToUse) && (serch_doc != '')){
-      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
-      question_backup = newChatContent + "\n\n" + "document" + ": " + serch_doc
+    if ((modeToUse) && (serch_doc != "\n\n")){
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
+      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
     else{
-      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = newChatContent
+      console.log("No document")
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
+      question_backup = chatContent + "\n\n" + "document" + ": " + "No Document" + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     question = "Model name: " + modelToUse.match(regexM)![1] + "\n\n" + "--------------** Start Conversation Section** --------------\n\n" + question;
@@ -2573,6 +2575,42 @@ ${context}
         return res.status(500).json({ error: `Failed to communicate with MyModel model: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
+
+
+    else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
+    try {
+      console.log("Calling IFX GPT API (internal OpenAI)...");
+      
+      const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
+      
+      // Use your existing buildMessages function
+      const messageHistory = buildMessages(
+        modeToUse === "code" ? setting_prompt : "You are a helpful assistant" + "\n"  + "If there is insufficient information to answer the user's question, tell the user what information you need.", 
+        question_backup
+      );
+
+      console.log("Message :");
+      console.log(messageHistory);
+    
+      // Call our new helper
+      const result = await IFXGPTInference(
+        messageHistory,
+        internalModelName,
+        socket,
+        controller
+      );
+    
+      response = { text: result };
+      console.log("IFXGPT_Response : ");
+      console.log(result);
+    
+    } catch (err) {
+      console.error("Error calling IFX GPT API:", err);
+      return res.status(500).json({
+        error: `Internal API Error: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+  }
 
   if (response) {
     newChatContent += "\n<DATA_SECTION>\n" + "assistance: " + response.text + "\n";
