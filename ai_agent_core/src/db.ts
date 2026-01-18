@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     chat_history_id INTEGER NOT NULL,
     uploaded_file_id INTEGER NOT NULL,
     extracted_text TEXT,
-    embedding VECTOR(1024),
+    embedding VECTOR(1536),
     page_number INTEGER DEFAULT -1, -- <<< NEW/UPDATED COLUMN
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
