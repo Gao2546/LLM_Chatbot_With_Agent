@@ -3551,7 +3551,7 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
                 t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
-            WHERE %s = ANY(t2.active_users)
+            WHERE %s = t2.chat_history_id
               AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
