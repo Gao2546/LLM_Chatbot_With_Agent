@@ -71,6 +71,8 @@ from utils.util import (
     search_similar_documents_by_active_user_all,
     search_similar_pages_by_active_user_all,
     DeepInfraInference,
+    IFXGPTInference,
+    IFXGPTEmbedding,
 )
 
 from utils.util import LOCAL
@@ -83,8 +85,10 @@ TEXT_FILE_EXTENSIONS = ['.txt', '.pdf', '.docx', '.pptx', '.odt', '.rtf']
 dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
+IFXGPT = os.getenv("IFXGPT", True)
 
 LOCAL = True if LOCAL == "True" else False
+IFXGPT = True if IFXGPT == "True" else False
 
 if LOCAL:
     print("Run model on local")
@@ -1008,7 +1012,10 @@ def process_document_api():
                     file_text = extract_txt_file(file_stream)
 
                 if file_text and file_text.strip():
-                    data_vector = encode_text_for_embedding(file_text)
+                    if IFXGPT:
+                        data_vector = IFXGPTEmbedding(inputs=[file_text])[0]
+                    else:
+                        data_vector = encode_text_for_embedding(file_text)
                     save_vector_to_db(
                         user_id=user_id,
                         chat_history_id=chat_history_id,
@@ -1113,6 +1120,14 @@ Prompt Type: Markdown
 Output only the simulated excerpt.
 """ #*****************
     if not LOCAL:
+        if IFXGPT:
+            search_text = IFXGPTInference(
+                prompt=create_search_prompt,
+                # system_prompt=system_prompt,
+                # image_bytes_list=image_bytes_list,
+                model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+        else:
             search_text = DeepInfraInference(
                 prompt=create_search_prompt,
                 # system_prompt=system_prompt,
