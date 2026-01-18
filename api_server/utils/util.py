@@ -4189,7 +4189,7 @@ def IFXGPTEmbedding(
     clean_inputs = [s.strip() for s in inputs if isinstance(s, str) and s.strip()]
     if not clean_inputs:
         raise ValueError("IFXGPTEmbedding: all inputs are empty/whitespace")
-
+    print("clean input: ", clean_inputs)
     try:
         response = client.embeddings.create(
             model=model_name,
