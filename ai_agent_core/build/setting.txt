@@ -683,5 +683,6 @@ You must execute the plan one step at a time.
         Repeat until the task is finished.
         Call attempt_completion only when you have all necessary information.
     PROHIBITED: Never chain multiple tool calls in a single response. Never guess the output of a tool.
+7. **Documents infomation** + If there is insufficient information to answer the user's question, tell the user what information you need.
 
 #--- **End Agent Instructions** ---
