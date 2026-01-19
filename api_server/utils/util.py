@@ -963,8 +963,7 @@ def summarize_text_with_llm(text: str) -> str:
     # Using a fast and cost-effective model for summarization tasks
     if not LOCAL:
         if IFXGPT:
-            IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="gpt-5-mini")
-            pass
+            summary = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="gpt-5-mini")
         else:
             summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
     else:
