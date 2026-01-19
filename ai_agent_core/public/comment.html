@@ -833,8 +833,18 @@
             const model = suggestion.model || 'AI';
             const decision = suggestion.decision || 'pending';
             const suggestionId = suggestion.id;
-            const sourcesCount = suggestion.verifiedSourcesCount || suggestion.sources?.length || 0;
             const sourcesData = suggestion.sources || [];
+            
+            // 🔄 FILTER & SORT: Keep only sources with >= 55% similarity and sort descending
+            const SIMILARITY_THRESHOLD = 0.55; // 55%
+            const MAX_SOURCES_DISPLAY = 5; // Top 5 sources
+            
+            const filteredAndSorted = sourcesData
+                .filter(source => !source.similarity || source.similarity >= SIMILARITY_THRESHOLD)
+                .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+                .slice(0, MAX_SOURCES_DISPLAY);
+            
+            const sourcesCount = filteredAndSorted.length;
 
             // Format answer - convert newlines to HTML if not already HTML
             if (!answer.includes('<div') && !answer.includes('<p>') && !answer.includes('<ul>')) {
@@ -865,7 +875,7 @@
                 const itemTextMuted = isDarkTheme ? '#999' : '#666';
                 
                 // Build sources list HTML
-                let sourcesListHtml = sourcesData.map((source, idx) => {
+                let sourcesListHtml = filteredAndSorted.map((source, idx) => {
                     const type = source.type || 'unknown';
                     const questionId = source.questionId || '';
                     const question = source.question || '';
@@ -877,16 +887,21 @@
                     let sourceLabel = 'Verified Answer';
                     
                     if (type === 'self_verified') {
-                        sourceIcon = '<i class="fas fa-user-check" style="color: #017374;"></i>';
+                        sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
                         sourceLabel = 'Self-verified';
+                    } else if (type === 'verified_answer' || type === 'verification_comments') {
+                        // Expert verified answers
+                        sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
+                        sourceLabel = 'Verified Answer';
                     } else if (type === 'similar_verified') {
-                        sourceIcon = '<i class="fas fa-search" style="color: #17a2b8;"></i>';
-                        sourceLabel = 'Similar Question';
+                        // Questions with sum_verified_answer (synthesized)
+                        sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
+                        sourceLabel = 'Verified Answer';
                     } else if (type === 'similar_unverified') {
                         sourceIcon = '<i class="fas fa-clock" style="color: #ffc107;"></i>';
                         sourceLabel = 'Similar Question (Pending)';
                     } else if (type === 'expert_verification') {
-                        sourceIcon = '<i class="fas fa-user-tie" style="color: #ffc107;"></i>';
+                        sourceIcon = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
                         sourceLabel = 'Expert Verification';
                     } else if (type === 'attachment_image') {
                         sourceIcon = '<i class="fas fa-image" style="color: #6f42c1;"></i>';

@@ -1021,315 +1021,47 @@ router.post('/message', async (req : Request, res : Response) => {
     
     // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
     if (modeToUse === 'ai_suggests') {
-      console.log('AI Suggests Mode: Using LLM + Verified Knowledge Base...');
+      console.log('🤖 AI Suggests Mode: Using shared core function with streaming...');
+      
+      const userQuestion = userMessage || '';
+      
+      // Detect language (outside try block for error handler)
+      const detectLanguage = (text: string): 'thai' | 'english' => {
+        const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+        const totalChars = thaiChars + englishChars;
+        if (totalChars === 0) return 'english';
+        return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+      };
+      
+      const isThaiQuestion = detectLanguage(userQuestion) === 'thai';
       
       try {
-        const userQuestion = userMessage || '';
-        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
         
-        // 1. Generate embedding for the question
-        let embedding: number[] = [];
-        try {
-          const userQuestion = userMessage || '';
-          
-          console.log('⏳ Requesting embedding from Python API...');
-          // ไม่แสดง status message ให้ผู้ใช้
-          
-          const embeddingRes = await axios.post(
-            `${API_SERVER_URL}/encode_embedding`,
-            { text: userQuestion, dimensions: 2048, is_query: true },  // ← cross-lingual search
-            { timeout: 120000 }  // ⬅️ INCREASED from 30s to 120s (2 minutes)
-          );
-          
-          if (embeddingRes.data && embeddingRes.data.embedding) {
-            embedding = embeddingRes.data.embedding;
-            console.log(`✅ AI Suggests: Got embedding with ${embedding.length} dimensions`);
-            // ไม่แสดง status message ให้ผู้ใช้
-          } else {
-            throw new Error('No embedding in response');
-          }
-        } catch (apiError: any) {
-          console.error('❌ AI Suggests: Failed to get embedding:', apiError.message);
-          socket?.emit('StreamText', '❌ Failed to generate embeddings. Please try again.');
-          return res.json({ response: '❌ Embedding service unavailable' });
-        }
+        // Call core function with streaming enabled
+        const result = await generateAISuggestionCore(userQuestion, {
+          streaming: true,
+          socket: socket,
+          questionId: null  // No questionId for chat mode
+        });
         
-        // 2. Search verified answers from knowledge base
-        if (embedding.length === 0) {
-          console.warn('⚠️ AI Suggests: Embedding is empty, cannot search knowledge base');
-          socket?.emit('StreamText', '❌ Could not generate embedding for query');
-          return res.json({ response: '❌ Embedding generation failed' });
-        }
+        // Build final response with footer
+        let finalResponse = result.answer;
         
-        // Use threshold 0.3 for cross-lingual search (Thai<->English)
-        // Lower threshold allows finding semantically similar content across languages
-        const SIMILARITY_THRESHOLD = 0.3;
-        console.log(`🔍 AI Suggests: Searching with embedding length=${embedding.length}, threshold=${SIMILARITY_THRESHOLD}`);
-        const results = await searchVerifiedAnswers(embedding, SIMILARITY_THRESHOLD, 5);
-        console.log(`🔍 AI Suggests: Search returned ${results?.length || 0} results`);
-        
-        let context = '';
-        let sourcesUsed: any[] = [];
-        let totalSources = 0;
-        
-        if (results && results.length > 0) {
-          // Filter out results with low similarity - use same threshold
-          const relevantResults = results.filter((r: any) => r.similarity >= SIMILARITY_THRESHOLD);
-          
-          if (relevantResults.length > 0) {
-            console.log(`✅ AI Suggests: Found ${relevantResults.length} relevant verified answers`);
-            relevantResults.forEach((r: any, i: number) => {
-              console.log(`   ${i+1}. Q${r.id} (${r.verification_type}): similarity=${r.similarity?.toFixed(3)} - "${r.question?.substring(0, 60)}..."`);
-            });
-            context += 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n';
-            relevantResults.forEach((result: any, idx: number) => {
-              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
-              context += `[คำถาม ${idx + 1}]: ${result.question}\n`;
-              context += `[คำตอบ]: ${result.answer}\n`;
-              if (result.tags && result.tags.length > 0) {
-                context += `[แท็ก]: ${result.tags.join(', ')}\n`;
-              }
-              context += `[ความคล้ายคลึง]: ${similarity}%\n\n`;
-              
-              sourcesUsed.push({
-                type: 'verified_answer',
-                questionId: result.id,
-                question: result.question,
-                similarity: result.similarity
-              });
-              totalSources++;
-            });
-          } else {
-            console.log(`⚠️ AI Suggests: No relevant answers found (all below ${SIMILARITY_THRESHOLD * 100}% threshold)`);
-          }
-        } else {
-          console.log(`📚 AI Suggests: No verified answers found in knowledge base`);
-        }
-        
-        console.log(`📚 Total verified sources found: ${totalSources}`);
-        
-        // 3. Build prompt for LLM
-        const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
-        
-        // Detect language of the question (Thai vs English/Other)
-        const detectLanguage = (text: string): 'thai' | 'english' => {
-          // Count Thai characters (Unicode range: \u0E00-\u0E7F)
-          const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
-          // Count English characters
-          const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-          
-          // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
-          const totalChars = thaiChars + englishChars;
-          if (totalChars === 0) return 'english'; // Default to English if no letters
-          
-          return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
-        };
-        
-        const questionLanguage = detectLanguage(userQuestion);
-        const isThaiQuestion = questionLanguage === 'thai';
-        console.log(`🌐 AI Suggests: Detected language = ${questionLanguage}`);
-        
-        let systemPrompt = '';
-        if (hasKnowledgeData) {
-          if (isThaiQuestion) {
-            systemPrompt = `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
-
-กฎสำคัญ:
-1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
-2. สรุปและเรียบเรียงข้อมูลให้ชัดเจน - อย่าคัดลอกทั้งหมด
-3. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่เกี่ยวข้อง
-4. ตอบเป็นภาษาไทย
-5. ใช้ **ตัวหนา** สำหรับคำสำคัญ
-6. ถ้ามีหลายคำตอบที่เกี่ยวข้อง ให้สังเคราะห์รวมกัน
-
-========== ข้อมูลจากฐานความรู้ ==========
-${context}
-==========================================
-`;
-          } else {
-            systemPrompt = `You are an AI Assistant that answers questions using verified knowledge base information.
-
-Important rules:
-1. Use the knowledge base as your primary source
-2. Summarize and organize information clearly - don't copy everything
-3. Include important data, numbers, and relevant details
-4. Respond in English
-5. Use **bold** for key terms
-6. If there are multiple relevant answers, synthesize them together
-
-========== Knowledge Base Information ==========
-${context}
-================================================
-`;
-          }
-        } else {
-          if (isThaiQuestion) {
-            systemPrompt = `คุณคือ AI Assistant ที่ช่วยตอบคำถาม
-
-หมายเหตุ: ไม่พบข้อมูลที่ยืนยันแล้วในฐานความรู้สำหรับคำถามนี้
-กรุณาตอบตามความรู้ทั่วไป และระบุว่านี่เป็นคำตอบจาก AI โดยยังไม่ได้รับการยืนยันจากผู้เชี่ยวชาญ`;
-          } else {
-            systemPrompt = `You are an AI Assistant that helps answer questions.
-
-Note: No verified information was found in the knowledge base for this question.
-Please answer based on general knowledge and indicate that this is an AI-generated answer that has not been verified by experts.`;
-          }
-        }
-        
-        const userPrompt = isThaiQuestion 
-          ? `คำถาม: ${userQuestion}
-
-${hasKnowledgeData ? 'สร้างคำตอบสรุปจากข้อมูลในฐานความรู้:' : 'กรุณาตอบคำถาม:'}
-- เขียนเป็นย่อหน้าที่กระชับ ชัดเจน
-- รวมข้อมูลสำคัญและตัวเลขที่เกี่ยวข้อง
-- ตอบเป็นภาษาไทย`
-          : `Question: ${userQuestion}
-
-${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Please answer the question:'}
-- Write in clear, concise paragraphs
-- Include important data and relevant numbers
-- Respond in English`;
-
-        let aiGeneratedAnswer = '';
-        let aiModelUsed = modelToUse || 'gemma-3-4b-it';
-        
-        // 4. Call LLM to synthesize answer WITH STREAMING
-        try {
-          console.log('🤖 AI Suggests: Calling LLM with STREAMING...');
-          
-          const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-          
-          // Use Google AI API with Streaming
-          const result = await ai.models.generateContentStream({
-            model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
-            contents: fullPrompt,
-            config: {
-              maxOutputTokens: 100000,
-            },
-          });
-          
-          // Stream the response chunk by chunk
-          for await (const chunk of result) {
-            if (controller.signal.aborted) {
-              console.log('⚠️ AI Suggests: Streaming aborted');
-              break;
-            }
-            let chunkText = chunk.text;
-            if (chunkText !== undefined) {
-              aiGeneratedAnswer += chunkText;
-              // Emit each accumulated response to client (streaming effect)
-              socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
-            }
-          }
-          
-          aiGeneratedAnswer = aiGeneratedAnswer
-            .replace(/\r\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-          console.log('✅ AI Suggests: LLM streaming completed');
-          
-        } catch (llmError: any) {
-          console.error('⚠️ AI Suggests: Google AI streaming failed:', llmError.message);
-          
-          // Fallback to Ollama with Streaming
-          try {
-            console.log('🔄 AI Suggests: Trying Ollama with streaming...');
-            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'gemma3:4b',
-                prompt: `${systemPrompt}\n\n${userPrompt}`,
-                stream: true  // Enable streaming
-              })
-            });
-            
-            if (ollamaResponse.ok && ollamaResponse.body) {
-              const reader = (ollamaResponse.body as any).getReader();
-              const decoder = new TextDecoder();
-              
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                
-                const chunk = decoder.decode(value, { stream: true });
-                // Ollama streams JSON lines
-                const lines = chunk.split('\n').filter(line => line.trim());
-                for (const line of lines) {
-                  try {
-                    const json = JSON.parse(line);
-                    if (json.response) {
-                      aiGeneratedAnswer += json.response;
-                      socket?.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
-                    }
-                  } catch (e) {
-                    // Skip invalid JSON
-                  }
-                }
-              }
-              
-              aiGeneratedAnswer = aiGeneratedAnswer
-                .replace(/\r\n/g, '\n')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim();
-              aiModelUsed = 'gemma3:4b (Ollama)';
-              console.log('✅ AI Suggests: Ollama streaming completed');
-            }
-          } catch (ollamaError) {
-            console.error('⚠️ AI Suggests: Ollama streaming also failed');
-          }
-        }
-        
-        // 5. Build final response and add footer
-        let finalResponse = '';
-        
-        if (aiGeneratedAnswer) {
-          finalResponse = aiGeneratedAnswer;
-          
-          // Add sources reference footer with streaming
-          let footer = '';
-          if (totalSources > 0) {
-            footer = isThaiQuestion 
-              ? `\n\n---\n📚 *อ้างอิงจาก ${totalSources} คำตอบที่ยืนยันแล้ว*`
-              : `\n\n---\n📚 *Referenced from ${totalSources} verified answer${totalSources > 1 ? 's' : ''}*`;
-          } else {
-            footer = isThaiQuestion
-              ? `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`
-              : `\n\n---\n⚠️ *No data found in knowledge base - AI answer not yet verified*`;
-          }
+        if (result.totalSources > 0) {
+          const footer = isThaiQuestion 
+            ? `\n\n---\n📚 *อ้างอิงจาก ${result.totalSources} คำตอบที่ยืนยันแล้ว*`
+            : `\n\n---\n📚 *Referenced from ${result.totalSources} verified answer${result.totalSources > 1 ? 's' : ''}*`;
           finalResponse += footer;
-          
-          // Stream the footer (since AI answer was already streamed)
-          socket?.emit('StreamText', finalResponse);
-          
         } else {
-          // Fallback if LLM fails completely - no streaming happened
-          if (totalSources > 0) {
-            finalResponse = isThaiQuestion 
-              ? '## 🔍 ผลลัพธ์จากฐานความรู้\n\n'
-              : '## 🔍 Results from Knowledge Base\n\n';
-            results.forEach((result: any, idx: number) => {
-              const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
-              finalResponse += `### ${idx + 1}. ${result.question}\n`;
-              finalResponse += isThaiQuestion 
-                ? `**ความคล้าย:** ${similarity}%\n\n`
-                : `**Similarity:** ${similarity}%\n\n`;
-              finalResponse += `${result.answer}\n\n---\n\n`;
-            });
-          } else {
-            finalResponse = isThaiQuestion 
-              ? '## ℹ️ ไม่พบคำตอบที่ตรงกัน\n\n'
-              : '## ℹ️ No matching answers found\n\n';
-            finalResponse += isThaiQuestion
-              ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้\n\n'
-              : 'No verified answers in the knowledge base yet.\n\n';
-            finalResponse += isThaiQuestion
-              ? '**คำแนะนำ:** ลองใช้โหมด **Ask** เพื่อให้ AI ตอบโดยตรง'
-              : '**Suggestion:** Try using **Ask** mode to get a direct AI answer';
-          }
-          // Send fallback response (not streamed)
-          socket?.emit('StreamText', finalResponse);
+          const footer = isThaiQuestion
+            ? `\n\n---\n⚠️ *ไม่พบข้อมูลในฐานความรู้ - คำตอบจาก AI ยังไม่ได้รับการยืนยัน*`
+            : `\n\n---\n⚠️ *No data found in knowledge base - AI answer not yet verified*`;
+          finalResponse += footer;
         }
+        
+        // Stream the footer (answer was already streamed by core function)
+        socket?.emit('StreamText', finalResponse);
         
         response = { text: finalResponse };
         
@@ -1337,11 +1069,14 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
         await storeChatHistory(currentChatId, chatContent);
         
+        console.log(`✅ AI Suggests: Completed (${result.totalSources} sources)`);
         return res.json({ response: finalResponse });
         
       } catch (aiSuggestError: any) {
-        console.error('AI Suggests Error:', aiSuggestError);
-        const errorMsg = '❌ เกิดข้อผิดพลาดในการค้นหาฐานความรู้: ' + aiSuggestError.message;
+        console.error('❌ AI Suggests Error:', aiSuggestError);
+        const errorMsg = isThaiQuestion
+          ? '❌ เกิดข้อผิดพลาดในการค้นหาฐานความรู้: ' + aiSuggestError.message
+          : '❌ Knowledge base search error: ' + aiSuggestError.message;
         socket?.emit('StreamText', errorMsg);
         return res.status(500).json({ error: errorMsg });
       }
@@ -5351,6 +5086,386 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
 // =====================================================
 
 /**
+ * CORE FUNCTION: Generate AI suggestion from knowledge base
+ * Used by both:
+ * 1. AI Suggests Mode (chat interface) - with streaming
+ * 2. Q&A Detail page (suggestion tab) - save to database
+ * 
+ * @param questionText - The question text
+ * @param options - { streaming, socket, questionId }
+ * @returns { answer, sources, confidence, totalSources }
+ */
+interface GenerateAISuggestionOptions {
+  streaming?: boolean;
+  socket?: any;
+  questionId?: number | null;
+}
+
+async function generateAISuggestionCore(
+  questionText: string, 
+  options: GenerateAISuggestionOptions = {}
+): Promise<{ answer: string; sources: any[]; confidence: number; totalSources: number }> {
+  const { streaming = false, socket = null, questionId = null } = options;
+  
+  try {
+    console.log(`🤖 Core: Generating AI suggestion (streaming=${streaming})...`);
+    
+    let question = questionText;
+    let questionBody = '';
+    
+    // Get question details if questionId provided
+    if (questionId) {
+      const questionResult = await pool.query(
+        'SELECT question, answer FROM verified_answers WHERE id = $1',
+        [questionId]
+      );
+      if (questionResult.rows.length > 0) {
+        question = questionResult.rows[0].question;
+        questionBody = questionResult.rows[0].answer || '';
+      }
+    }
+    
+    // Combine title + body for better embedding
+    const fullQuestionText = questionBody 
+      ? `${question}\n\n${questionBody}` 
+      : question;
+    
+    // 1. Generate embedding
+    const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })
+    });
+
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to generate embedding');
+    }
+
+    const embeddingData = await embeddingResponse.json() as { embedding: number[] };
+    const questionEmbedding = embeddingData.embedding;
+
+    // 2. Search verified answers from knowledge base
+    let context = '';
+    const sourcesUsed: any[] = [];
+    let totalSources = 0;
+    
+    // Check if current question is self-verified (if questionId provided)
+    let isCurrentSelfVerified = false;
+    let currentAnswer = '';
+    let currentCreatedBy = 'Unknown';
+    
+    if (questionId) {
+      const currentQuestionData = await pool.query(
+        `SELECT id, question, answer, verification_type, created_by
+         FROM verified_answers 
+         WHERE id = $1`,
+        [questionId]
+      );
+      
+      if (currentQuestionData.rows.length > 0) {
+        isCurrentSelfVerified = currentQuestionData.rows[0].verification_type === 'self';
+        currentAnswer = currentQuestionData.rows[0].answer || '';
+        currentCreatedBy = currentQuestionData.rows[0].created_by || 'Unknown';
+        
+        // Use self-verified answer if available
+        if (isCurrentSelfVerified && currentAnswer) {
+          context = `คำตอบที่ยืนยันแล้วสำหรับคำถามนี้ (โดย ${currentCreatedBy}):\n${currentAnswer}\n\n`;
+          sourcesUsed.push({
+            type: 'self_verified',
+            questionId: questionId,
+            verifiedBy: currentCreatedBy
+          });
+          totalSources++;
+        }
+      }
+    }
+    
+    // Search for similar verified questions
+    if (!isCurrentSelfVerified || totalSources === 0) {
+      const SIMILARITY_THRESHOLD = 0.3;
+      
+      const queryParams: any[] = [JSON.stringify(questionEmbedding)];
+      let paramIndex = 2;
+      
+      let whereClause = '';
+      if (questionId) {
+        whereClause = `va.id != $${paramIndex} AND `;
+        queryParams.push(questionId);
+        paramIndex++;
+      }
+      
+      queryParams.push(SIMILARITY_THRESHOLD);
+      
+      // 🆕 EXPANDED QUERY: Include questions that have verification comments
+      // Now includes: self-verified, synthesized (sum_verified_answer), AND questions with verification comments
+      const similarQuestions = await pool.query(
+        `SELECT va.id, va.question, 
+                CASE 
+                  WHEN va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL 
+                  THEN va.sum_verified_answer
+                  ELSE va.answer
+                END as answer,
+                va.verification_type, va.created_by,
+                GREATEST(
+                  COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+                  CASE 
+                    WHEN va.sum_verified_answer_embedding IS NOT NULL 
+                    THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+                    ELSE 0
+                  END
+                ) as similarity,
+                (SELECT COUNT(*) FROM answer_verifications av 
+                 WHERE av.verified_answer_id = va.id 
+                 AND av.verification_type = 'verification' 
+                 AND av.comment IS NOT NULL AND av.comment != '') as verification_count
+         FROM verified_answers va
+         WHERE ${whereClause}
+           va.question_embedding IS NOT NULL
+           AND (
+             (va.verification_type = 'self')
+             OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+             OR (va.verification_type = 'request' AND EXISTS (
+               SELECT 1 FROM answer_verifications av 
+               WHERE av.verified_answer_id = va.id 
+               AND av.verification_type = 'verification'
+               AND av.comment IS NOT NULL AND av.comment != ''
+             ))
+           )
+           AND (1 - (va.question_embedding <=> $1::vector)) > $${paramIndex}
+         ORDER BY similarity DESC
+         LIMIT 5`,
+        queryParams
+      );
+
+      if (similarQuestions.rows.length > 0) {
+        console.log(`📚 Core: Found ${similarQuestions.rows.length} similar verified questions`);
+        context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
+        
+        for (const q of similarQuestions.rows) {
+          // 🆕 Calculate combined similarity: embedding (70%) + string (30%)
+          const embeddingSimilarity = parseFloat(q.similarity);
+          const stringSimilarity = calculateStringSimilarity(question, q.question);
+          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          
+          // Only include if combined similarity is >= 50%
+          if (combinedSimilarity < 0.5) {
+            console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
+            continue;
+          }
+          
+          console.log(`✅ Q${q.id}: embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
+          
+          const similarity = (combinedSimilarity * 100).toFixed(1);
+          context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
+          
+          // 🆕 If no sum_verified_answer, get verification comments directly
+          if (q.verification_type === 'request' && !q.answer?.includes('สังเคราะห์จากความเห็น')) {
+            // Get verification comments for this question
+            const verificationComments = await pool.query(
+              `SELECT commenter_name, comment, requested_departments
+               FROM answer_verifications 
+               WHERE verified_answer_id = $1 
+               AND verification_type = 'verification'
+               AND comment IS NOT NULL AND comment != ''
+               ORDER BY created_at`,
+              [q.id]
+            );
+            
+            if (verificationComments.rows.length > 0) {
+              context += `    คำตอบจากผู้เชี่ยวชาญ (${verificationComments.rows.length} คน):\n`;
+              verificationComments.rows.forEach((v, idx) => {
+                const dept = v.requested_departments?.[0] || 'General';
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 200)}${v.comment.length > 200 ? '...' : ''}\n`;
+              });
+              
+              // 🔄 Changed: Use 'verified_answer' type for questions with expert verification
+              sourcesUsed.push({
+                type: 'verified_answer',
+                questionId: q.id,
+                question: q.question,
+                similarity: combinedSimilarity,  // 🔄 Changed: Use combined similarity instead of embedding only
+                verifierCount: verificationComments.rows.length
+              });
+            } else {
+              // No verification comments yet - show as similar question
+              context += `    คำตอบ: ${q.answer.substring(0, 300)}${q.answer.length > 300 ? '...' : ''}\n`;
+              sourcesUsed.push({
+                type: 'similar_unverified',
+                questionId: q.id,
+                question: q.question,
+                similarity: combinedSimilarity  // 🔄 Changed: Use combined similarity
+              });
+            }
+          } else {
+            context += `    คำตอบ: ${q.answer.substring(0, 300)}${q.answer.length > 300 ? '...' : ''}\n`;
+            sourcesUsed.push({
+              type: 'similar_verified',
+              questionId: q.id,
+              question: q.question,
+              similarity: combinedSimilarity  // 🔄 Changed: Use combined similarity
+            });
+          }
+          
+          totalSources++;
+        }
+      }
+    }
+    
+    // 🆕 NEW: Also get verification comments for the CURRENT question (if questionId provided)
+    if (questionId && totalSources === 0) {
+      console.log(`📚 Core: Checking verification comments for current question ${questionId}...`);
+      
+      const currentVerifications = await pool.query(
+        `SELECT commenter_name, comment, requested_departments, created_at
+         FROM answer_verifications 
+         WHERE verified_answer_id = $1 
+         AND verification_type = 'verification'
+         AND comment IS NOT NULL AND comment != ''
+         ORDER BY created_at`,
+        [questionId]
+      );
+      
+      if (currentVerifications.rows.length > 0) {
+        console.log(`✅ Core: Found ${currentVerifications.rows.length} verification comments for current question`);
+        context += `\nคำตอบจากผู้เชี่ยวชาญที่ verify คำถามนี้:\n`;
+        
+        currentVerifications.rows.forEach((v, idx) => {
+          const dept = v.requested_departments?.[0] || 'General';
+          context += `\n[${idx + 1}] ${v.commenter_name} (${dept}):\n${v.comment}\n`;
+        });
+        
+        sourcesUsed.push({
+          type: 'current_question_verifications',
+          questionId: questionId,
+          verifierCount: currentVerifications.rows.length,
+          verifiers: currentVerifications.rows.map(v => v.commenter_name)
+        });
+        
+        totalSources += currentVerifications.rows.length;
+      }
+    }
+
+    console.log(`📚 Core: Total sources = ${totalSources}`);
+
+    // 3. Generate AI answer using LLM
+    const detectLanguage = (text: string): 'thai' | 'english' => {
+      const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+      const totalChars = thaiChars + englishChars;
+      if (totalChars === 0) return 'english';
+      return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+    };
+    
+    const isThaiQuestion = detectLanguage(question) === 'thai';
+    const hasKnowledgeData = totalSources > 0 && context.trim().length > 0;
+    
+    let systemPrompt = '';
+    if (hasKnowledgeData) {
+      systemPrompt = isThaiQuestion
+        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+
+กฎสำคัญ:
+1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
+2. สรุปและเรียบเรียงข้อมูลให้ชัดเจน
+3. ตอบเป็นภาษาไทย
+4. ใช้ **ตัวหนา** สำหรับคำสำคัญ
+
+========== ข้อมูลจากฐานความรู้ ==========
+${context}
+==========================================`
+        : `You are an AI Assistant that answers questions using verified knowledge base data.
+
+Rules:
+1. Use knowledge base as primary source
+2. Summarize clearly
+3. Answer in English
+4. Use **bold** for key terms
+
+========== Knowledge Base Data ==========
+${context}
+==========================================`;
+    } else {
+      systemPrompt = isThaiQuestion
+        ? 'คุณคือ AI Assistant ยังไม่มีข้อมูลในฐานความรู้ ตอบว่า "ยังไม่มีข้อมูลที่ยืนยันแล้วในฐานความรู้"'
+        : 'You are an AI Assistant. No data in knowledge base. Answer: "No verified data in knowledge base yet"';
+    }
+    
+    const userPrompt = isThaiQuestion 
+      ? `คำถาม: ${question}\n\nให้คำตอบที่สั้นแต่รายระเอียด มีคำอธิบายและตัวอย่าง:`
+      : `Question: ${question}\n\nProvide a concise but detailed answer with explanations and examples:`;
+    
+    let aiGeneratedAnswer = '';
+    
+    // 4. Call LLM with streaming support
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+    
+    if (streaming && socket) {
+      // Streaming mode for AI Suggests
+      try {
+        const result = await ai.models.generateContentStream({
+          model: 'gemma-3-4b-it',
+          contents: fullPrompt,
+          config: { maxOutputTokens: 100000 },
+        });
+        
+        for await (const chunk of result) {
+          const chunkText = chunk.text;
+          if (chunkText !== undefined) {
+            aiGeneratedAnswer += chunkText;
+            socket.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+          }
+        }
+        
+        aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        console.log('✅ Core: Streaming completed');
+      } catch (streamError) {
+        console.error('⚠️ Core: Streaming error, trying non-streaming:', streamError);
+        // Fallback to non-streaming
+        const result = await ai.models.generateContent({
+          model: 'gemma-3-4b-it',
+          contents: fullPrompt
+        });
+        if (result && result.text) {
+          aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          socket?.emit('StreamText', aiGeneratedAnswer);
+        }
+      }
+    } else {
+      // Non-streaming mode for Q&A Detail
+      try {
+        const result = await ai.models.generateContent({
+          model: 'gemma-3-4b-it',
+          contents: fullPrompt
+        });
+        
+        if (result && result.text) {
+          aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+      } catch (error) {
+        console.error('⚠️ Core: LLM generation error:', error);
+        throw error;
+      }
+    }
+    
+    // Calculate confidence (simplified)
+    const confidence = totalSources > 0 ? Math.min(0.7 + (totalSources * 0.1), 0.95) : 0.3;
+    
+    console.log(`✅ Core: Generated answer (${aiGeneratedAnswer.length} chars, confidence=${confidence.toFixed(2)})`);
+    
+    return {
+      answer: aiGeneratedAnswer,
+      sources: sourcesUsed,
+      confidence: confidence,
+      totalSources: totalSources
+    };
+    
+  } catch (error) {
+    console.error('❌ Core: Error in generateAISuggestionCore:', error);
+    throw error;
+  }
+}
+
+/**
  * Background function to generate AI suggestion without blocking
  * Called after a new question is created to pre-generate the suggestion
  */
@@ -5576,8 +5691,9 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
       // Search for:
       // 1. Self-verified questions (verification_type = 'self')
       // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
-      // Use higher threshold (0.6) to avoid irrelevant results
-      const SIMILARITY_THRESHOLD = 0.6;
+      // 3. 🆕 Request-verified questions that have verification comments
+      // Use lower threshold (0.3) to support cross-lingual search
+      const SIMILARITY_THRESHOLD = 0.3;
       
       const similarQuestions = await pool.query(
         `SELECT va.id, va.question, 
@@ -5597,31 +5713,74 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
                 ) as similarity
          FROM verified_answers va
          WHERE va.id != $2
-           AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+           AND va.question_embedding IS NOT NULL
            AND (
              (va.verification_type = 'self')
              OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+             OR (va.verification_type = 'request' AND EXISTS (
+               SELECT 1 FROM answer_verifications av 
+               WHERE av.verified_answer_id = va.id 
+               AND av.verification_type = 'verification'
+               AND av.comment IS NOT NULL AND av.comment != ''
+             ))
            )
-           AND (
-             (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > $3)
-             OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > $3)
-           )
+           AND (1 - (va.question_embedding <=> $1::vector)) > $3
          ORDER BY similarity DESC
-         LIMIT 3`,
+         LIMIT 5`,
         [JSON.stringify(questionEmbedding), questionId, SIMILARITY_THRESHOLD]
       );
 
       if (similarQuestions.rows.length > 0) {
         console.log(`📚 Found ${similarQuestions.rows.length} similar verified questions:`);
         similarQuestions.rows.forEach((q, idx) => {
-          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): similarity=${(parseFloat(q.similarity) * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
+          const embeddingSimilarity = parseFloat(q.similarity);
+          const stringSimilarity = calculateStringSimilarity(question, q.question);
+          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
         });
         
         context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
-        similarQuestions.rows.forEach((q, idx) => {
-          const similarity = (parseFloat(q.similarity) * 100).toFixed(1);
-          context += `\n[${idx + 1}] คำถาม: ${q.question}\n`;
+        
+        for (const q of similarQuestions.rows) {
+          const embeddingSimilarity = parseFloat(q.similarity);
+          const stringSimilarity = calculateStringSimilarity(question, q.question);
+          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          const similarity = (combinedSimilarity * 100).toFixed(1);
+          context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
           context += `    ความคล้าย: ${similarity}%\n`;
+          
+          // 🆕 If request type without sum_verified_answer, get verification comments directly
+          if (q.verification_type === 'request' && (!q.answer || !q.answer.includes('สังเคราะห์จากความเห็น'))) {
+            const verificationComments = await pool.query(
+              `SELECT commenter_name, comment, requested_departments
+               FROM answer_verifications 
+               WHERE verified_answer_id = $1 
+               AND verification_type = 'verification'
+               AND comment IS NOT NULL AND comment != ''
+               ORDER BY created_at`,
+              [q.id]
+            );
+            
+            if (verificationComments.rows.length > 0) {
+              context += `    ประเภท: ยืนยันจากผู้เชี่ยวชาญ ${verificationComments.rows.length} คน\n`;
+              verificationComments.rows.forEach((v) => {
+                const dept = v.requested_departments?.[0] || 'General';
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 300)}${v.comment.length > 300 ? '...' : ''}\n`;
+              });
+              
+              sourcesUsed.push({
+                type: 'verification_comments',
+                questionId: q.id,
+                question: q.question,
+                similarity: combinedSimilarity,  // 🔄 Use combined similarity
+                verifierCount: verificationComments.rows.length
+              });
+              totalSources++;
+              continue;
+            }
+          }
+          
+          // Original answer or synthesized answer
           context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
           context += `    คำตอบ: ${q.answer.substring(0, 500)}${q.answer.length > 500 ? '...' : ''}\n`;
           
@@ -5631,10 +5790,10 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
             question: q.question,
             verificationType: q.verification_type,
             verifiedBy: q.created_by,
-            similarity: parseFloat(q.similarity)
+            similarity: combinedSimilarity  // 🔄 Use combined similarity
           });
           totalSources++;
-        });
+        }
       } else {
         console.log('📚 No similar verified questions found');
       }
