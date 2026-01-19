@@ -1016,9 +1016,13 @@ def process_document_api():
                     # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
                     text_splitter = RecursiveCharacterTextSplitter(
                         chunk_size=6000,  # Conservative chunk size to stay under 8164 tokens
-                        chunk_overlap=200
+                        chunk_overlap=200,
+                        separators=["\n\n", "\n", "。", "!", "?", " ", ""] # Added common punctuation
                     )
                     text_chunks = text_splitter.split_text(file_text)
+                    print("size of chunck : ",len(text_chunks))
+                    for c in text_chunks:
+                        print(c)
                     
                     if not text_chunks:
                         print(f"No text chunks extracted from {filename}")
