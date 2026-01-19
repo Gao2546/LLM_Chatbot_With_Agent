@@ -4371,7 +4371,7 @@ def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str
 
 
 
-def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
+def IFXGPTInference(prompt: str, system_prompt: str = None, image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
     """
     Perform inference using the Infineon IFX GPT (OpenAI Client).
     """
