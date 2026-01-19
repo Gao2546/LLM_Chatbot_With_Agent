@@ -10,6 +10,7 @@ import io # NEW IMPORT
 import concurrent.futures
 import multiprocessing
 import numpy as np
+import unicodedata
 
 # Third-party libraries
 # import bs4
@@ -818,6 +819,23 @@ def process():
     })
 
 
+def normalize_uploaded_filename(name: str) -> str:
+    # Keep only the final path component (some clients send full paths)
+    name = os.path.basename(name)
+
+    # If it's mojibake (UTF-8 bytes decoded as latin-1), repair it.
+    # Try only when it actually looks like mojibake.
+    if "Ã" in name or "à" in name:
+        try:
+            name = name.encode("latin-1").decode("utf-8")
+        except UnicodeError:
+            pass
+
+    # Normalize Unicode (handles composed vs decomposed forms used by different OSes)
+    name = unicodedata.normalize("NFC", name)
+
+    return name
+
 @app.route('/processDocument', methods=['POST'])
 def process_document_api():
     """
@@ -884,7 +902,8 @@ def process_document_api():
     # --- SCENARIO B: File Processing ---
     for file in files:
         start_process = time.time()
-        filename = file.filename
+        # filename = file.filename
+        filename = normalize_uploaded_filename(file.filename)
         file.seek(0)
         file_bytes = file.read()
         
