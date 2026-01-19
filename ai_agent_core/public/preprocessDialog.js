@@ -770,7 +770,7 @@ async function showPreprocessDialog() {
             body: formData,
             }, 86400000);
 
-            if (!res.ok) throw new Error("Server failed to process document");
+            // if (!res.ok) throw new Error("Server failed to process document");
 
             const result = await res.json();
             
