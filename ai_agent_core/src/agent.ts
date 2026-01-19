@@ -502,6 +502,19 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // =================================================================================
 
 /**
+ * Detect language of text (Thai vs English/Other)
+ * Returns 'thai' if text contains significant Thai characters, otherwise 'english'
+ */
+function detectTextLanguage(text: string): 'thai' | 'english' {
+  const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+  const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+  const totalChars = thaiChars + englishChars;
+  
+  if (totalChars === 0) return 'english';
+  return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+}
+
+/**
  * Calculate string similarity using Levenshtein distance (normalized)
  * Returns value between 0 (completely different) and 1 (identical)
  */
@@ -5245,15 +5258,28 @@ async function generateAISuggestionCore(
           // 🆕 Calculate combined similarity: embedding (70%) + string (30%)
           const embeddingSimilarity = parseFloat(q.similarity);
           const stringSimilarity = calculateStringSimilarity(question, q.question);
-          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          
+          // 🆕 CROSS-LINGUAL FIX: Check if question and result are in different languages
+          const questionLang = detectTextLanguage(question);
+          const resultLang = detectTextLanguage(q.question);
+          const isCrossLingual = questionLang !== resultLang;
+          
+          let combinedSimilarity: number;
+          if (isCrossLingual) {
+            // 🔄 Cross-lingual: Use embedding only (string similarity is meaningless)
+            combinedSimilarity = embeddingSimilarity;
+            console.log(`🌐 Q${q.id}: CROSS-LINGUAL (${questionLang}→${resultLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}% only`);
+          } else {
+            // ✅ Same language: Use combined scoring
+            combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+            console.log(`✅ Q${q.id}: SAME-LANG (${questionLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
+          }
           
           // Only include if combined similarity is >= 50%
           if (combinedSimilarity < 0.5) {
             console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
             continue;
           }
-          
-          console.log(`✅ Q${q.id}: embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           
           const similarity = (combinedSimilarity * 100).toFixed(1);
           context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
@@ -5341,7 +5367,7 @@ async function generateAISuggestionCore(
           verifiers: currentVerifications.rows.map(v => v.commenter_name)
         });
         
-        totalSources += currentVerifications.rows.length;
+        totalSources += 1; // 🔄 FIXED: Count as 1 source group, not by number of verifications
       }
     }
 
@@ -5391,8 +5417,12 @@ ${context}
     }
     
     const userPrompt = isThaiQuestion 
-      ? `คำถาม: ${question}\n\nให้คำตอบที่สั้นแต่รายระเอียด มีคำอธิบายและตัวอย่าง:`
-      : `Question: ${question}\n\nProvide a concise but detailed answer with explanations and examples:`;
+      ? (hasKnowledgeData 
+          ? `คำถาม: ${question}\n\nให้คำตอบที่สั้นแต่รายระเอียด มีคำอธิบายและตัวอย่าง:` 
+          : `คำถาม: ${question}`)
+      : (hasKnowledgeData 
+          ? `Question: ${question}\n\nProvide a concise but detailed answer with explanations and examples:` 
+          : `Question: ${question}`);
     
     let aiGeneratedAnswer = '';
     
@@ -5445,6 +5475,22 @@ ${context}
         console.error('⚠️ Core: LLM generation error:', error);
         throw error;
       }
+    }
+    
+    // 🆕 CHECK: If AI answer says "no data", force totalSources = 0
+    const noDataKeywords = [
+      'ไม่มีข้อมูล', 'ยังไม่มีข้อมูล', 'no data', 'no information', 'no verified',
+      'does not contain', 'ไม่พบข้อมูล', 'knowledge base does not'
+    ];
+    
+    const answersaysNoData = noDataKeywords.some(keyword => 
+      aiGeneratedAnswer.toLowerCase().includes(keyword.toLowerCase())
+    );
+    
+    if (answersaysNoData) {
+      console.log(`⚠️ Core: AI answer indicates no relevant data - resetting totalSources to 0`);
+      totalSources = 0;
+      sourcesUsed.length = 0; // Clear sources array
     }
     
     // Calculate confidence (simplified)
@@ -5735,8 +5781,11 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
         similarQuestions.rows.forEach((q, idx) => {
           const embeddingSimilarity = parseFloat(q.similarity);
           const stringSimilarity = calculateStringSimilarity(question, q.question);
-          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
-          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
+          const questionLang = detectTextLanguage(question);
+          const resultLang = detectTextLanguage(q.question);
+          const isCrossLingual = questionLang !== resultLang;
+          const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): ${isCrossLingual ? `🌐 CROSS-LINGUAL(${questionLang}→${resultLang})` : `✅ SAME-LANG(${questionLang})`} embedding=${(embeddingSimilarity * 100).toFixed(1)}%${!isCrossLingual ? `, string=${(stringSimilarity * 100).toFixed(1)}%` : ''}, combined=${(combinedSimilarity * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
         });
         
         context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
@@ -5744,7 +5793,10 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
         for (const q of similarQuestions.rows) {
           const embeddingSimilarity = parseFloat(q.similarity);
           const stringSimilarity = calculateStringSimilarity(question, q.question);
-          const combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          const questionLang = detectTextLanguage(question);
+          const resultLang = detectTextLanguage(q.question);
+          const isCrossLingual = questionLang !== resultLang;
+          const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
           const similarity = (combinedSimilarity * 100).toFixed(1);
           context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
           context += `    ความคล้าย: ${similarity}%\n`;
