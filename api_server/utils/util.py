@@ -1514,7 +1514,7 @@ If a specific user question is provided and this page contains no relevant infor
                             prompt=batch_user_prompt,
                             system_prompt=vlm_system_prompt,
                             image_bytes_list=batch_images,
-                            model_name="gpt-5.2" 
+                            model_name="gpt-5-mini" 
                         )
                     else:
                         batch_res = DeepInfraInference(
