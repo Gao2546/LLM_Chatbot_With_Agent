@@ -1511,8 +1511,8 @@ If a specific user question is provided and this page contains no relevant infor
                 if not LOCAL:
                     if IFXGPT:
                         batch_res = IFXGPTInference(
-                            prompt=vlm_system_prompt,
-                            # system_prompt="",
+                            prompt=batch_user_prompt,
+                            system_prompt=vlm_system_prompt,
                             image_bytes_list=batch_images,
                             model_name="gpt-5.2" 
                         )
@@ -4371,7 +4371,7 @@ def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str
 
 
 
-def IFXGPTInference(prompt: str, system_prompt: str = None, image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
+def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
     """
     Perform inference using the Infineon IFX GPT (OpenAI Client).
     """
