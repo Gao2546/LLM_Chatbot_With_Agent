@@ -498,6 +498,103 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 });
 
 // =================================================================================
+// KNOWLEDGE GROUP HELPER FUNCTIONS
+// =================================================================================
+
+/**
+ * Calculate string similarity using Levenshtein distance (normalized)
+ * Returns value between 0 (completely different) and 1 (identical)
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  
+  if (s1 === s2) return 1;
+  if (s1.length === 0 || s2.length === 0) return 0;
+  
+  // Levenshtein distance
+  const matrix: number[][] = [];
+  
+  for (let i = 0; i <= s2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= s1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= s2.length; i++) {
+    for (let j = 1; j <= s1.length; j++) {
+      if (s2.charAt(i - 1) === s1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+  
+  const maxLen = Math.max(s1.length, s2.length);
+  const distance = matrix[s2.length][s1.length];
+  return 1 - distance / maxLen;
+}
+
+/**
+ * Get existing knowledge groups from database
+ */
+async function getExistingKnowledgeGroups(): Promise<string[]> {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT predicted_group
+      FROM ai_learning_analysis
+      WHERE predicted_group IS NOT NULL
+      ORDER BY predicted_group
+    `);
+    return result.rows.map(row => row.predicted_group);
+  } catch (error) {
+    console.error('Error getting existing knowledge groups:', error);
+    return [];
+  }
+}
+
+/**
+ * Find the most similar existing group for a new predicted group
+ * Returns the existing group name if similarity > threshold, otherwise returns null
+ */
+async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: number = 0.75): Promise<string | null> {
+  const existingGroups = await getExistingKnowledgeGroups();
+  
+  if (existingGroups.length === 0) {
+    return null; // No existing groups, use the new one
+  }
+  
+  let bestMatch: string | null = null;
+  let bestSimilarity = 0;
+  
+  for (const existingGroup of existingGroups) {
+    const similarity = calculateStringSimilarity(newGroup, existingGroup);
+    
+    console.log(`  📊 Similarity: "${newGroup}" vs "${existingGroup}" = ${(similarity * 100).toFixed(1)}%`);
+    
+    if (similarity > bestSimilarity) {
+      bestSimilarity = similarity;
+      bestMatch = existingGroup;
+    }
+  }
+  
+  if (bestSimilarity >= similarityThreshold) {
+    console.log(`  ✅ Matched to existing group: "${bestMatch}" (${(bestSimilarity * 100).toFixed(1)}% similar)`);
+    return bestMatch;
+  } else {
+    console.log(`  🆕 Creating new group: "${newGroup}" (best match was ${(bestSimilarity * 100).toFixed(1)}%)`);
+    return null; // Not similar enough, use the new group
+  }
+}
+
+// =================================================================================
 // FILE PROCESSING HELPER FUNCTIONS
 // =================================================================================
 
@@ -4813,12 +4910,27 @@ Return ONLY this JSON format (no markdown, no extra text):
               if (jsonMatch) {
                 try {
                   const classification = JSON.parse(jsonMatch[0]);
-                  predictedGroup = classification.group || null;
+                  const rawPredictedGroup = classification.group || null;
                   groupConfidence = typeof classification.confidence === 'number' 
                     ? Math.min(1, Math.max(0, classification.confidence)) 
                     : null;
                   
-                  console.log(`📁 Knowledge Group: ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                  console.log(`📁 Raw Knowledge Group from LLM: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                  
+                  // ========== Similarity Check with Existing Groups ==========
+                  if (rawPredictedGroup) {
+                    const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                    
+                    if (similarGroup && similarGroup !== rawPredictedGroup) {
+                      console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                      predictedGroup = similarGroup;
+                    } else {
+                      predictedGroup = rawPredictedGroup;
+                    }
+                  }
+                  // ========== END Similarity Check ==========
+                  
+                  console.log(`📁 Final Knowledge Group: ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
                 } catch (parseErr) {
                   console.warn('Could not parse classification JSON:', parseErr);
                 }
@@ -6022,12 +6134,27 @@ Return ONLY this JSON format (no markdown, no extra text):
             if (jsonMatch) {
               try {
                 const classification = JSON.parse(jsonMatch[0]);
-                predictedGroup = classification.group || null;
+                const rawPredictedGroup = classification.group || null;
                 groupConfidence = typeof classification.confidence === 'number' 
                   ? Math.min(1, Math.max(0, classification.confidence)) 
                   : null;
                 
-                console.log(`📁 Knowledge Group (no KB): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                console.log(`📁 Raw Knowledge Group (no KB): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                
+                // ========== Similarity Check with Existing Groups ==========
+                if (rawPredictedGroup) {
+                  const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                  
+                  if (similarGroup && similarGroup !== rawPredictedGroup) {
+                    console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                    predictedGroup = similarGroup;
+                  } else {
+                    predictedGroup = rawPredictedGroup;
+                  }
+                }
+                // ========== END Similarity Check ==========
+                
+                console.log(`📁 Final Knowledge Group (no KB): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
               } catch (parseErr) {
                 console.warn('Could not parse classification JSON:', parseErr);
               }
@@ -6182,12 +6309,27 @@ Return ONLY this JSON format (no markdown, no extra text):
                   if (jsonMatch) {
                     try {
                       const classification = JSON.parse(jsonMatch[0]);
-                      predictedGroup = classification.group || null;
+                      const rawPredictedGroup = classification.group || null;
                       groupConfidence = typeof classification.confidence === 'number' 
                         ? Math.min(1, Math.max(0, classification.confidence)) 
                         : null;
                       
-                      console.log(`📁 Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                      console.log(`📁 Raw Knowledge Group (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                      
+                      // ========== Similarity Check with Existing Groups ==========
+                      if (rawPredictedGroup) {
+                        const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                        
+                        if (similarGroup && similarGroup !== rawPredictedGroup) {
+                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                          predictedGroup = similarGroup;
+                        } else {
+                          predictedGroup = rawPredictedGroup;
+                        }
+                      }
+                      // ========== END Similarity Check ==========
+                      
+                      console.log(`📁 Final Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
                     } catch (parseErr) {
                       console.warn('Could not parse classification JSON:', parseErr);
                     }

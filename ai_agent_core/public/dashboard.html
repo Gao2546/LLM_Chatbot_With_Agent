@@ -155,6 +155,23 @@
             color: #009374;
         }
 
+        .badge-critical {
+            background: transparent;
+            color: #dc3545;
+            font-weight: 700;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+            font-weight: 700;
+        }
+
+        .badge-low {
+            background: #d4edda;
+            color: #009374;
+        }
+
         .risk-item {
             padding: 15px;
             border-radius: 6px;
@@ -572,6 +589,21 @@
             color: #00b894;
         }
 
+        body[data-theme="dark"] .badge-critical {
+            background: transparent;
+            color: #ff6b6b;
+        }
+
+        body[data-theme="dark"] .badge-warning {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+
+        body[data-theme="dark"] .badge-low {
+            background: rgba(0, 184, 148, 0.2);
+            color: #00b894;
+        }
+
         body[data-theme="dark"] .risk-item.critical {
             background: rgba(214, 48, 49, 0.15);
         }
@@ -909,7 +941,7 @@
                                         <th>Accepted</th>
                                         <th>Rejected</th>
                                         <th>Reject %</th>
-                                        <th>Avg Conf</th>
+                                        <th>Score</th>
                                         <th>Severity</th>
                                     </tr>
                                 </thead>

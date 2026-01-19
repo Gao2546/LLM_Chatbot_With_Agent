@@ -2373,7 +2373,10 @@ async function getKnowledgeGroupAnalytics() {
     
     const result = await pool.query(`
       SELECT 
-        ala.predicted_group,
+        CASE 
+          WHEN ala.predicted_group = 'Health' THEN 'Health & Wellness'
+          ELSE ala.predicted_group
+        END as predicted_group,
         COUNT(DISTINCT va.id) as total_questions,
         COUNT(*) as total_predictions,
         ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
@@ -2386,7 +2389,10 @@ async function getKnowledgeGroupAnalytics() {
       INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
       INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
       WHERE ala.predicted_group IS NOT NULL
-      GROUP BY ala.predicted_group
+      GROUP BY CASE 
+        WHEN ala.predicted_group = 'Health' THEN 'Health & Wellness'
+        ELSE ala.predicted_group
+      END
       ORDER BY total_questions DESC, rejected_count DESC
       LIMIT 100
     `);

@@ -177,18 +177,52 @@ async function loadKnowledgeGapHeatmap() {
         
         const data = result.data.groupDistribution || [];
         
-        // Sort by rejected count (high to low) and show top 5
-        const sortedData = data
-            .filter(item => item.predicted_group && item.predicted_group !== 'Other')
+        // Calculate Criticality Score and sort by it
+        const filteredData = data.filter(item => item.predicted_group && item.predicted_group !== 'Other');
+        
+        // 1️⃣ Find max values for normalization
+        const maxRejected = Math.max(...filteredData.map(item => parseInt(item.rejected_count) || 0), 1); // min 1 to avoid division by 0
+        const maxTotal = Math.max(...filteredData.map(item => parseInt(item.total_questions) || 0), 1);
+        
+        console.log('📊 Normalization factors:', { maxRejected, maxTotal });
+        
+        const sortedData = filteredData
             .map(item => {
                 const rejected = parseInt(item.rejected_count) || 0;
                 const accepted = parseInt(item.accepted_count) || 0;
+                const total = parseInt(item.total_questions) || 0;
                 const totalDecisions = rejected + accepted;
+                
+                // Reject % in 0-1 range (not 0-100)
                 const rejectPct = totalDecisions > 0 ? rejected / totalDecisions : 0;
-                return { ...item, rejectPct };
+                
+                // 2️⃣ Normalize values (0-1 range)
+                const normalizedRejected = rejected / maxRejected;
+                const normalizedTotal = total / maxTotal;
+                
+                // 3️⃣ Calculate Criticality Score
+                // Formula: (Reject % × 0.5) + (Normalized Rejected × 0.3) + (Normalized Total × 0.2)
+                const criticalityScore = (rejectPct * 0.5) + (normalizedRejected * 0.3) + (normalizedTotal * 0.2);
+                
+                console.log(`📈 ${item.predicted_group}:`, {
+                    rejected,
+                    total,
+                    rejectPct: rejectPct.toFixed(3),
+                    normalizedRejected: normalizedRejected.toFixed(3),
+                    normalizedTotal: normalizedTotal.toFixed(3),
+                    criticalityScore: criticalityScore.toFixed(3)
+                });
+                
+                return { 
+                    ...item, 
+                    rejectPct,
+                    normalizedRejected,
+                    normalizedTotal,
+                    criticalityScore: Math.round(criticalityScore * 100) / 100
+                };
             })
-            .sort((a, b) => (parseInt(b.rejected_count) || 0) - (parseInt(a.rejected_count) || 0)) // มากไปน้อย
-            .slice(0, 5); // เอา 5 อันดับแรก
+            .sort((a, b) => b.criticalityScore - a.criticalityScore)
+            .slice(0, 5);
         
         renderHeatmapTable(sortedData);
         
@@ -219,15 +253,15 @@ function renderHeatmapTable(data) {
         const accepted = parseInt(item.accepted_count) || 0;
         const totalDecisions = rejected + accepted;
         const rejectPct = totalDecisions > 0 ? Math.round(100 * rejected / totalDecisions) : 0;
-        const avgConf = Math.round((parseFloat(item.avg_confidence) || 0) * 100);
+        const criticalityScore = item.criticalityScore || 0;
         
-        // Determine severity based on reject percentage
+        // Determine severity based on criticality score
         let severityClass = 'severity-low';
         let severityLabel = 'Low';
-        if (rejectPct >= 50) {
+        if (criticalityScore >= 0.5) {
             severityClass = 'severity-critical';
             severityLabel = 'Critical';
-        } else if (rejectPct >= 25) {
+        } else if (criticalityScore >= 0.3) {
             severityClass = 'severity-warning';
             severityLabel = 'Warning';
         }
@@ -241,7 +275,7 @@ function renderHeatmapTable(data) {
                 <td>${accepted}</td>
                 <td>${rejected}</td>
                 <td>${rejectPct}%</td>
-                <td><span class="badge badge-high">${avgConf}%</span></td>
+                <td><span class="badge ${criticalityScore >= 0.5 ? 'badge-critical' : criticalityScore >= 0.3 ? 'badge-warning' : 'badge-low'}">${criticalityScore.toFixed(2)}</span></td>
                 <td>
                     <span class="severity-badge ${severityClass}">
                         <span class="status-dot ${severityClass === 'severity-critical' ? 'status-critical' : severityClass === 'severity-warning' ? 'status-warning' : 'status-good'}"></span>
