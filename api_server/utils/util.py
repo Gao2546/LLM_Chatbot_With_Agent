@@ -4408,6 +4408,7 @@ def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List
             messages=messages,
             temperature=1.0
         )
+        print("Text Extract: ", response.choices[0].message.content)
         return response.choices[0].message.content
     except Exception as e:
         return f"Error calling IFX GPT: {e}"
