@@ -1511,7 +1511,7 @@ If a specific user question is provided and this page contains no relevant infor
                 if not LOCAL:
                     if IFXGPT:
                         batch_res = IFXGPTInference(
-                            prompt=vlm_system_prompt + "\n\n" + batch_user_prompt,
+                            prompt=vlm_system_prompt,
                             # system_prompt="",
                             image_bytes_list=batch_images,
                             model_name="gpt-5.2" 
