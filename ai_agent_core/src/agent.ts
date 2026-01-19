@@ -577,6 +577,22 @@ async function getExistingKnowledgeGroups(): Promise<string[]> {
  * Find the most similar existing group for a new predicted group
  * Returns the existing group name if similarity > threshold, otherwise returns null
  */
+/**
+ * Normalize knowledge group name for better matching
+ * - Convert to lowercase
+ * - Replace "&" with "and"
+ * - Remove extra spaces
+ * - Remove special characters
+ */
+function normalizeGroupName(groupName: string): string {
+  return groupName
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')  // "Health & Wellness" → "health and wellness"
+    .replace(/[^a-z0-9\s]/g, '')    // Remove special chars
+    .replace(/\s+/g, ' ')           // Normalize spaces
+    .trim();
+}
+
 async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: number = 0.75): Promise<string | null> {
   const existingGroups = await getExistingKnowledgeGroups();
   
@@ -584,11 +600,17 @@ async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: 
     return null; // No existing groups, use the new one
   }
   
+  // 🆕 Normalize for better matching
+  const normalizedNew = normalizeGroupName(newGroup);
+  
   let bestMatch: string | null = null;
   let bestSimilarity = 0;
   
   for (const existingGroup of existingGroups) {
-    const similarity = calculateStringSimilarity(newGroup, existingGroup);
+    const normalizedExisting = normalizeGroupName(existingGroup);
+    
+    // Calculate similarity on NORMALIZED strings
+    const similarity = calculateStringSimilarity(normalizedNew, normalizedExisting);
     
     console.log(`  📊 Similarity: "${newGroup}" vs "${existingGroup}" = ${(similarity * 100).toFixed(1)}%`);
     
@@ -598,7 +620,8 @@ async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: 
     }
   }
   
-  if (bestSimilarity >= similarityThreshold) {
+  // 🔄 Lower threshold to 70% for better grouping
+  if (bestSimilarity >= 0.70) {
     console.log(`  ✅ Matched to existing group: "${bestMatch}" (${(bestSimilarity * 100).toFixed(1)}% similar)`);
     return bestMatch;
   } else {
