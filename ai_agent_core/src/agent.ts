@@ -5227,7 +5227,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.75;  // Increased to 0.75 - only highly relevant questions
+      const SIMILARITY_THRESHOLD = 0.85;  // Increased to prevent unrelated questions  // Increased to 0.75 - only highly relevant questions
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
@@ -5300,19 +5300,20 @@ async function generateAISuggestionCore(
           if (isCrossLingual) {
             // 🔄 Cross-lingual: Use embedding only (string similarity is meaningless)
             combinedSimilarity = embeddingSimilarity;
-            console.log(`🌐 Q${q.id}: CROSS-LINGUAL (${questionLang}→${resultLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}% only`);
+            console.log(`🌐 Q${q.id} "${q.question.substring(0, 40)}...": CROSS-LINGUAL (${questionLang}→${resultLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%`);
           } else {
             // ✅ Same language: Use combined scoring
             combinedSimilarity = (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
-            console.log(`✅ Q${q.id}: SAME-LANG (${questionLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
+            console.log(`✅ Q${q.id} "${q.question.substring(0, 40)}...": SAME-LANG (${questionLang}): emb=${(embeddingSimilarity * 100).toFixed(1)}%, str=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           }
           
-          // Only include if combined similarity is >= 75%
-          if (combinedSimilarity < 0.75) {
-            console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
+          // ⚠️ STRICT THRESHOLD: Only include if combined similarity >= 85%
+          if (combinedSimilarity < 0.85) {
+            console.log(`❌ REJECTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% < 85% threshold`);
             continue;
           }
           
+          console.log(`✅ ACCEPTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% >= 85%`);
           const similarity = (combinedSimilarity * 100).toFixed(1);
           context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
           
@@ -5544,7 +5545,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const questionEmbedding = embeddingData.embedding;
 
     // Search for similar verified questions
-    const SIMILARITY_THRESHOLD = 0.75;  // Increased for better relevance
+    const SIMILARITY_THRESHOLD = 0.85;  // Strict threshold to prevent unrelated matches
     const similarQuestions = await pool.query(
       `SELECT va.id, va.question, 
               CASE 
@@ -5745,7 +5746,7 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
       // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
       // 3. 🆕 Request-verified questions that have verification comments
       // Increased threshold (0.75) for better relevance
-      const SIMILARITY_THRESHOLD = 0.75;
+      const SIMILARITY_THRESHOLD = 0.85;  // Strict threshold to prevent unrelated matches
       
       const similarQuestions = await pool.query(
         `SELECT va.id, va.question, 
