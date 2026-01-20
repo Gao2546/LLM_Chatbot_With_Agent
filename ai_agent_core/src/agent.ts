@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import { Server as SocketIOServer } from 'socket.io';
@@ -259,20 +259,20 @@ const ifxClient = new OpenAI({
 /**
  * Simple IFXGPT call for Q&A Detail features (AI Suggests, AI Judge, AI Synthesis, AI Classification)
  * @param prompt - The prompt to send
- * @param options - Optional settings (maxTokens, temperature)
+ * @param options - Optional settings (maxTokens, temperature, model)
  * @returns Generated text response
  */
 export async function IFXGPTSimpleInference(
   prompt: string,
-  options: { maxTokens?: number; temperature?: number } = {}
+  options: { maxTokens?: number; temperature?: number; model?: string } = {}
 ): Promise<string> {
-  const { maxTokens = 2000, temperature = 0.3 } = options;
+  const { maxTokens = 2000, temperature = 0.3, model = ifxDefaultModel } = options;
   
-  console.log(`🤖 Calling IFXGPT API (${ifxDefaultModel}) for Q&A Detail...`);
+  console.log(`🤖 Calling IFXGPT API (${model}) for Q&A Detail...`);
   
   try {
     const response = await ifxClient.chat.completions.create({
-      model: ifxDefaultModel,
+      model: model,
       messages: [{ role: 'user', content: prompt }],
       stream: false,
       temperature: temperature,
@@ -298,16 +298,16 @@ export async function IFXGPTSimpleInference(
 export async function IFXGPTStreamInference(
   prompt: string,
   socket: any,
-  options: { maxTokens?: number; temperature?: number } = {}
+  options: { maxTokens?: number; temperature?: number; model?: string } = {}
 ): Promise<string> {
-  const { maxTokens = 100000, temperature = 0.3 } = options;
+  const { maxTokens = 100000, temperature = 0.3, model = ifxDefaultModel } = options;
   let fullText = '';
   
-  console.log(`🤖 Calling IFXGPT API (${ifxDefaultModel}) with streaming...`);
+  console.log(`🤖 Calling IFXGPT API (${model}) with streaming...`);
   
   try {
     const stream: any = await ifxClient.chat.completions.create({
-      model: ifxDefaultModel,
+      model: model,
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: temperature,
@@ -1166,11 +1166,12 @@ router.post('/message', async (req : Request, res : Response) => {
       
       try {
         
-        // Call core function with streaming enabled
+        // Call core function with streaming enabled and selected model
         const result = await generateAISuggestionCore(userQuestion, {
           streaming: true,
           socket: socket,
-          questionId: null  // No questionId for chat mode
+          questionId: null,  // No questionId for chat mode
+          model: modelToUse.replace(/\{_IFXGPT_API_\}/, '')  // Extract model name from {_IFXGPT_API_}gpt-5.2
         });
         
         // Build final response with footer
@@ -5142,16 +5143,17 @@ interface GenerateAISuggestionOptions {
   streaming?: boolean;
   socket?: any;
   questionId?: number | null;
+  model?: string;
 }
 
 async function generateAISuggestionCore(
   questionText: string, 
   options: GenerateAISuggestionOptions = {}
 ): Promise<{ answer: string; sources: any[]; confidence: number; totalSources: number }> {
-  const { streaming = false, socket = null, questionId = null } = options;
+  const { streaming = false, socket = null, questionId = null, model = ifxDefaultModel } = options;
   
   try {
-    console.log(`🤖 Core: Generating AI suggestion (streaming=${streaming})...`);
+    console.log(`🤖 Core: Generating AI suggestion (streaming=${streaming}, model=${model})...`);
     
     let question = questionText;
     let questionBody = '';
@@ -5463,7 +5465,7 @@ ${context}
       // Streaming mode for AI Suggests - Use IFXGPT
       try {
         console.log('🤖 Core: Using IFXGPT for AI Suggests (streaming)...');
-        aiGeneratedAnswer = await IFXGPTStreamInference(fullPrompt, socket, { maxTokens: 100000 });
+        aiGeneratedAnswer = await IFXGPTStreamInference(fullPrompt, socket, { maxTokens: 100000, model });
         console.log('✅ Core: IFXGPT streaming completed');
       } catch (streamError) {
         console.error('⚠️ Core: IFXGPT streaming error:', streamError);
@@ -5473,7 +5475,7 @@ ${context}
       // Non-streaming mode for Q&A Detail - Use IFXGPT
       try {
         console.log('🤖 Core: Using IFXGPT for AI Suggests (non-streaming)...');
-        aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 100000 });
+        aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 100000, model });
         aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
       } catch (error) {
         console.error('⚠️ Core: IFXGPT generation error:', error);
