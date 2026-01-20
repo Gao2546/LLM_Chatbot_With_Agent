@@ -258,6 +258,7 @@ const ifxClient = new OpenAI({
 // =================================================================================
 /**
  * Simple IFXGPT call for Q&A Detail features (AI Suggests, AI Judge, AI Synthesis, AI Classification)
+ * Includes fallback to Gemma3:1b if GPT fails
  * @param prompt - The prompt to send
  * @param options - Optional settings (maxTokens, temperature, model)
  * @returns Generated text response
@@ -284,12 +285,23 @@ export async function IFXGPTSimpleInference(
     return text;
   } catch (error: any) {
     console.error('❌ IFXGPT Simple Inference error:', error?.message || error);
-    throw error;
+    console.log('⚠️ Attempting fallback to Gemma3:1b...');
+    
+    try {
+      // Fallback to Gemma3:1b via Ollama
+      const fallbackText = await Gemma3Fallback(prompt, options);
+      console.log('✅ Fallback succeeded with Gemma3:1b');
+      return fallbackText;
+    } catch (fallbackError: any) {
+      console.error('❌ Fallback also failed:', fallbackError?.message);
+      throw fallbackError;
+    }
   }
 }
 
 /**
  * IFXGPT call with streaming for AI Suggests (supports socket streaming)
+ * Includes fallback to Gemma3:1b if GPT fails
  * @param prompt - The prompt to send
  * @param socket - Socket.io socket for streaming
  * @param options - Optional settings
@@ -335,12 +347,99 @@ export async function IFXGPTStreamInference(
     console.log(`✅ IFXGPT streaming complete: ${fullText.length} characters`);
     return fullText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   } catch (error: any) {
-    console.error('❌ IFXGPT Streaming error, trying non-streaming fallback:', error?.message || error);
+    console.error('❌ IFXGPT Streaming error, trying Gemma3:1b fallback:', error?.message || error);
     
-    // Fallback to non-streaming
-    const text = await IFXGPTSimpleInference(prompt, options);
-    socket?.emit('StreamText', text);
-    return text;
+    // Fallback to Gemma3:1b via Ollama
+    try {
+      const text = await Gemma3Fallback(prompt, options, socket, true);
+      return text;
+    } catch (fallbackError: any) {
+      console.error('❌ Fallback failed too:', fallbackError?.message);
+      throw fallbackError;
+    }
+  }
+}
+
+// =================================================================================
+// ⭐ GEMMA3:1B FALLBACK - For when IFXGPT fails (via Ollama/Local LLM)
+// =================================================================================
+/**
+ * Fallback to Gemma3:1b via Ollama when GPT fails
+ * @param prompt - The prompt to send
+ * @param options - Optional settings (maxTokens, temperature, model)
+ * @param socket - Optional socket for streaming
+ * @param streaming - Whether to stream or not
+ * @returns Generated text response
+ */
+async function Gemma3Fallback(
+  prompt: string,
+  options: { maxTokens?: number; temperature?: number; model?: string } = {},
+  socket?: any,
+  streaming: boolean = false
+): Promise<string> {
+  const { maxTokens = 2000, temperature = 0.3 } = options;
+  const ollamaUrl = process.env.API_OLLAMA;
+  
+  if (!ollamaUrl) {
+    throw new Error('Ollama API URL not configured (API_OLLAMA env var missing)');
+  }
+  
+  console.log(`⚠️ Using Gemma3:1b (Ollama) as fallback (streaming=${streaming})...`);
+  
+  try {
+    const response = await fetch(ollamaUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gemma3:1b',
+        prompt: prompt,
+        stream: streaming
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Ollama API error: ${response.statusText}`);
+    }
+    
+    if (streaming && socket) {
+      // Handle streaming response (Node.js Readable stream)
+      let fullText = '';
+      const stream = response.body as Readable;
+      
+      const result = await new Promise<string>((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+          const text = chunk.toString('utf8');
+          const lines: string[] = text.split('\n').filter((line: string) => line.trim() !== '');
+          
+          for (const line of lines) {
+            try {
+              const json = JSON.parse(line);
+              if (json.response) {
+                fullText += json.response;
+                socket?.emit('StreamText', fullText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+              }
+            } catch (e) {
+              console.error('Failed to parse Ollama chunk:', e);
+            }
+          }
+        });
+        
+        stream.on('end', () => resolve(fullText));
+        stream.on('error', reject);
+      });
+      
+      console.log(`✅ Gemma3:1b fallback complete: ${result.length} characters`);
+      return result.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    } else {
+      // Handle non-streaming response
+      const data = await response.json() as { response: string };
+      const text = (data.response || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+      console.log(`✅ Gemma3:1b fallback response: ${text.length} characters`);
+      return text;
+    }
+  } catch (error: any) {
+    console.error('❌ Gemma3:1b Fallback error:', error?.message || error);
+    throw error;
   }
 }
 
@@ -5315,7 +5414,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.90;  // 🔥 INCREASED to 0.90 for stricter relevance matching
+      const SIMILARITY_THRESHOLD = 0.50;  // Lowered from 0.90 to match /related-questions endpoint for better coverage
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
@@ -5395,9 +5494,9 @@ async function generateAISuggestionCore(
             console.log(`✅ Q${q.id} "${q.question.substring(0, 40)}...": SAME-LANG (${questionLang}): emb=${(embeddingSimilarity * 100).toFixed(1)}%, str=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           }
           
-          // ⚠️ STRICT THRESHOLD: Only include if combined similarity >= 90%
-          if (combinedSimilarity < 0.90) {
-            console.log(`❌ REJECTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% < 90% threshold`);
+          // ⚠️ THRESHOLD: Only include if combined similarity >= 55% (lowered from 90% for better coverage)
+          if (combinedSimilarity < 0.55) {
+            console.log(`❌ REJECTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% < 55% threshold`);
             continue;
           }
           
@@ -5406,8 +5505,8 @@ async function generateAISuggestionCore(
           const refKeywords = extractKeywords(q.question);
           const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
           
-          if (keywordOverlap < 0.2) {
-            console.log(`❌ REJECTED Q${q.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20% threshold`);
+          if (keywordOverlap < 0.1) {
+            console.log(`❌ REJECTED Q${q.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 10% threshold (lowered from 20%)`);
             continue;
           }
           
@@ -5651,7 +5750,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const questionEmbedding = embeddingData.embedding;
 
     // Search for similar verified questions
-    const SIMILARITY_THRESHOLD = 0.90;  // 🔥 INCREASED to 0.90 for stricter relevance matching
+    const SIMILARITY_THRESHOLD = 0.50;  // Lowered from 0.90 to match /related-questions endpoint for better coverage
     const similarQuestions = await pool.query(
       `SELECT va.id, va.question, 
               CASE 
@@ -5687,8 +5786,8 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
         const refKeywords = extractKeywords(sq.question);
         const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
         
-        if (keywordOverlap < 0.2) {
-          console.log(`❌ [Background] REJECTED Q${sq.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20%`);
+        if (keywordOverlap < 0.1) {
+          console.log(`❌ [Background] REJECTED Q${sq.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 10% (lowered from 20%)`);
           continue;
         }
         
@@ -5865,8 +5964,8 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
       // 1. Self-verified questions (verification_type = 'self')
       // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
       // 3. 🆕 Request-verified questions that have verification comments
-      // Increased threshold (0.75) for better relevance
-      const SIMILARITY_THRESHOLD = 0.85;  // Strict threshold to prevent unrelated matches
+      // Using 0.50 threshold to match /related-questions endpoint for consistency
+      const SIMILARITY_THRESHOLD = 0.50;  // Lowered from 0.85 to match /related-questions endpoint
       
       const similarQuestions = await pool.query(
         `SELECT va.id, va.question, 
@@ -5886,9 +5985,8 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
                 ) as similarity
          FROM verified_answers va
          WHERE va.id != $2
-           AND va.question_embedding IS NOT NULL
            AND (
-             (va.verification_type = 'self')
+             (va.verification_type = 'self' AND va.answer IS NOT NULL)
              OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
              OR (va.verification_type = 'request' AND EXISTS (
                SELECT 1 FROM answer_verifications av 
@@ -5897,7 +5995,11 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
                AND av.comment IS NOT NULL AND av.comment != ''
              ))
            )
-           AND (1 - (va.question_embedding <=> $1::vector)) > $3
+           AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+           AND (
+             COALESCE(1 - (va.question_embedding <=> $1::vector), 0) > $3
+             OR COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0) > $3
+           )
          ORDER BY similarity DESC
          LIMIT 5`,
         [JSON.stringify(questionEmbedding), questionId, SIMILARITY_THRESHOLD]
@@ -5925,8 +6027,8 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
           const isCrossLingual = questionLang !== resultLang;
           const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
           
-          // 🔴 SKIP: If combined similarity is too low (< 75%), skip this question
-          if (combinedSimilarity < 0.75) {
+          // 🔴 SKIP: If combined similarity is too low (< 55%), skip this question
+          if (combinedSimilarity < 0.55) {
             console.log(`   ⏭️ Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
             continue;
           }
@@ -6267,46 +6369,54 @@ Create a summary answer from the knowledge base:
     let aiGeneratedAnswer = '';
     let aiModelUsed = process.env.IFXGPT_MODEL || 'gpt-4o-mini';
     
-    // Use IFXGPT API to synthesize answer
-    try {
-      console.log('🤖 Calling IFXGPT to synthesize answer...');
-      
-      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-      
-      aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 2000, temperature: 0.5 });
-      
-      if (aiGeneratedAnswer) {
-        aiGeneratedAnswer = aiGeneratedAnswer
-          .replace(/\r\n/g, '\n')  // Normalize line endings
-          .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
-          .replace(/\n\n\n/g, '\n\n')  // Ensure no triple newlines
-          .trim();
-        console.log('✅ IFXGPT generated answer successfully');
+    // ⚠️ If NO knowledge base data AND NO attachments, do NOT call LLM - just show warning
+    if (totalSources === 0 && !hasAttachments) {
+      console.log('⚠️ No knowledge base data and no attachments - showing warning instead of generating answer');
+      aiGeneratedAnswer = isThaiQuestion 
+        ? '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ ไม่ต้องสร้างคำตอบมา'
+        : '⚠️ No data available in the knowledge base for this question. Please wait for expert verification. Do not generate answers.';
+    } else {
+      // Use IFXGPT API to synthesize answer (when we have knowledge base or attachments)
+      try {
+        console.log('🤖 Calling IFXGPT to synthesize answer...');
+        
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        
+        aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 2000, temperature: 0.5 });
+        
+        if (aiGeneratedAnswer) {
+          aiGeneratedAnswer = aiGeneratedAnswer
+            .replace(/\r\n/g, '\n')  // Normalize line endings
+            .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+            .replace(/\n\n\n/g, '\n\n')  // Ensure no triple newlines
+            .trim();
+          console.log('✅ IFXGPT generated answer successfully');
+        }
+      } catch (llmError) {
+        console.error('⚠️ IFXGPT call failed:', llmError);
       }
-    } catch (llmError) {
-      console.error('⚠️ IFXGPT call failed:', llmError);
-    }
-    
-    // Check if LLM incorrectly said "no data" when we actually have sources
-    const noDataPhrases = [
-      'ยังไม่มีคำตอบที่ยืนยันแล้ว',
-      'ไม่มีข้อมูลในฐานความรู้',
-      'ยังไม่มีข้อมูล',
-      'No data available',
-      'no verified',
-      'No verified answer available',
-      'Please wait for expert verification',
-      'กรุณารอผู้เชี่ยวชาญมายืนยัน'
-    ];
-    
-    const llmSaidNoData = noDataPhrases.some(phrase => 
-      aiGeneratedAnswer.toLowerCase().includes(phrase.toLowerCase())
-    );
-    
-    // If LLM said no data but we have sources, use fallback instead
-    if (llmSaidNoData && totalSources > 0) {
-      console.log('⚠️ LLM incorrectly said no data, using fallback with actual sources');
-      aiGeneratedAnswer = ''; // Reset to trigger fallback below
+      
+      // Check if LLM incorrectly said "no data" when we actually have sources
+      const noDataPhrases = [
+        'ยังไม่มีคำตอบที่ยืนยันแล้ว',
+        'ไม่มีข้อมูลในฐานความรู้',
+        'ยังไม่มีข้อมูล',
+        'No data available',
+        'no verified',
+        'No verified answer available',
+        'Please wait for expert verification',
+        'กรุณารอผู้เชี่ยวชาญมายืนยัน'
+      ];
+      
+      const llmSaidNoData = noDataPhrases.some(phrase => 
+        aiGeneratedAnswer.toLowerCase().includes(phrase.toLowerCase())
+      );
+      
+      // If LLM said no data but we have sources, use fallback instead
+      if (llmSaidNoData && totalSources > 0) {
+        console.log('⚠️ LLM incorrectly said no data, using fallback with actual sources');
+        aiGeneratedAnswer = ''; // Reset to trigger fallback below
+      }
     }
     
     // Fallback if LLM fails or returns empty
@@ -6351,8 +6461,8 @@ Create a summary answer from the knowledge base:
         aiGeneratedAnswer = aiGeneratedAnswer.trim();
       } else {
         aiGeneratedAnswer = isThaiQuestion 
-          ? 'ยังไม่มีคำตอบที่ยืนยันแล้วในฐานความรู้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
-          : 'No verified answer available in the knowledge base yet. Please wait for expert verification.';
+          ? '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ ไม่ต้องสร้างคำตอบมา'
+          : '⚠️ No data available in the knowledge base for this question. Please wait for expert verification. Do not generate answers.';
       }
     }
 
