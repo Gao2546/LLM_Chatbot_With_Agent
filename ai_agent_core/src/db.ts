@@ -1372,11 +1372,11 @@ async function triggerNotificationsForQuestion(
  * ② ค้นหาคำตอบคล้ายกัน (Vector Similarity)
  * Searches for verified answers using vector similarity
  * Searches both question_embedding AND answer_embedding for better matching
- * NOTE: threshold default = 0.3 สำหรับ cross-lingual search (ไทย<->อังกฤษ)
+ * NOTE: threshold default = 0.75 - ปรับเพิ่มขึ้นเพื่อกรองข้อมูลที่ไม่เกี่ยวข้อง
  */
 async function searchVerifiedAnswers(
   questionEmbedding: number[],
-  threshold: number = 0.3,  // ← ลดจาก 0.7 เป็น 0.3 สำหรับ cross-lingual
+  threshold: number = 0.75,  // 🔥 INCREASED from 0.3 to 0.75 for stricter relevance
   limit: number = 5
 ) {
   try {

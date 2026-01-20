@@ -216,8 +216,8 @@ export default async function agentRouters(ios: SocketIOServer) {
         console.warn(`Warning: Expected 2048 dimensions, got ${embedding.length}. Proceeding anyway...`);
       }
 
-      // ค้นหา
-      const results = await searchVerifiedAnswers(embedding, threshold || 0.3, limit || 5);
+      // ค้นหา - ใช้ threshold สูงขึ้นเพื่อกรองข้อมูลที่ไม่เกี่ยวข้อง
+      const results = await searchVerifiedAnswers(embedding, threshold || 0.75, limit || 5);
 
       res.json({ success: true, results });
     } catch (error) {
@@ -645,6 +645,70 @@ function calculateStringSimilarity(str1: string, str2: string): number {
   const maxLen = Math.max(s1.length, s2.length);
   const distance = matrix[s2.length][s1.length];
   return 1 - distance / maxLen;
+}
+
+/**
+ * Extract keywords from text for relevance checking
+ * Removes stop words and extracts meaningful terms
+ */
+function extractKeywords(text: string): Set<string> {
+  // Thai and English stop words
+  const stopWords = new Set([
+    // English
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
+    'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+    'between', 'under', 'again', 'further', 'then', 'once', 'here', 'there',
+    'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more', 'most', 'other',
+    'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than',
+    'too', 'very', 'just', 'and', 'but', 'if', 'or', 'because', 'until', 'while',
+    'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+    'my', 'your', 'his', 'its', 'our', 'their',
+    // Thai
+    'คือ', 'และ', 'หรือ', 'ที่', 'ของ', 'ใน', 'กับ', 'จาก', 'ให้', 'ได้',
+    'มี', 'เป็น', 'อะไร', 'ไหน', 'ทำไม', 'อย่างไร', 'เมื่อไหร่', 'นี้', 'นั้น',
+    'ก็', 'แต่', 'จะ', 'ไม่', 'ว่า', 'เรา', 'คุณ', 'เขา', 'มัน', 'พวก',
+    'โดย', 'แล้ว', 'ยัง', 'ทั้ง', 'การ', 'ความ', 'อัน', 'บาง', 'ทุก', 'ต้อง'
+  ]);
+  
+  // Split by whitespace and common delimiters
+  const words = text.toLowerCase()
+    .replace(/[^\u0E00-\u0E7Fa-z0-9\s]/g, ' ')  // Keep Thai, English letters, numbers
+    .split(/\s+/)
+    .filter(word => word.length > 1 && !stopWords.has(word));
+  
+  return new Set(words);
+}
+
+/**
+ * Calculate keyword overlap between two sets
+ * Returns value between 0 (no overlap) and 1 (complete overlap)
+ */
+function calculateKeywordOverlap(keywords1: Set<string>, keywords2: Set<string>): number {
+  if (keywords1.size === 0 || keywords2.size === 0) return 0;
+  
+  let overlap = 0;
+  for (const word of keywords1) {
+    if (keywords2.has(word)) {
+      overlap++;
+    }
+    // Also check for partial matches (word contains or is contained)
+    else {
+      for (const word2 of keywords2) {
+        if ((word.length > 3 && word2.includes(word)) || 
+            (word2.length > 3 && word.includes(word2))) {
+          overlap += 0.5;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Jaccard-like coefficient
+  const minSize = Math.min(keywords1.size, keywords2.size);
+  return overlap / minSize;
 }
 
 /**
@@ -2001,20 +2065,32 @@ router.post('/edit-message', async (req, res) => {
         return res.json({ response: errorMsg });
       }
       
-      // Search verified answers with lower threshold for cross-lingual
-      const results = await searchVerifiedAnswers(embedding, 0.3, 5);
+      // Search verified answers with higher threshold for stricter relevance
+      const results = await searchVerifiedAnswers(embedding, 0.75, 5);
       
       let context = '';
       let sourcesUsed: any[] = [];
       let totalSources = 0;
       
+      // 🔥 NEW: Extract keywords from user question for relevance filtering
+      const questionKeywords = extractKeywords(newMessage);
+      
       if (results && results.length > 0) {
         context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
         results.forEach((result: any, idx: number) => {
+          // 🔥 NEW: Check keyword overlap
+          const refKeywords = extractKeywords(result.question);
+          const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
+          
+          if (keywordOverlap < 0.2) {
+            console.log(`❌ edit-message: REJECTED Q${result.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20%`);
+            return; // Skip this result
+          }
+          
           const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
           context += isThaiQuestion 
-            ? `[คำถาม ${idx + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
-            : `[Question ${idx + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
+            ? `[คำถาม ${totalSources + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
+            : `[Question ${totalSources + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
           sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
           totalSources++;
         });
@@ -3427,10 +3503,22 @@ router.get('/verified-answers', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, error: 'Could not generate embedding' });
     }
 
-    // Search similar verified answers with cross-lingual threshold
-    const results = await searchVerifiedAnswers(questionEmbedding, 0.3, 5);
+    // Search similar verified answers with stricter threshold for relevance
+    const results = await searchVerifiedAnswers(questionEmbedding, 0.75, 5);
+    
+    // 🔥 NEW: Filter results by keyword overlap
+    const questionKeywords = extractKeywords(question);
+    const filteredResults = results.filter((result: any) => {
+      const refKeywords = extractKeywords(result.question);
+      const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
+      if (keywordOverlap < 0.2) {
+        console.log(`❌ verified-answers: REJECTED Q${result.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20%`);
+        return false;
+      }
+      return true;
+    });
 
-    res.json({ success: true, results });
+    res.json({ success: true, results: filteredResults });
 
   } catch (error) {
     console.error('Error fetching verified answers:', error);
@@ -5227,7 +5315,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.85;  // Increased to prevent unrelated questions  // Increased to 0.75 - only highly relevant questions
+      const SIMILARITY_THRESHOLD = 0.90;  // 🔥 INCREASED to 0.90 for stricter relevance matching
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
@@ -5307,13 +5395,23 @@ async function generateAISuggestionCore(
             console.log(`✅ Q${q.id} "${q.question.substring(0, 40)}...": SAME-LANG (${questionLang}): emb=${(embeddingSimilarity * 100).toFixed(1)}%, str=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           }
           
-          // ⚠️ STRICT THRESHOLD: Only include if combined similarity >= 85%
-          if (combinedSimilarity < 0.85) {
-            console.log(`❌ REJECTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% < 85% threshold`);
+          // ⚠️ STRICT THRESHOLD: Only include if combined similarity >= 90%
+          if (combinedSimilarity < 0.90) {
+            console.log(`❌ REJECTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% < 90% threshold`);
             continue;
           }
           
-          console.log(`✅ ACCEPTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% >= 85%`);
+          // 🔥 NEW: Additional keyword relevance check
+          const questionKeywords = extractKeywords(question);
+          const refKeywords = extractKeywords(q.question);
+          const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
+          
+          if (keywordOverlap < 0.2) {
+            console.log(`❌ REJECTED Q${q.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20% threshold`);
+            continue;
+          }
+          
+          console.log(`✅ ACCEPTED Q${q.id}: similarity ${(combinedSimilarity * 100).toFixed(1)}% >= 90%, keywords ${(keywordOverlap * 100).toFixed(1)}%`);
           const similarity = (combinedSimilarity * 100).toFixed(1);
           context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
           
@@ -5421,24 +5519,32 @@ async function generateAISuggestionCore(
     let systemPrompt = '';
     if (hasKnowledgeData) {
       systemPrompt = isThaiQuestion
-        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
+        ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้วเท่านั้น
 
-กฎสำคัญ:
-1. ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
-2. สรุปและเรียบเรียงข้อมูลให้ชัดเจน
-3. ตอบเป็นภาษาไทย
-4. ใช้ **ตัวหนา** สำหรับคำสำคัญ
+กฎสำคัญ (ต้องปฏิบัติตามอย่างเคร่งครัด):
+1. **ห้ามใช้ความรู้ภายนอก** - ตอบโดยใช้เฉพาะข้อมูลจากฐานความรู้ที่ให้มาเท่านั้น
+2. **ตรวจสอบความเกี่ยวข้อง** - ถ้าข้อมูลในฐานความรู้ไม่ตรงกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลที่เกี่ยวข้องโดยตรงในฐานความรู้"
+3. **อ้างอิงแหล่งข้อมูล** - ระบุว่าข้อมูลมาจากแหล่งใดในฐานความรู้
+4. สรุปและเรียบเรียงข้อมูลให้ชัดเจน
+5. ตอบเป็นภาษาไทย
+6. ใช้ **ตัวหนา** สำหรับคำสำคัญ
+
+⚠️ คำเตือน: ถ้าข้อมูลในฐานความรู้ไม่เกี่ยวข้องกับคำถาม ห้ามตอบโดยใช้ความรู้ทั่วไป
 
 ========== ข้อมูลจากฐานความรู้ ==========
 ${context}
 ==========================================`
-        : `You are an AI Assistant that answers questions using verified knowledge base data.
+        : `You are an AI Assistant that answers questions using ONLY verified knowledge base data.
 
-Rules:
-1. Use knowledge base as primary source
-2. Summarize clearly
-3. Answer in English
-4. Use **bold** for key terms
+CRITICAL RULES (Must follow strictly):
+1. **DO NOT use external knowledge** - Answer using ONLY the provided knowledge base data
+2. **Check relevance** - If the knowledge base data is NOT relevant to the question, respond: "No directly relevant information found in knowledge base"
+3. **Cite sources** - Reference which source from the knowledge base you used
+4. Summarize clearly
+5. Answer in English
+6. Use **bold** for key terms
+
+⚠️ WARNING: If knowledge base data is NOT related to the question, DO NOT answer using general knowledge
 
 ========== Knowledge Base Data ==========
 ${context}
@@ -5545,7 +5651,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const questionEmbedding = embeddingData.embedding;
 
     // Search for similar verified questions
-    const SIMILARITY_THRESHOLD = 0.85;  // Strict threshold to prevent unrelated matches
+    const SIMILARITY_THRESHOLD = 0.90;  // 🔥 INCREASED to 0.90 for stricter relevance matching
     const similarQuestions = await pool.query(
       `SELECT va.id, va.question, 
               CASE 
@@ -5568,14 +5674,24 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
       [`[${questionEmbedding.join(',')}]`, questionId, SIMILARITY_THRESHOLD]
     );
 
-    // Build context from similar questions
+    // Build context from similar questions - with keyword check
     let context = '';
     const sourcesUsed: any[] = [];
+    const questionKeywords = extractKeywords(questionText);
     
     if (similarQuestions.rows.length > 0) {
       console.log(`🤖 [Background] Found ${similarQuestions.rows.length} similar verified questions`);
       
       for (const sq of similarQuestions.rows) {
+        // 🔥 NEW: Check keyword overlap
+        const refKeywords = extractKeywords(sq.question);
+        const keywordOverlap = calculateKeywordOverlap(questionKeywords, refKeywords);
+        
+        if (keywordOverlap < 0.2) {
+          console.log(`❌ [Background] REJECTED Q${sq.id}: keyword overlap ${(keywordOverlap * 100).toFixed(1)}% < 20%`);
+          continue;
+        }
+        
         if (sq.verified_answer) {
           context += `\n---\nคำถามที่คล้ายกัน: ${sq.question}\nคำตอบ: ${sq.verified_answer}\n`;
           sourcesUsed.push({
@@ -5590,8 +5706,12 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
 
     // Generate AI suggestion using the context
     if (context) {
-      const systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้ที่ผ่านการยืนยันแล้ว
-กรุณาตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ต่อไปนี้ หากไม่มีข้อมูลที่เกี่ยวข้อง ให้แจ้งว่าไม่พบข้อมูลในฐานความรู้
+      const systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้ที่ผ่านการยืนยันแล้วเท่านั้น
+
+กฎสำคัญ:
+1. **ห้ามใช้ความรู้ภายนอก** - ตอบโดยใช้เฉพาะข้อมูลจากฐานความรู้ที่ให้มาเท่านั้น
+2. **ตรวจสอบความเกี่ยวข้อง** - ถ้าข้อมูลในฐานความรู้ไม่เกี่ยวข้องกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลที่เกี่ยวข้องโดยตรงในฐานความรู้"
+3. **อ้างอิงแหล่งข้อมูล** - ระบุว่าข้อมูลมาจากแหล่งใดในฐานความรู้
 
 ฐานความรู้:
 ${context}`;
