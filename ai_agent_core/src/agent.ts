@@ -5227,7 +5227,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.3;
+      const SIMILARITY_THRESHOLD = 0.65;  // Increased from 0.3 to only get highly relevant questions
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
@@ -5307,8 +5307,8 @@ async function generateAISuggestionCore(
             console.log(`✅ Q${q.id}: SAME-LANG (${questionLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           }
           
-          // Only include if combined similarity is >= 50%
-          if (combinedSimilarity < 0.5) {
+          // Only include if combined similarity is >= 65%
+          if (combinedSimilarity < 0.65) {
             console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
             continue;
           }
