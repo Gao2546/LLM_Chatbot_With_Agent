@@ -239,6 +239,7 @@ export default async function agentRouters(ios: SocketIOServer) {
 const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
 const ifxToken = process.env.IFXGPT_TOKEN;
 const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
+const ifxDefaultModel = process.env.IFXGPT_MODEL || 'gpt-4o-mini'; // Default model for Q&A Detail
 
 const httpsAgent = new https.Agent({
   ca: fs.readFileSync(ifxCertPath),
@@ -251,6 +252,97 @@ const ifxClient = new OpenAI({
   httpAgent: undefined,
   httpsAgent,
 } as any);
+
+// =================================================================================
+// ⭐ IFXGPT SIMPLE INFERENCE - For Q&A Detail (non-streaming)
+// =================================================================================
+/**
+ * Simple IFXGPT call for Q&A Detail features (AI Suggests, AI Judge, AI Synthesis, AI Classification)
+ * @param prompt - The prompt to send
+ * @param options - Optional settings (maxTokens, temperature)
+ * @returns Generated text response
+ */
+export async function IFXGPTSimpleInference(
+  prompt: string,
+  options: { maxTokens?: number; temperature?: number } = {}
+): Promise<string> {
+  const { maxTokens = 2000, temperature = 0.3 } = options;
+  
+  console.log(`🤖 Calling IFXGPT API (${ifxDefaultModel}) for Q&A Detail...`);
+  
+  try {
+    const response = await ifxClient.chat.completions.create({
+      model: ifxDefaultModel,
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+      temperature: temperature,
+      max_tokens: maxTokens,
+    });
+
+    const text = response?.choices?.[0]?.message?.content ?? '';
+    console.log(`✅ IFXGPT response: ${text.length} characters`);
+    return text;
+  } catch (error: any) {
+    console.error('❌ IFXGPT Simple Inference error:', error?.message || error);
+    throw error;
+  }
+}
+
+/**
+ * IFXGPT call with streaming for AI Suggests (supports socket streaming)
+ * @param prompt - The prompt to send
+ * @param socket - Socket.io socket for streaming
+ * @param options - Optional settings
+ * @returns Generated text response
+ */
+export async function IFXGPTStreamInference(
+  prompt: string,
+  socket: any,
+  options: { maxTokens?: number; temperature?: number } = {}
+): Promise<string> {
+  const { maxTokens = 100000, temperature = 0.3 } = options;
+  let fullText = '';
+  
+  console.log(`🤖 Calling IFXGPT API (${ifxDefaultModel}) with streaming...`);
+  
+  try {
+    const stream: any = await ifxClient.chat.completions.create({
+      model: ifxDefaultModel,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+      temperature: temperature,
+      max_tokens: maxTokens,
+    });
+
+    const it = stream.iterator();
+
+    // Process chunks
+    while (true) {
+      const { value: chunk, done } = await it.next();
+      if (done) break;
+
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        '';
+
+      if (content) {
+        fullText += content;
+        socket?.emit('StreamText', fullText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+      }
+    }
+
+    console.log(`✅ IFXGPT streaming complete: ${fullText.length} characters`);
+    return fullText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  } catch (error: any) {
+    console.error('❌ IFXGPT Streaming error, trying non-streaming fallback:', error?.message || error);
+    
+    // Fallback to non-streaming
+    const text = await IFXGPTSimpleInference(prompt, options);
+    socket?.emit('StreamText', text);
+    return text;
+  }
+}
 
 
 export async function IFXGPTInference(
@@ -4296,47 +4388,13 @@ ${expertCommentsForSynthesis}
 
           let synthesizedAnswer = '';
           
-          // Try using Google Gemini for synthesis (⚡ FASTEST MODEL)
+          // Use IFXGPT (Internal Infineon GPT) for synthesis
           try {
-            console.log('🤖 Calling Gemma-3-4B for answer synthesis (FASTEST)...');
-            const geminiResult = await ai.models.generateContent({
-              model: 'gemma-3-4b-it',
-              contents: synthesisPrompt,
-              config: {
-                maxOutputTokens: 2000,
-                temperature: 0.3,
-              },
-            });
-            
-            synthesizedAnswer = geminiResult.text || '';
-            console.log(`✅ Gemma-3-4B synthesis complete: ${synthesizedAnswer.length} characters`);
+            console.log('🤖 Calling IFXGPT for answer synthesis...');
+            synthesizedAnswer = await IFXGPTSimpleInference(synthesisPrompt, { maxTokens: 2000, temperature: 0.3 });
+            console.log(`✅ IFXGPT synthesis complete: ${synthesizedAnswer.length} characters`);
           } catch (llmError) {
-            console.warn('Gemini synthesis failed, trying Ollama:', llmError);
-            
-            // Fallback to Ollama
-            try {
-              const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  model: 'llama3:latest',
-                  prompt: synthesisPrompt,
-                  stream: false,
-                  options: { 
-                    temperature: 0.3,
-                    num_predict: 2000
-                  }
-                })
-              });
-              
-              if (ollamaResponse.ok) {
-                const ollamaData = await ollamaResponse.json() as { response?: string };
-                synthesizedAnswer = ollamaData.response || '';
-                console.log(`✅ Ollama synthesis complete: ${synthesizedAnswer.length} characters`);
-              }
-            } catch (ollamaError) {
-              console.error('Both Gemini and Ollama synthesis failed:', ollamaError);
-            }
+            console.error('❌ IFXGPT synthesis failed:', llmError);
           }
           
           // If synthesis succeeded, create embedding and save to sum_verified_answer
@@ -4439,60 +4497,24 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
 
           let judgeResult: any = null;
           
-          // Use Google Gemma-3-4B for FASTEST LLM Judge (⚡ MAXIMUM SPEED)
+          // Use IFXGPT (Internal Infineon GPT) for LLM Judge
           try {
-            const geminiResult = await ai.models.generateContent({
-              model: 'gemma-3-4b-it',
-              contents: judgePrompt,
-              config: {
-                maxOutputTokens: 1000,
-                temperature: 0.1,
-              },
-            });
-            
-            const responseText = geminiResult.text || '';
+            console.log('🤖 Calling IFXGPT for LLM Judge...');
+            const responseText = await IFXGPTSimpleInference(judgePrompt, { maxTokens: 1000, temperature: 0.1 });
             
             // Extract JSON from response
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
               judgeResult = JSON.parse(jsonMatch[0]);
+              console.log('✅ IFXGPT LLM Judge succeeded');
             }
           } catch (llmError) {
-            console.warn('LLM Judge (Gemini) failed, trying Ollama:', llmError);
-            
-            // Fallback to Ollama for LLM Judge
-            try {
-              const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  model: 'llama3:latest',
-                  prompt: judgePrompt,
-                  stream: false,
-                  options: { 
-                    temperature: 0.1,
-                    num_predict: 1000
-                  }
-                })
-              });
-              
-              if (ollamaJudgeResponse.ok) {
-                const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
-                const responseText = ollamaData.response || '';
-                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  judgeResult = JSON.parse(jsonMatch[0]);
-                  console.log('✅ LLM Judge (Ollama) succeeded');
-                }
-              }
-            } catch (ollamaJudgeError) {
-              console.warn('LLM Judge (Ollama) also failed:', ollamaJudgeError);
-            }
+            console.warn('IFXGPT LLM Judge failed:', llmError);
           }
           
-          // Fallback: Smarter text comparison if both LLMs fail
+          // Fallback: Smarter text comparison if IFXGPT fails
           if (!judgeResult) {
-            console.log('⚠️ Both LLMs failed, using text analysis fallback');
+            console.log('⚠️ IFXGPT failed, using text analysis fallback');
             const normalizeText = (text: string) => 
               text.toLowerCase().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
             
@@ -4652,29 +4674,12 @@ Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
 `;
 
-            // Use Llama3 for better classification accuracy
-            console.log('🔍 Calling Ollama for knowledge group classification...');
-            const classifyResponse = await fetch(process.env.API_OLLAMA!, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'llama3:latest',
-                prompt: classificationPrompt,
-                stream: false,
-                options: { 
-                  temperature: 0.2,
-                  num_predict: 100
-                }
-              })
-            });
-            
-            console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
-            
-            if (classifyResponse.ok) {
-              const classifyData = await classifyResponse.json() as { response?: string };
-              const classifyText = classifyData.response || '';
+            // Use IFXGPT for knowledge group classification
+            console.log('🔍 Calling IFXGPT for knowledge group classification...');
+            try {
+              const classifyText = await IFXGPTSimpleInference(classificationPrompt, { maxTokens: 100, temperature: 0.2 });
               
-              console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+              console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
               
               // Try to extract JSON from response
               const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
@@ -4686,7 +4691,7 @@ Return ONLY this JSON format (no markdown, no extra text):
                     ? Math.min(1, Math.max(0, classification.confidence)) 
                     : null;
                   
-                  console.log(`📁 Raw Knowledge Group from LLM: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                  console.log(`📁 Raw Knowledge Group from IFXGPT: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
                   
                   // ========== Similarity Check with Existing Groups ==========
                   if (rawPredictedGroup) {
@@ -4706,9 +4711,11 @@ Return ONLY this JSON format (no markdown, no extra text):
                   console.warn('Could not parse classification JSON:', parseErr);
                 }
               }
+            } catch (classifyError) {
+              console.warn('Knowledge group classification failed (non-critical):', classifyError);
             }
-          } catch (classifyError) {
-            console.warn('Knowledge group classification failed (non-critical):', classifyError);
+          } catch (outerError) {
+            console.warn('Knowledge group classification context failed:', outerError);
           }
           // ========== END AI Knowledge Group Classification ==========
           
@@ -5449,53 +5456,27 @@ ${context}
     
     let aiGeneratedAnswer = '';
     
-    // 4. Call LLM with streaming support
+    // 4. Call IFXGPT (Internal Infineon GPT) with streaming support
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
     
     if (streaming && socket) {
-      // Streaming mode for AI Suggests
+      // Streaming mode for AI Suggests - Use IFXGPT
       try {
-        const result = await ai.models.generateContentStream({
-          model: 'gemma-3-4b-it',
-          contents: fullPrompt,
-          config: { maxOutputTokens: 100000 },
-        });
-        
-        for await (const chunk of result) {
-          const chunkText = chunk.text;
-          if (chunkText !== undefined) {
-            aiGeneratedAnswer += chunkText;
-            socket.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
-          }
-        }
-        
-        aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        console.log('✅ Core: Streaming completed');
+        console.log('🤖 Core: Using IFXGPT for AI Suggests (streaming)...');
+        aiGeneratedAnswer = await IFXGPTStreamInference(fullPrompt, socket, { maxTokens: 100000 });
+        console.log('✅ Core: IFXGPT streaming completed');
       } catch (streamError) {
-        console.error('⚠️ Core: Streaming error, trying non-streaming:', streamError);
-        // Fallback to non-streaming
-        const result = await ai.models.generateContent({
-          model: 'gemma-3-4b-it',
-          contents: fullPrompt
-        });
-        if (result && result.text) {
-          aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-          socket?.emit('StreamText', aiGeneratedAnswer);
-        }
+        console.error('⚠️ Core: IFXGPT streaming error:', streamError);
+        throw streamError;
       }
     } else {
-      // Non-streaming mode for Q&A Detail
+      // Non-streaming mode for Q&A Detail - Use IFXGPT
       try {
-        const result = await ai.models.generateContent({
-          model: 'gemma-3-4b-it',
-          contents: fullPrompt
-        });
-        
-        if (result && result.text) {
-          aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        }
+        console.log('🤖 Core: Using IFXGPT for AI Suggests (non-streaming)...');
+        aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 100000 });
+        aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
       } catch (error) {
-        console.error('⚠️ Core: LLM generation error:', error);
+        console.error('⚠️ Core: IFXGPT generation error:', error);
         throw error;
       }
     }
@@ -6154,58 +6135,26 @@ Create a summary answer from the knowledge base:
 - Answer in English`;
 
     let aiGeneratedAnswer = '';
-    let aiModelUsed = 'gemma-3-4b-it';
+    let aiModelUsed = process.env.IFXGPT_MODEL || 'gpt-4o-mini';
     
-    // Try to call LLM to synthesize answer
+    // Use IFXGPT API to synthesize answer
     try {
-      console.log('🤖 Calling Google AI to synthesize answer...');
-      
-      // Use Google AI API (same as chat uses)
-      const ai = new GoogleGenAI({ apiKey: process.env.Google_API_KEY });
+      console.log('🤖 Calling IFXGPT to synthesize answer...');
       
       const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
       
-      const response = await ai.models.generateContent({
-        model: 'gemma-3-4b-it',
-        contents: fullPrompt
-      });
+      aiGeneratedAnswer = await IFXGPTSimpleInference(fullPrompt, { maxTokens: 2000, temperature: 0.5 });
       
-      if (response && response.text) {
-        aiGeneratedAnswer = response.text
+      if (aiGeneratedAnswer) {
+        aiGeneratedAnswer = aiGeneratedAnswer
           .replace(/\r\n/g, '\n')  // Normalize line endings
           .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
           .replace(/\n\n\n/g, '\n\n')  // Ensure no triple newlines
           .trim();
-        console.log('✅ Google AI generated answer successfully');
+        console.log('✅ IFXGPT generated answer successfully');
       }
     } catch (llmError) {
-      console.error('⚠️ Google AI call failed:', llmError);
-      
-      // Fallback: Try Ollama
-      try {
-        console.log('🔄 Trying Ollama as fallback...');
-        const llmResponse = await fetch(`${process.env.API_OLLAMA}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'llama3:latest',
-            prompt: `${systemPrompt}\n\n${userPrompt}`,
-            stream: false
-          })
-        });
-        
-        if (llmResponse.ok) {
-          const llmData = await llmResponse.json() as { response: string };
-          aiGeneratedAnswer = (llmData.response || '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-          aiModelUsed = 'llama3:latest (Ollama)';
-          console.log('✅ Ollama generated answer successfully');
-        }
-      } catch (ollamaError) {
-        console.error('⚠️ Ollama also failed:', ollamaError);
-      }
+      console.error('⚠️ IFXGPT call failed:', llmError);
     }
     
     // Check if LLM incorrectly said "no data" when we actually have sources
@@ -6341,28 +6290,12 @@ Return ONLY this JSON format (no markdown, no extra text):
 {"group": "IT & Computer", "confidence": 0.9}
 `;
 
-          const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
-          console.log('🔍 Calling Ollama for knowledge group classification (no KB data)...');
+          console.log('🔍 Calling IFXGPT for knowledge group classification (no KB data)...');
           
-          const classifyResponse = await fetch(ollamaUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'llama3:latest',
-              prompt: classificationPrompt,
-              stream: false,
-              options: { 
-                temperature: 0.2,
-                num_predict: 100
-              }
-            })
-          });
-          
-          if (classifyResponse.ok) {
-            const classifyData = await classifyResponse.json() as { response?: string };
-            const classifyText = classifyData.response || '';
+          try {
+            const classifyText = await IFXGPTSimpleInference(classificationPrompt, { maxTokens: 100, temperature: 0.2 });
             
-            console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+            console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
             
             const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
             if (jsonMatch) {
@@ -6393,6 +6326,8 @@ Return ONLY this JSON format (no markdown, no extra text):
                 console.warn('Could not parse classification JSON:', parseErr);
               }
             }
+          } catch (classifyErr) {
+            console.warn('IFXGPT classification call failed:', classifyErr);
           }
           
           // Auto-reject since no knowledge available
@@ -6512,32 +6447,13 @@ Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
 `;
 
-                const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
-                console.log('🔍 Calling Ollama for knowledge group classification (self-verified)...');
-                console.log('🔍 Ollama URL:', ollamaUrl);
+                console.log('🔍 Calling IFXGPT for knowledge group classification (self-verified)...');
                 console.log('🔍 Question:', originalQuestion.substring(0, 100));
                 
-                const classifyResponse = await fetch(ollamaUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    model: 'llama3:latest',
-                    prompt: classificationPrompt,
-                    stream: false,
-                    options: { 
-                      temperature: 0.2,
-                      num_predict: 100
-                    }
-                  })
-                });
-                
-                console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
-                
-                if (classifyResponse.ok) {
-                  const classifyData = await classifyResponse.json() as { response?: string };
-                  const classifyText = classifyData.response || '';
+                try {
+                  const classifyText = await IFXGPTSimpleInference(classificationPrompt, { maxTokens: 100, temperature: 0.2 });
                   
-                  console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+                  console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
                   
                   const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
                   if (jsonMatch) {
@@ -6568,9 +6484,11 @@ Return ONLY this JSON format (no markdown, no extra text):
                       console.warn('Could not parse classification JSON:', parseErr);
                     }
                   }
+                } catch (classifyErr) {
+                  console.warn('IFXGPT classification call failed:', classifyErr);
                 }
-              } catch (classifyError) {
-                console.warn('Knowledge group classification failed (non-critical):', classifyError);
+              } catch (outerErr) {
+                console.warn('Classification context failed:', outerErr);
               }
               // ========== END AI Knowledge Group Classification ==========
               
