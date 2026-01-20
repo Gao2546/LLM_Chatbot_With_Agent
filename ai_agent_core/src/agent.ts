@@ -5227,7 +5227,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.65;  // Increased from 0.3 to only get highly relevant questions
+      const SIMILARITY_THRESHOLD = 0.75;  // Increased to 0.75 - only highly relevant questions
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
@@ -5307,8 +5307,8 @@ async function generateAISuggestionCore(
             console.log(`✅ Q${q.id}: SAME-LANG (${questionLang}): embedding=${(embeddingSimilarity * 100).toFixed(1)}%, string=${(stringSimilarity * 100).toFixed(1)}%, combined=${(combinedSimilarity * 100).toFixed(1)}%`);
           }
           
-          // Only include if combined similarity is >= 65%
-          if (combinedSimilarity < 0.65) {
+          // Only include if combined similarity is >= 75%
+          if (combinedSimilarity < 0.75) {
             console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
             continue;
           }
@@ -5544,7 +5544,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const questionEmbedding = embeddingData.embedding;
 
     // Search for similar verified questions
-    const SIMILARITY_THRESHOLD = 0.6;
+    const SIMILARITY_THRESHOLD = 0.75;  // Increased for better relevance
     const similarQuestions = await pool.query(
       `SELECT va.id, va.question, 
               CASE 
@@ -5744,8 +5744,8 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
       // 1. Self-verified questions (verification_type = 'self')
       // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
       // 3. 🆕 Request-verified questions that have verification comments
-      // Use lower threshold (0.3) to support cross-lingual search
-      const SIMILARITY_THRESHOLD = 0.3;
+      // Increased threshold (0.75) for better relevance
+      const SIMILARITY_THRESHOLD = 0.75;
       
       const similarQuestions = await pool.query(
         `SELECT va.id, va.question, 
@@ -5803,6 +5803,13 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
           const resultLang = detectTextLanguage(q.question);
           const isCrossLingual = questionLang !== resultLang;
           const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          
+          // 🔴 SKIP: If combined similarity is too low (< 75%), skip this question
+          if (combinedSimilarity < 0.75) {
+            console.log(`   ⏭️ Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%)`);
+            continue;
+          }
+          
           const similarity = (combinedSimilarity * 100).toFixed(1);
           context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
           context += `    ความคล้าย: ${similarity}%\n`;
