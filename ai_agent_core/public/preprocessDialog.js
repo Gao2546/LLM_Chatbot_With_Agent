@@ -753,7 +753,7 @@ async function showPreprocessDialog() {
             //     body: formData
             // });
 
-            async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+            async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
             const controller = new AbortController();
             const id = setTimeout(() => controller.abort(), timeoutMs);
 

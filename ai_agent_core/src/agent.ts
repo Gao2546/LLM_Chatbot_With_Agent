@@ -1,4 +1,4 @@
-﻿import express, { Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import { Server as SocketIOServer } from 'socket.io';
@@ -890,7 +890,7 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
           },
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
-          timeout: 24 * 60 * 60 * 1000, // 15 minutes
+          timeout: 24 * 60 * 60 * 1000, // 24 Hr
       });
       // Check if the Python server returned a "success" status and update file process status
       if (flaskRes.data && flaskRes.data.status === "success") {

@@ -3065,15 +3065,18 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 2048, is_query
             raise ValueError(f"Embedding failed: {ollama_error}")
 
 def clean_text(input_text: str) -> str:
-    """
-    (Original function, unchanged)
-    """
     if input_text is None:
         return ""
-    # Remove NUL characters
+    # Keep the NUL character removal (Postgres hates \x00)
     cleaned = input_text.replace("\x00", "")
-    # Optionally, remove all non-printable control chars except common whitespace (\n, \r, \t)
-    cleaned = re.sub(r"[^\x20-\x7E\n\r\t]", "", cleaned)
+    
+    # REMOVE OR CHANGE THE REGEX LINE:
+    # Do NOT use re.sub(r"[^\x20-\x7E...]", ...) because it kills Thai.
+    
+    # If you want to remove "Control Characters" safely without killing Thai, use this:
+    import unicodedata
+    cleaned = "".join(ch for ch in cleaned if unicodedata.category(ch)[0] != "C" or ch in "\n\r\t")
+    
     return cleaned
 
 def save_vector_to_db(user_id, chat_history_id, uploaded_file_id, file_name, text, embedding, page_number: int = -1):
