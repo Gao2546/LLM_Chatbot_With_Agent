@@ -185,6 +185,7 @@ def get_page(driver, url):
 def test_db():
     """Test database connection and check document_embeddings table"""
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         
         # Count total records
@@ -242,6 +243,7 @@ def test_embedding_save():
         # Try to save
         save_vector_to_db(**test_data)
         
+        conn = get_db_connection()
         # Verify save
         cur = conn.cursor()
         cur.execute(
@@ -705,6 +707,7 @@ def process():
                     page_number=-1
                 )
                 
+                conn = get_db_connection()
                 # ✅ Verify save to DB
                 cur = conn.cursor()
                 cur.execute(
@@ -1269,6 +1272,7 @@ Output only the simulated excerpt.
     elif document_search_method == 'none':
         print(f"  - executing 'none' (chat context) strategy for chat {chat_history_id}...")
         
+        conn = get_db_connection()
         # Check DB for Legacy Data
         cur = conn.cursor()
         cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
