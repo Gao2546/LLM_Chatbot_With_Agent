@@ -854,7 +854,7 @@ def process_document_api():
         files = request.files.getlist('files')
         text_input = request.form.get('text', '')
         method = request.form.get('method', 'text')
-        chat_history_id = request.form.get('chat_history_id',-1)
+        chat_history_id = int(request.form.get('chat_history_id',-1))
         
         # Get user_id sent from TypeScript agent
         user_id_str = request.form.get('user_id')
@@ -879,7 +879,7 @@ def process_document_api():
         
         # Create a dummy file record for pure text
         uploaded_file_id, object_name = upload_file_to_minio_and_db(
-            user_id=0,
+            user_id=user_id,
             chat_history_id=chat_history_id,
             file_name=f"text_snippet_{int(time.time())}.txt",
             file_bytes=text_input.encode('utf-8')
@@ -896,7 +896,7 @@ def process_document_api():
                  embedding = get_image_embedding_jinna_api(text=text_input)
              
              if embedding:
-                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, 1, embedding)
+                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, chat_history_id, embedding)
                  processed_files.append({"name": "Raw Text", "status": "indexed_as_multimodal_text"})
 
         else:
@@ -921,7 +921,7 @@ def process_document_api():
             continue
 
         # 1. Upload to MinIO & DB
-        user_id = 0
+        # user_id = 0
         uploaded_file_id, object_name = upload_file_to_minio_and_db(
             user_id=user_id,
             chat_history_id=chat_history_id,
