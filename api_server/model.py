@@ -854,6 +854,7 @@ def process_document_api():
         files = request.files.getlist('files')
         text_input = request.form.get('text', '')
         method = request.form.get('method', 'text')
+        chat_history_id = request.form.get('chat_history_id',-1)
         
         # Get user_id sent from TypeScript agent
         user_id_str = request.form.get('user_id')
@@ -862,7 +863,7 @@ def process_document_api():
         user_id = int(user_id_str)
 
         # Force Chat ID to -1 for "Knowledge Base" / Global context
-        chat_history_id = -1 
+        # chat_history_id = -1 
 
     except Exception as e:
         return jsonify({"error": f"Invalid form data: {e}"}), 400

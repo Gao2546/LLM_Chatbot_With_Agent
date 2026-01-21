@@ -875,6 +875,7 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
       
       // Pass the session user_id to Python
       form.append('user_id', userId.toString());
+      form.append('chat_history_id', -1)
       
       // Pass other fields
       if (text) form.append('text', text);
