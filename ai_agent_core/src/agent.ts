@@ -5108,8 +5108,8 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
         )
         AND LENGTH(va.question) >= 10
         AND (
-          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
-          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.70)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.70)
         )
       GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding
       ORDER BY similarity_score DESC`,
@@ -5242,7 +5242,7 @@ async function generateAISuggestionCore(
     
     // Search for similar verified questions
     if (!isCurrentSelfVerified || totalSources === 0) {
-      const SIMILARITY_THRESHOLD = 0.65;  // Increased from 0.3 to only get highly relevant questions
+      const SIMILARITY_THRESHOLD = 0.68;  // Balanced threshold for relevant questions
       
       const queryParams: any[] = [JSON.stringify(questionEmbedding)];
       let paramIndex = 2;
