@@ -694,7 +694,10 @@ def process():
             print(f"✅ Text extracted: {len(file_text)} characters")
             
             try:
-                data_vector = encode_text_for_embedding(file_text)
+                if IFXGPT:
+                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                else:
+                    data_vector = encode_text_for_embedding(chunk_text)
                 print(f"✅ Vector created: {len(data_vector)} dimensions")
                 
                 save_vector_to_db(
@@ -897,7 +900,10 @@ def process_document_api():
 
         else:
             # Standard Text Embedding
-            embedding = encode_text_for_embedding(text_input)
+            if IFXGPT:
+                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+            else:
+                data_vector = encode_text_for_embedding(chunk_text)
             save_vector_to_db(user_id, chat_history_id, uploaded_file_id, "Raw Text Input", text_input, embedding, -1)
             processed_files.append({"name": "Raw Text", "status": "indexed_as_legacy_text"})
 

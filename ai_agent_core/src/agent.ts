@@ -830,10 +830,24 @@ router.post('/upload', upload.array('files'), async (req, res) => {
             form.append('files', file.buffer, file.originalname);
         }
 
+        // const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+        // console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
+        // const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
+        //     headers: form.getHeaders()
+        // });
+
         const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
-        const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
-            headers: form.getHeaders()
+        console.log(`Forwarding /processDocument to ${API_SERVER_URL}/processDocument...`);
+
+        const flaskRes = await axios.post(`${API_SERVER_URL}/processDocument`, form, {
+            headers: {
+                ...form.getHeaders(),
+                // Optional: Increase timeout for large file processing
+                'Content-Type': form.getHeaders()['content-type'] 
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            timeout: 24 * 60 * 60 * 1000, // 24 Hr
         });
         
         res.json(flaskRes.data.reply);
