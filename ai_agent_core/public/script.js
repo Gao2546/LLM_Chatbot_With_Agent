@@ -1627,13 +1627,8 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // if (window.MathJax) {
-    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
-    // }
-
-    if (window.MathJax?.typesetPromise) {
-        MathJax.typesetClear([contentDiv]);           // กันสมการซ้อน/หน่วง
-        MathJax.typesetPromise([contentDiv]).catch(console.error);
+    if (window.MathJax) {
+        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
     }
 }
 
