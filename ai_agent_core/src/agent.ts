@@ -5310,9 +5310,9 @@ async function generateAISuggestionCore(
           // Use confidence score from hybrid search (already combines vector + keyword + freshness)
           const confidenceScore = q.confidenceScore || 0;
           
-          // Lower threshold to 35% for better recall
-          if (confidenceScore < 0.45) {
-            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 40%`);
+          // Higher threshold (55%) to ensure better quality sources
+          if (confidenceScore < 0.55) {
+            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 55%`);
             continue;
           }
           
@@ -5338,7 +5338,7 @@ async function generateAISuggestionCore(
               context += `    ประเภท: ยืนยันจากผู้เชี่ยวชาญ ${verificationComments.rows.length} คน\n`;
               verificationComments.rows.forEach((v) => {
                 const dept = v.requested_departments?.[0] || 'General';
-                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 300)}${v.comment.length > 300 ? '...' : ''}\n`;
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 1500)}${v.comment.length > 1500 ? '...' : ''}\n`;
               });
               
               sourcesUsed.push({
@@ -5358,7 +5358,7 @@ async function generateAISuggestionCore(
           
           // Original answer or synthesized answer
           context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
-          context += `    คำตอบ: ${q.answer.substring(0, 500)}${q.answer.length > 500 ? '...' : ''}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 3000)}${q.answer.length > 3000 ? '...' : ''}\n`;
           
           sourcesUsed.push({
             type: 'similar_verified',
@@ -5425,16 +5425,17 @@ async function generateAISuggestionCore(
     
     const isThaiQuestion = detectLanguage(question) === 'thai';
     
-    // 🆕 ตรวจสอบว่ามี verified sources จริงหรือไม่ (ไม่นับ similar_unverified)
+    // 🔧 FIXED: ตรวจสอบว่ามี verified sources จริงหรือไม่ (รวมทุก type ที่เพิ่มไว้)
     const verifiedSources = sourcesUsed.filter(s => 
       s.type === 'self_verified' || 
-      s.type === 'verified_answer' || 
+      s.type === 'similar_verified' ||           // 🆕 เพิ่ม
+      s.type === 'verification_comments' ||       // 🆕 เพิ่ม
       s.type === 'current_question_verifications'
     );
     const hasVerifiedData = verifiedSources.length > 0 && context.trim().length > 0;
     const hasKnowledgeData = hasVerifiedData; // ใช้เฉพาะ verified sources
     
-    console.log(`📊 Core: verifiedSources=${verifiedSources.length}, hasVerifiedData=${hasVerifiedData}`);
+    console.log(`📊 Core: verifiedSources=${verifiedSources.length}, hasVerifiedData=${hasVerifiedData}, sourcesUsed types: ${sourcesUsed.map(s => s.type).join(', ')}`);
     
     let systemPrompt = '';
     if (hasKnowledgeData) {
@@ -5489,83 +5490,93 @@ ${context}
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
     
     if (streaming && socket) {
-      // Streaming mode for AI Suggests
+      // Streaming mode for AI Suggests - Use IFX GPT first, fallback to Ollama
       try {
-        const result = await ai.models.generateContentStream({
-          model: 'gemma-3-4b-it',
-          contents: fullPrompt,
-          config: { maxOutputTokens: 100000 },
+        console.log('🤖 Core: Trying IFX GPT (gpt-4o-mini) for streaming...');
+        
+        // 🆕 Use IFX GPT instead of Google AI
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const stream = await ifxClient.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_tokens: 20000,
+          stream: true
         });
         
-        for await (const chunk of result) {
-          const chunkText = chunk.text;
-          if (chunkText !== undefined) {
+        for await (const chunk of stream) {
+          const chunkText = chunk.choices[0]?.delta?.content || '';
+          if (chunkText) {
             aiGeneratedAnswer += chunkText;
             socket.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
           }
         }
         
         aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        console.log('✅ Core: Streaming completed (Google AI)');
-      } catch (streamError) {
-        console.error('⚠️ Core: Google AI streaming error, trying non-streaming:', streamError);
-        // Fallback to non-streaming Google AI
+        console.log('✅ Core: IFX GPT streaming completed');
+        
+      } catch (ifxError) {
+        console.error('⚠️ Core: IFX GPT streaming failed, trying Ollama:', ifxError);
+        
+        // 🔄 FALLBACK to Ollama gemma3:1b
         try {
-          const result = await ai.models.generateContent({
-            model: 'gemma-3-4b-it',
-            contents: fullPrompt
+          const OLLAMA_HOST = process.env.OLLAMA_HOST || process.env.API_OLLAMA?.replace('/api/generate', '') || 'http://localhost:11434';
+          const ollamaResponse = await fetch(`${OLLAMA_HOST}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: fullPrompt,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 4000 }
+            })
           });
-          if (result && result.text) {
-            aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response?: string };
+            aiGeneratedAnswer = (ollamaData.response || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
             socket?.emit('StreamText', aiGeneratedAnswer);
-            console.log('✅ Core: Non-streaming Google AI completed');
+            console.log('✅ Core: Ollama gemma3:1b fallback completed');
+          } else {
+            throw new Error(`Ollama API error: ${ollamaResponse.status}`);
           }
-        } catch (googleError) {
-          console.error('⚠️ Core: Google AI failed completely, falling back to Ollama gemma3:1b:', googleError);
-          // 🔄 FALLBACK to Ollama gemma3:1b
-          try {
-            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'gemma3:1b',
-                prompt: fullPrompt,
-                stream: false,
-                options: { temperature: 0.3, num_predict: 4000 }
-              })
-            });
-            
-            if (ollamaResponse.ok) {
-              const ollamaData = await ollamaResponse.json() as { response?: string };
-              aiGeneratedAnswer = (ollamaData.response || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-              socket?.emit('StreamText', aiGeneratedAnswer);
-              console.log('✅ Core: Ollama gemma3:1b fallback completed');
-            } else {
-              throw new Error(`Ollama API error: ${ollamaResponse.status}`);
-            }
-          } catch (ollamaError) {
-            console.error('❌ Core: All AI models failed:', ollamaError);
-            throw new Error('All AI models (Google AI, Ollama) are unavailable');
-          }
+        } catch (ollamaError) {
+          console.error('❌ Core: All AI models failed:', ollamaError);
+          throw new Error('All AI models (IFX GPT, Ollama) are unavailable');
         }
       }
     } else {
-      // Non-streaming mode for Q&A Detail
+      // Non-streaming mode for Q&A Detail - Use IFX GPT first
       try {
-        const result = await ai.models.generateContent({
-          model: 'gemma-3-4b-it',
-          contents: fullPrompt
+        console.log('🤖 Core: Trying IFX GPT (gpt-4o-mini) non-streaming...');
+        
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const response = await ifxClient.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_tokens: 20000,
+          stream: false
         });
         
-        if (result && result.text) {
-          aiGeneratedAnswer = result.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-          console.log('✅ Core: Google AI non-streaming completed');
-        }
-      } catch (googleError) {
-        console.error('⚠️ Core: Google AI failed, falling back to Ollama gemma3:1b:', googleError);
+        aiGeneratedAnswer = (response.choices[0]?.message?.content || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        console.log('✅ Core: IFX GPT non-streaming completed');
+        
+      } catch (ifxError) {
+        console.error('⚠️ Core: IFX GPT failed, falling back to Ollama gemma3:1b:', ifxError);
+        
         // 🔄 FALLBACK to Ollama gemma3:1b
         try {
-          const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+          const OLLAMA_HOST = process.env.OLLAMA_HOST || process.env.API_OLLAMA?.replace('/api/generate', '') || 'http://localhost:11434';
+          const ollamaResponse = await fetch(`${OLLAMA_HOST}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5586,7 +5597,7 @@ ${context}
           }
         } catch (ollamaError) {
           console.error('❌ Core: All AI models failed:', ollamaError);
-          throw new Error('All AI models (Google AI, Ollama) are unavailable');
+          throw new Error('All AI models (IFX GPT, Ollama) are unavailable');
         }
       }
     }
@@ -6139,7 +6150,7 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
               context += `    ประเภท: ยืนยันจากผู้เชี่ยวชาญ ${verificationComments.rows.length} คน\n`;
               verificationComments.rows.forEach((v) => {
                 const dept = v.requested_departments?.[0] || 'General';
-                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 300)}${v.comment.length > 300 ? '...' : ''}\n`;
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 1500)}${v.comment.length > 1500 ? '...' : ''}\n`;
               });
               
               sourcesUsed.push({
@@ -6156,7 +6167,7 @@ router.post('/ai-generate-suggestion', async (req: Request, res: Response) => {
           
           // Original answer or synthesized answer
           context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
-          context += `    คำตอบ: ${q.answer.substring(0, 500)}${q.answer.length > 500 ? '...' : ''}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 3000)}${q.answer.length > 3000 ? '...' : ''}\n`;
           
           sourcesUsed.push({
             type: 'similar_verified',

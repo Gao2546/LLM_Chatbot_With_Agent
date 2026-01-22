@@ -1471,10 +1471,10 @@ async function searchVerifiedAnswersHybrid(
   try {
     // 1. Generate embedding for question
     const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-    const embeddingResponse = await fetch(`${API_SERVER_URL}/get_embedding`, {
+    const embeddingResponse = await fetch(`${API_SERVER_URL}/encode_embedding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: questionText })
+      body: JSON.stringify({ text: questionText, dimensions: 2048, is_query: true })
     });
     
     if (!embeddingResponse.ok) {
@@ -1492,7 +1492,7 @@ async function searchVerifiedAnswersHybrid(
 
     const embeddingStr = `[${questionEmbedding.join(',')}]`;
 
-    // 2. Get vector similarity results (broad search)
+    // 2. Get vector similarity results (broad search) - using COSINE distance (<=>)
     const vectorResults = await pool.query(
       `SELECT 
         id,
@@ -1507,20 +1507,20 @@ async function searchVerifiedAnswersHybrid(
         tags,
         created_at,
         GREATEST(
-          COALESCE(1 - (question_embedding <-> $1::vector), 0),
-          COALESCE(1 - (answer_embedding <-> $1::vector), 0),
+          COALESCE(1 - (question_embedding <=> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <=> $1::vector), 0),
           CASE 
             WHEN sum_verified_answer_embedding IS NOT NULL 
-            THEN COALESCE(1 - (sum_verified_answer_embedding <-> $1::vector), 0)
+            THEN COALESCE(1 - (sum_verified_answer_embedding <=> $1::vector), 0)
             ELSE 0
           END
         ) as similarity
        FROM verified_answers
        WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
          AND (
-           (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
-           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
-           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <-> $1::vector) > $2)
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <=> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <=> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <=> $1::vector) > $2)
          )
        ORDER BY similarity DESC
        LIMIT $3`,
@@ -1568,8 +1568,8 @@ async function searchVerifiedAnswersHybrid(
       };
     });
 
-    // 5. Filter by minimum confidence (default: 0.25)
-    const minConfidence = 0.25;
+    // 5. Filter by minimum confidence (increased to 0.50 for better quality)
+    const minConfidence = 0.50;
     const filtered = hybridResults.filter(r => r.confidenceScore >= minConfidence);
 
     // 6. Sort by confidence score
