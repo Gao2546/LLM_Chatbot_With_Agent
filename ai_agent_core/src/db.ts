@@ -1451,6 +1451,175 @@ async function searchVerifiedAnswers(
 }
 
 /**
+ * HYBRID SEMANTIC SEARCH - Enhanced version with keyword and freshness scoring
+ * 
+ * This function enhances vector similarity with:
+ * 1. Keyword extraction and matching (stopwords removed)
+ * 2. Freshness scoring (exponential decay, 180-day half-life)
+ * 3. Weighted combination: Vector 55% + Keyword 30% + Freshness 15%
+ * 
+ * @param questionText - The question text (will generate embedding)
+ * @param threshold - Minimum vector similarity threshold (default: 0.25, lower for better recall)
+ * @param limit - Maximum results to return
+ * @returns Array of results with confidence scores and match details
+ */
+async function searchVerifiedAnswersHybrid(
+  questionText: string,
+  threshold: number = 0.25,  // Lower threshold for better recall
+  limit: number = 10
+) {
+  try {
+    // 1. Generate embedding for question
+    const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+    const embeddingResponse = await fetch(`${API_SERVER_URL}/get_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: questionText })
+    });
+    
+    if (!embeddingResponse.ok) {
+      console.error('Failed to get embedding for hybrid search');
+      return [];
+    }
+    
+    const embeddingData = await embeddingResponse.json();
+    const questionEmbedding = embeddingData.embedding;
+    
+    if (!questionEmbedding || questionEmbedding.length === 0) {
+      console.warn('Empty embedding provided, returning empty results');
+      return [];
+    }
+
+    const embeddingStr = `[${questionEmbedding.join(',')}]`;
+
+    // 2. Get vector similarity results (broad search)
+    const vectorResults = await pool.query(
+      `SELECT 
+        id,
+        question,
+        CASE 
+          WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL 
+          THEN sum_verified_answer
+          ELSE answer
+        END as answer,
+        verification_type,
+        created_by,
+        tags,
+        created_at,
+        GREATEST(
+          COALESCE(1 - (question_embedding <-> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <-> $1::vector), 0),
+          CASE 
+            WHEN sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (sum_verified_answer_embedding <-> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity
+       FROM verified_answers
+       WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+         AND (
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <-> $1::vector) > $2)
+         )
+       ORDER BY similarity DESC
+       LIMIT $3`,
+      [embeddingStr, threshold, limit * 2] // Get more results for hybrid filtering
+    );
+
+    console.log(`🔍 Hybrid Search: Vector search found ${vectorResults.rows.length} results (threshold=${threshold})`);
+
+    if (vectorResults.rows.length === 0) {
+      return [];
+    }
+
+    // 3. Extract keywords from query (simple version - remove stopwords)
+    const queryKeywords = extractKeywordsSimple(questionText);
+    console.log(`   Query keywords: [${queryKeywords.join(', ')}]`);
+
+    // 4. Score each result with hybrid approach
+    const hybridResults = vectorResults.rows.map(row => {
+      // Vector score
+      const vectorScore = row.similarity;
+
+      // Keyword score (Jaccard similarity)
+      const docKeywords = extractKeywordsSimple(row.question);
+      const intersection = queryKeywords.filter(kw => docKeywords.includes(kw));
+      const union = [...new Set([...queryKeywords, ...docKeywords])];
+      const keywordScore = union.length > 0 ? intersection.length / union.length : 0;
+
+      // Freshness score (exponential decay, 180-day half-life)
+      const now = new Date();
+      const createdAt = row.created_at ? new Date(row.created_at) : now;
+      const ageDays = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      const freshnessScore = Math.max(Math.pow(0.5, ageDays / 180), 0.01); // Min 0.01
+
+      // Weighted combination: Vector 55% + Keyword 30% + Freshness 15%
+      const confidenceScore = (vectorScore * 0.55) + (keywordScore * 0.30) + (freshnessScore * 0.15);
+
+      return {
+        ...row,
+        vectorScore,
+        keywordScore,
+        freshnessScore,
+        confidenceScore,
+        matchedKeywords: intersection.length,
+        totalKeywords: queryKeywords.length
+      };
+    });
+
+    // 5. Filter by minimum confidence (default: 0.25)
+    const minConfidence = 0.25;
+    const filtered = hybridResults.filter(r => r.confidenceScore >= minConfidence);
+
+    // 6. Sort by confidence score
+    filtered.sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+    // 7. Limit results
+    const final = filtered.slice(0, limit);
+
+    console.log(`   Hybrid results: ${vectorResults.rows.length} → ${filtered.length} → ${final.length} (after scoring & limit)`);
+    if (final.length > 0) {
+      final.forEach((r, idx) => {
+        console.log(`   ${idx + 1}. Q${r.id}: confidence=${(r.confidenceScore * 100).toFixed(1)}% [vec:${(r.vectorScore * 100).toFixed(0)}% kw:${(r.keywordScore * 100).toFixed(0)}% fresh:${(r.freshnessScore * 100).toFixed(0)}%] "${r.question.substring(0, 60)}..."`);
+      });
+    }
+
+    return final;
+  } catch (error) {
+    console.error('Error in hybrid semantic search:', error);
+    throw error;
+  }
+}
+
+/**
+ * Simple keyword extraction helper
+ * Removes stopwords and short words
+ */
+function extractKeywordsSimple(text: string): string[] {
+  const stopwords = new Set([
+    // English
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
+    'could', 'can', 'may', 'might', 'must', 'of', 'at', 'by', 'for',
+    'with', 'about', 'against', 'between', 'into', 'through', 'during',
+    'to', 'from', 'in', 'out', 'on', 'off', 'over', 'under', 'how',
+    'what', 'which', 'who', 'when', 'where', 'why', 'this', 'that',
+    // Thai
+    'ที่', 'ใน', 'การ', 'เป็น', 'ของ', 'มี', 'ได้', 'จาก', 'และ', 'ให้',
+    'ต้อง', 'จะ', 'อยู่', 'แล้ว', 'ด้วย', 'ว่า', 'คือ', 'ซึ่ง', 'นี้', 'นั้น',
+    'ไม่', 'หรือ', 'เพราะ', 'โดย', 'เพื่อ', 'กับ', 'เช่น'
+  ]);
+
+  return text
+    .toLowerCase()
+    .replace(/[^\w\sก-๙]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length >= 2 && !stopwords.has(word) && !/^\d+$/.test(word))
+    .filter((word, idx, arr) => arr.indexOf(word) === idx); // Remove duplicates
+}
+
+/**
  * ③ ดึงคะแนนและคอมเมนต์
  * Retrieves ratings and comments for a verified answer
  */
@@ -2543,6 +2712,7 @@ export {
   // Verified Answers Functions (จากเดิม verifiedAnswers.ts)
   saveVerifiedAnswer,
   searchVerifiedAnswers,
+  searchVerifiedAnswersHybrid,
   getAnswerVerifications,
   filterQuestionsByType,
   countQuestionsByType,
