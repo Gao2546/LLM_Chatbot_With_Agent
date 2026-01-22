@@ -864,7 +864,7 @@
             const sourcesData = suggestion.sources || [];
             
             // 🔄 FILTER & SORT: Keep only sources with >= 40% confidence and sort descending
-            const CONFIDENCE_THRESHOLD = 0.40; // 40% (lowered from 55% for better recall)
+            const CONFIDENCE_THRESHOLD = 0.45; // 40% (lowered from 55% for better recall)
             const MAX_SOURCES_DISPLAY = 5; // Top 5 sources
             
             const filteredAndSorted = sourcesData

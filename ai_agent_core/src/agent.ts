@@ -3042,9 +3042,26 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
         console.warn('Could not trigger notifications:', notifError);
       }
 
-      // 🤖 Pre-generate AI suggestion in the background (don't wait)
-      // This allows the AI suggestion to be ready when users view the question
-      if (verificationType === 'request') {
+      // 🤖 Handle verification based on type
+      if (verificationType === 'self') {
+        // Self-verified: Auto-accept immediately
+        console.log(`✅ Auto-accepting self-verified question ${result.answerId}`);
+        try {
+          // Mark as fully verified by setting sum_verified_answer
+          await pool.query(
+            `UPDATE verified_answers 
+             SET sum_verified_answer = answer,
+                 is_accepted = true,
+                 accepted_at = NOW()
+             WHERE id = $1`,
+            [result.answerId]
+          );
+          console.log(`✅ Question ${result.answerId} auto-accepted (self-verified)`);
+        } catch (acceptError) {
+          console.error('Error auto-accepting self-verified question:', acceptError);
+        }
+      } else if (verificationType === 'request') {
+        // Request verification: Generate AI suggestion in the background
         console.log(`🤖 Starting background AI suggestion generation for question ${result.answerId}`);
         generateAISuggestionBackground(result.answerId, question, answer).catch(err => {
           console.warn('Background AI suggestion generation failed:', err);
@@ -5001,7 +5018,7 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
 
     // 2. Get total count of related questions (same criteria as main query)
     // Include both self-verified and request-verified (with sum_verified_answer) questions
-    // Lower threshold to 0.50 for better coverage
+    // Threshold set to 0.6 for better quality
     const countResult = await pool.query(
       `SELECT COUNT(*) as total
       FROM verified_answers va
@@ -5013,8 +5030,8 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
         )
         AND LENGTH(va.question) >= 10
         AND (
-          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $2::vector)) > 0.50)
-          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $2::vector)) > 0.50)
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $2::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $2::vector)) > 0.6)
         )`,
       [qId, question_embedding]
     );
@@ -5052,8 +5069,8 @@ router.get('/related-questions/:questionId', async (req: Request, res: Response)
         )
         AND LENGTH(va.question) >= 10
         AND (
-          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
-          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.6)
         )
       GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding, va.sum_verified_answer
       ORDER BY 
@@ -5113,7 +5130,7 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
 
     // 2. Search for ALL similar questions - improved filtering
     // Include both self-verified and request-verified (with sum_verified_answer) questions
-    // Lower threshold to 0.50 for better coverage
+    // Threshold set to 0.6 for better quality
     const relatedResult = await pool.query(
       `SELECT 
         va.id,
@@ -5142,8 +5159,8 @@ router.get('/related-questions-all/:questionId', async (req: Request, res: Respo
         )
         AND LENGTH(va.question) >= 10
         AND (
-          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.50)
-          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.50)
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.6)
         )
       GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding
       ORDER BY similarity_score DESC`,
@@ -5294,7 +5311,7 @@ async function generateAISuggestionCore(
           const confidenceScore = q.confidenceScore || 0;
           
           // Lower threshold to 35% for better recall
-          if (confidenceScore < 0.30) {
+          if (confidenceScore < 0.45) {
             console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 40%`);
             continue;
           }
