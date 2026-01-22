@@ -1511,9 +1511,16 @@ const markdown = window.markdownit({
     }
 });
 
+function normalizeLatexDelimiters(s) {
+  return s
+    .replace(/\\\[/g, '$$').replace(/\\\]/g, '$$')
+    .replace(/\\\(/g, '$').replace(/\\\)/g, '$');
+}
+
 
 function displayMarkdownMessage(text, className, userQuestion = null) {
-    const html = markdown.render(text);
+    // const html = markdown.render(text);
+    const html = markdown.render(normalizeLatexDelimiters(text));
     const messageElement = document.createElement('div');
     messageElement.innerHTML = html;
     messageElement.className = className;
@@ -1627,8 +1634,13 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    if (window.MathJax) {
-        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // if (window.MathJax) {
+    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // }
+
+    if (window.MathJax?.typesetPromise) {
+        MathJax.typesetClear([messageElement]);           // กันสมการซ้อน/หน่วง
+        MathJax.typesetPromise([messageElement]).catch(console.error);
     }
 }
 
@@ -1656,7 +1668,8 @@ function displayMarkdownMessageStream(text, messageElement) {
     }
     
     // Update content (this will be called multiple times as stream comes in)
-    const html = markdown.render(text);
+    // const html = markdown.render(text);
+    const html = markdown.render(normalizeLatexDelimiters(text));
     contentDiv.innerHTML = html;
 
     // Check if buttons already added to messageElement
