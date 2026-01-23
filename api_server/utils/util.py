@@ -100,7 +100,7 @@ if basic_auth:
     'Authorization': f"Basic {token}"      
     }   
 else:    
-    token = '<generated-token-from-url>'    
+    token = token    
     headers = {     
         'Authorization': f"Bearer {token}",      }      
    
