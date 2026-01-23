@@ -5602,10 +5602,12 @@ ${context}
       }
     }
     
-    // 🆕 CHECK: If AI answer says "no data", force totalSources = 0
+    // 🆕 CHECK: If AI answer says "no data", force totalSources = 0 and return standard message
     const noDataKeywords = [
       'ไม่มีข้อมูล', 'ยังไม่มีข้อมูล', 'no data', 'no information', 'no verified',
-      'does not contain', 'ไม่พบข้อมูล', 'knowledge base does not'
+      'does not contain', 'ไม่พบข้อมูล', 'knowledge base does not',
+      'ไม่ได้กล่าวถึง', 'ไม่ได้มีข้อมูล', 'ไม่ตรงกับคำถาม', 'ไม่เกี่ยวข้อง',
+      'ข้อมูลที่ให้มาไม่ได้', 'no relevant', 'not found', 'doesn\'t contain'
     ];
     
     const answersaysNoData = noDataKeywords.some(keyword => 
@@ -5613,9 +5615,15 @@ ${context}
     );
     
     if (answersaysNoData) {
-      console.log(`⚠️ Core: AI answer indicates no relevant data - resetting totalSources to 0`);
-      totalSources = 0;
-      sourcesUsed.length = 0; // Clear sources array
+      console.log(`⚠️ Core: AI answer indicates no relevant data - returning standard no-data message`);
+      const noDataAnswer = '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+      
+      return {
+        answer: noDataAnswer,
+        sources: [],
+        confidence: 0,
+        totalSources: 0
+      };
     }
     
     // Calculate confidence (simplified)
@@ -5890,8 +5898,48 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
         }
       }
 
-      // ===== 3. Save the suggestion if we got one =====
+      // ===== 3. Check if LLM says "no data" and save appropriately =====
       if (suggestion && suggestion.trim().length > 0) {
+        // 🆕 ตรวจสอบว่า LLM ตอบว่า "ไม่มีข้อมูล" หรือไม่
+        const noDataPatterns = [
+          'ไม่มีข้อมูล',
+          'ไม่ได้กล่าวถึง',
+          'ไม่ได้มีข้อมูล',
+          'ไม่พบข้อมูล',
+          'ไม่ตรงกับคำถาม',
+          'ไม่เกี่ยวข้อง',
+          'no data',
+          'no relevant',
+          'not found',
+          'does not contain',
+          'doesn\'t contain',
+          'ข้อมูลที่ให้มาไม่ได้'
+        ];
+        
+        const lowerSuggestion = suggestion.toLowerCase();
+        const isNoDataResponse = noDataPatterns.some(pattern => 
+          lowerSuggestion.includes(pattern.toLowerCase())
+        );
+        
+        if (isNoDataResponse) {
+          console.log(`⚠️ [Background] LLM indicated no relevant data - saving standard no-data message`);
+          const noDataMessage = '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+          
+          await saveAISuggestion(
+            questionId,
+            noDataMessage,
+            'create_question',
+            {
+              aiModelUsed: 'no-relevant-data',
+              aiConfidence: 0,
+              sourcesUsed: []
+            }
+          );
+          console.log(`✅ [Background] No-data message saved for question ${questionId}`);
+          return;
+        }
+        
+        // LLM ตอบปกติ - save คำตอบ
         await saveAISuggestion(
           questionId,
           suggestion,

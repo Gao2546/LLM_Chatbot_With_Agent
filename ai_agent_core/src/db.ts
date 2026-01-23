@@ -1403,6 +1403,9 @@ async function searchVerifiedAnswers(
     // Search using question and answer embeddings, prioritize sum_verified_answer for request type
     // For 'request' type with sum_verified_answer, use it; otherwise use regular answer
     // IMPORTANT: Include questions that have sum_verified_answer_embedding even if question_embedding is NULL
+    // FILTER: Only include VERIFIED answers (verification_type != 'staging')
+    //   - 'self': Self-verified by creator
+    //   - 'request': Requested verification from others (with sum_verified_answer = verified)
     const result = await pool.query(
       `SELECT 
         id,
@@ -1425,7 +1428,12 @@ async function searchVerifiedAnswers(
           END
         ) as similarity
        FROM verified_answers
-       WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+       WHERE verification_type != 'staging'
+         AND (
+           (verification_type = 'self')
+           OR (verification_type = 'request' AND sum_verified_answer IS NOT NULL)
+         )
+         AND (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
          AND (
            (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
            OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
@@ -1493,6 +1501,7 @@ async function searchVerifiedAnswersHybrid(
     const embeddingStr = `[${questionEmbedding.join(',')}]`;
 
     // 2. Get vector similarity results (broad search) - using COSINE distance (<=>)
+    // FILTER: Only include VERIFIED answers (verification_type != 'staging')
     const vectorResults = await pool.query(
       `SELECT 
         id,
@@ -1516,7 +1525,12 @@ async function searchVerifiedAnswersHybrid(
           END
         ) as similarity
        FROM verified_answers
-       WHERE (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+       WHERE verification_type != 'staging'
+         AND (
+           (verification_type = 'self')
+           OR (verification_type = 'request' AND sum_verified_answer IS NOT NULL)
+         )
+         AND (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
          AND (
            (question_embedding IS NOT NULL AND 1 - (question_embedding <=> $1::vector) > $2)
            OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <=> $1::vector) > $2)

@@ -2979,90 +2979,135 @@ Output only the descriptive paragraph.
     
 def encode_text_for_embedding(text: str, target_dimensions: int = 2048, is_query: bool = False) -> list[float]:
     """
-    Convert text into an embedding vector using pre-loaded model (FAST).
-    Falls back to Ollama if pre-loaded model unavailable.
+    Convert text into an embedding vector.
+    
+    Priority Order:
+    1. OpenAI text-embedding-3-small (via IFX GPT) ← PRIMARY
+    2. Jina v4 local model
+    3. Jina API (Provider)
+    4. Ollama (qwen3-embedding:0.6b)
     
     Args:
         text: ข้อความที่ต้องการ embedding
         target_dimensions: จำนวน dimensions ที่ต้องการ (default: 2048 สำหรับ verified_answers)
         is_query: True = ค้นหา (retrieval.query), False = บันทึกเอกสาร (retrieval.passage)
-                  การใช้ task ที่ถูกต้องช่วยให้ cross-lingual search ทำงานได้ดี
     
     Returns:
-        list[float]: embedding vector (2048 dims)
+        list[float]: embedding vector (2048 dims, padded/truncated as needed)
     """
-    global model  # Use the pre-loaded model
+    global model  # Use the pre-loaded Jina model
     
     # ตรวจสอบว่า text ว่างหรือไม่
     if not text or not text.strip():
         print(f"❌ ERROR: Empty text provided!")
         raise ValueError("Cannot create embedding from empty text")
     
-    # เลือก task - Jina v4 ใช้ 'retrieval' สำหรับทั้ง query และ document
-    # Note: is_query ยังคงใช้ประโยชน์สำหรับ logging และ API fallback
-    task = 'retrieval'  # Jina v4 ใช้ task เดียวกันสำหรับทั้ง query และ passage
+    # Store errors for final logging
+    openai_error = None
+    jina_error = None
+    jina_api_error = None
+    
+    # ========== PRIMARY: OpenAI text-embedding-3-small via IFX GPT ==========
+    print(f"🤖 [1/4] Attempting OpenAI text-embedding-3-small...")
+    try:
+        embedding_list = IFXGPTEmbedding(inputs=[text])[0]
+        
+        # OpenAI returns 1536 dims, adjust to target_dimensions (2048)
+        current_dim = len(embedding_list)
+        if current_dim < target_dimensions:
+            padding = [0.0] * (target_dimensions - current_dim)
+            embedding_list.extend(padding)
+        elif current_dim > target_dimensions:
+            embedding_list = embedding_list[:target_dimensions]
+        
+        print(f"✅ OpenAI embedding succeeded ({current_dim} → {target_dimensions} dims)")
+        return embedding_list
+    
+    except Exception as e:
+        openai_error = e
+        print(f"⚠️  [1/4] OpenAI failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 1: Pre-loaded Jina v4 model ==========
+    print(f"🤖 [2/4] Attempting Jina v4 local model...")
+    task = 'retrieval'
     
     try:
-        # Use the pre-loaded Jina embedding model (FAST - no reload)
         if model is not None:
             mode_str = 'QUERY' if is_query else 'DOCUMENT'
-            print(f"⚡ Using PRE-LOADED Jina model (task={task}, mode={mode_str}) for embedding...")
+            print(f"⚡ Using PRE-LOADED Jina model (task={task}, mode={mode_str})...")
             embedding = model.encode(text, task=task)
             embedding_list = embedding.tolist()
             
-            # Adjust dimensions to target_dimensions (2048)
             current_dim = len(embedding_list)
             if current_dim < target_dimensions:
-                # Pad with zeros
                 padding = [0.0] * (target_dimensions - current_dim)
                 embedding_list.extend(padding)
-                print(f"✅ Padded embedding from {current_dim} to {target_dimensions} dimensions")
             elif current_dim > target_dimensions:
-                # Truncate
                 embedding_list = embedding_list[:target_dimensions]
-                print(f"✅ Truncated embedding from {current_dim} to {target_dimensions} dimensions")
             
+            print(f"✅ Jina v4 local succeeded ({current_dim} → {target_dimensions} dims)")
             return embedding_list
         else:
-            print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
-            # ส่ง is_query ไปยัง API เพื่อใช้ task ที่ถูกต้อง
-            if is_query:
-                embedding_list = get_image_embedding_jinna_api(search_text=text)  # retrieval.query
-            else:
-                embedding_list = get_image_embedding_jinna_api(text=text)  # retrieval.passage
-            if embedding_list and len(embedding_list) > 0:
-                # Adjust dimensions for API fallback too
-                current_dim = len(embedding_list)
-                if current_dim < target_dimensions:
-                    padding = [0.0] * (target_dimensions - current_dim)
-                    embedding_list.extend(padding)
-                elif current_dim > target_dimensions:
-                    embedding_list = embedding_list[:target_dimensions]
-                return embedding_list
-            else:
-                raise ValueError("Ollama returned empty embedding")
-            
+            raise Exception("Jina model not initialized (model=None)")
+    
     except Exception as e:
-        print(f"❌ Jina embedding error: {e}. Trying Ollama fallback...")
-        try:
-            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
-            if embedding_list and len(embedding_list) > 0:
-                embedding_result = embedding_list[0]
-                # Adjust dimensions for Ollama fallback
-                current_dim = len(embedding_result)
-                if current_dim < target_dimensions:
-                    padding = [0.0] * (target_dimensions - current_dim)
-                    embedding_result.extend(padding)
-                    print(f"✅ Padded Ollama embedding from {current_dim} to {target_dimensions} dimensions")
-                elif current_dim > target_dimensions:
-                    embedding_result = embedding_result[:target_dimensions]
-                    print(f"✅ Truncated Ollama embedding from {current_dim} to {target_dimensions} dimensions")
-                return embedding_result
-            else:
-                raise ValueError("Ollama returned empty embedding")
-        except Exception as ollama_error:
-            print(f"❌ ALL embedding methods failed: {ollama_error}")
-            raise ValueError(f"Embedding failed: {ollama_error}")
+        jina_error = e
+        print(f"⚠️  [2/4] Jina v4 local failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 2: Jina API (Provider) ==========
+    print(f"🤖 [3/4] Attempting Jina API (Provider)...")
+    try:
+        if is_query:
+            embedding_list = get_image_embedding_jinna_api(search_text=text)
+        else:
+            embedding_list = get_image_embedding_jinna_api(text=text)
+        
+        if embedding_list and len(embedding_list) > 0:
+            current_dim = len(embedding_list)
+            if current_dim < target_dimensions:
+                padding = [0.0] * (target_dimensions - current_dim)
+                embedding_list.extend(padding)
+            elif current_dim > target_dimensions:
+                embedding_list = embedding_list[:target_dimensions]
+            
+            print(f"✅ Jina API succeeded ({current_dim} → {target_dimensions} dims)")
+            return embedding_list
+        else:
+            raise ValueError("Jina API returned empty embedding")
+    
+    except Exception as e:
+        jina_api_error = e
+        print(f"⚠️  [3/4] Jina API failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 3: Ollama ==========
+    print(f"🤖 [4/4] Attempting Ollama (qwen3-embedding:0.6b)...")
+    try:
+        embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+        
+        if embedding_list and len(embedding_list) > 0:
+            embedding_result = embedding_list[0]
+            current_dim = len(embedding_result)
+            if current_dim < target_dimensions:
+                padding = [0.0] * (target_dimensions - current_dim)
+                embedding_result.extend(padding)
+            elif current_dim > target_dimensions:
+                embedding_result = embedding_result[:target_dimensions]
+            
+            print(f"✅ Ollama succeeded ({current_dim} → {target_dimensions} dims)")
+            return embedding_result
+        else:
+            raise ValueError("Ollama returned empty embedding")
+    
+    except Exception as ollama_error:
+        print(f"❌ [4/4] Ollama failed: {str(ollama_error)[:80]}...")
+    
+    # ========== ALL METHODS FAILED ==========
+    print(f"❌ ALL embedding methods FAILED!")
+    print(f"   1. OpenAI: {str(openai_error)[:50] if openai_error else 'N/A'}")
+    print(f"   2. Jina v4: {str(jina_error)[:50] if jina_error else 'N/A'}")
+    print(f"   3. Jina API: {str(jina_api_error)[:50] if jina_api_error else 'N/A'}")
+    print(f"   4. Ollama: {str(ollama_error)[:50] if ollama_error else 'N/A'}")
+    raise ValueError("All embedding methods failed - check API connections and model availability")
 
 def clean_text(input_text: str) -> str:
     if input_text is None:
