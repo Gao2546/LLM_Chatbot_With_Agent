@@ -235,22 +235,42 @@ export default async function agentRouters(ios: SocketIOServer) {
 
 
 // Initialize IFX GPT Client
-// Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
-const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
-const ifxToken = process.env.IFXGPT_TOKEN;
-const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
+function generateBase64String(username: string, password: string): string {
+  return Buffer.from(`${username}:${password}`, "utf8").toString("base64");
+}
+
+const basicAuth = process.env.IFXGPT_BASIC_AUTH === "True"; // or your own flag
+const windowUser = process.env.IFXGPT_USER || "yuthaworawit";
+const windowPassword = process.env.IFXGPT_PASSWORD || "Gao Gao2546";
+const bearerToken = process.env.IFXGPT_TOKEN || "";
+
+const authHeader = basicAuth
+  ? `Basic ${generateBase64String(windowUser, windowPassword)}`
+  : `Bearer ${bearerToken}`;
+
+// ---- Initialize IFX GPT Client ----
+const ifxCertPath = process.env.IFXGPT_CERT_PATH || "ca-bundle.crt";
+const ifxBaseUrl =
+  process.env.IFXGPT_BASE_URL || "https://gpt4ifx.icp.infineon.com";
 
 const httpsAgent = new https.Agent({
   ca: fs.readFileSync(ifxCertPath),
 });
 
 const ifxClient = new OpenAI({
-  apiKey: ifxToken,
+  // OpenAI SDK expects apiKey, but we'll also force our Authorization header:
+  apiKey: "unused",
   baseURL: ifxBaseUrl,
-  // สำคัญ: ใช้ httpsAgent
   httpAgent: undefined,
   httpsAgent,
+
+  // This makes every request send your chosen Authorization header
+  defaultHeaders: {
+    Authorization: authHeader,
+  },
 } as any);
+
+
 
 
 export async function IFXGPTInference(
