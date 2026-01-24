@@ -1188,7 +1188,7 @@ User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
-query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
+    query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
     if not LOCAL:
         if IFXGPT:
             search_text = IFXGPTInference(
