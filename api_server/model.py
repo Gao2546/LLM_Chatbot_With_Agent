@@ -1188,6 +1188,7 @@ User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
+query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
     if not LOCAL:
         if IFXGPT:
             search_text = IFXGPTInference(
@@ -1196,7 +1197,7 @@ Output only the simulated excerpt.
                 # image_bytes_list=image_bytes_list,
                 model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
             )
-            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+            query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
         else:
             search_text = DeepInfraInference(
                 prompt=create_search_prompt,
@@ -1204,14 +1205,14 @@ Output only the simulated excerpt.
                 # image_bytes_list=image_bytes_list,
                 model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
             )
-            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+            query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
 
     else :
         search_text = ollama_generate_text(
             prompt=create_search_prompt,
             model="gemma3:4b"
         )
-        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+        query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
     print(f"Search prompt: {search_text}")
 
     # =========================================================
@@ -1222,7 +1223,7 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 legacy_results = search_similar_documents_by_active_user(
                     query_text=text,
                     user_id=user_id,
@@ -1234,12 +1235,13 @@ Output only the simulated excerpt.
                     break
 
             # 2. New Page Image Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 page_search_results = search_similar_pages_by_active_user(
                     query_text=text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if page_search_results:
                     break
@@ -1253,7 +1255,7 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 legacy_results = search_similar_documents_by_active_user_all(
                     query_text=text,
                     user_id=user_id,
@@ -1265,12 +1267,13 @@ Output only the simulated excerpt.
                     break
 
             # 2. New Page Image Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 page_search_results = search_similar_pages_by_active_user_all(
                     query_text=text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if page_search_results:
                     break
@@ -1299,7 +1302,7 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             if has_legacy:
-                for text in [search_text, queryT]:
+                for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                     legacy_results = search_similar_documents_by_chat(
                         query_text=text, 
                         user_id=user_id, 
@@ -1312,13 +1315,14 @@ Output only the simulated excerpt.
                         break
 
             if has_pages:
-                for text in [search_text, queryT]:
+                for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                     page_search_results = search_similar_pages(
                         query_text=text, 
                         user_id=user_id, 
                         chat_history_id=chat_history_id, 
                         top_k=top_k_pages, 
                         threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                        query_embedding=query_embedding,
                     )
                     if page_search_results:
                         break
