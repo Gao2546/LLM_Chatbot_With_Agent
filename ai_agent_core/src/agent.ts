@@ -235,9 +235,9 @@ export default async function agentRouters(ios: SocketIOServer) {
 
 
 // Initialize IFX GPT Client
-// Uses TOKEN (same as api_server) or IFXGPT_TOKEN for backward compatibility
+// Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
 const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
-const ifxToken = process.env.TOKEN || process.env.IFXGPT_TOKEN;
+const ifxToken = process.env.IFXGPT_TOKEN;
 const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
 
 const httpsAgent = new https.Agent({

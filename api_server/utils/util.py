@@ -73,11 +73,15 @@ IFXGPT = os.getenv("IFXGPT", True)
 API_OLLAMA = os.getenv("API_OLLAMA", "http://127.0.0.1:11434/api/generate")
 
 # IFX GPT API
-cert_path = os.getenv('IFXGPT_CERT_PATH')   
-window_user = os.getenv('WINDOWS_USER')
-window_password = os.getenv('WINDOWS_PASSWORD') 
+cert_path = os.getenv('IFXGPT_CERT_PATH')    
+window_user = os.getenv('WINDOWS_USER','yuthaworawit')
+window_password = os.getenv('WINDOWS_PASSWORD','Gao Gao2546') 
 token = os.getenv("TOKEN")
-basic_auth = False
+print(token)
+print(cert_path)
+print(window_user)
+print(window_password)
+basic_auth = True 
 
 LOCAL = True if LOCAL == "True" else False
 IFXGPT = True if IFXGPT == "True" else False
