@@ -67,6 +67,7 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     PORT=3000 \
     LOCAL=False \
     IFXGPT=True \
+    IFXGPT_BASIC_AUTH=True \
     IFXGPT_CERT_PATH=/app/ca-bundle.crt \
     NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt \
     WINDOWS_USER=yuthaworawit \
