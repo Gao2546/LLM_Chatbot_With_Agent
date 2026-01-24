@@ -3223,7 +3223,7 @@ def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_numb
             conn.close()
 
 # Search Text (Legacy)
-def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
     """
     Search (Legacy) from 'document_embeddings' table.
     
@@ -3232,13 +3232,16 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
     """
     # Step 1: Encode the query text to a vector
     # query_embedding = encode_text_for_embedding(query_text)
-    if not LOCAL:
+    if (not LOCAL) and (query_embedding is not None):
         if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    
+    if not query_embedding: return []
+    
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
     conn = None
@@ -3299,7 +3302,7 @@ from typing import List, Dict, Any
 # Assuming get_image_embedding_jinna_api and get_db_connection are defined elsewhere
 # import { get_image_embedding_jinna_api, get_db_connection } from ...
 
-def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
     """
     Search (New) from 'document_page_embeddings' table.
     
@@ -3315,16 +3318,15 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
         [{'page_id': 12, 'file_name': 'report.pdf', ..., 'distance': 0.25, 'normalized_distance': 0.1}, ...]
     """
     # Step 1: Encode the query text using the *CLIP* model
-    if not LOCAL:
-        if IFXGPT: # Embedding
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
-    if not query_embedding:
-        print("❌ Failed to get CLIP embedding for query.")
-        return []
+
+    if not query_embedding: return []
         
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
@@ -3424,7 +3426,7 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
 #  SEARCH BY ACTIVE USER FUNCTIONS (METHOD: searchDoc)
 # ==============================================================================
 
-def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
     """
     Legacy Text Search: Finds text chunks in files where the user is an 'active_user'.
     """
@@ -3434,13 +3436,16 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
     # query_embedding = encode_text_for_embedding(text=query_text)
 
     # Encode using jinna Text-Image-Embedding
-    if not LOCAL:
+    if (not LOCAL) and (query_embedding is not None):
         if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    
+    if not query_embedding: return []
+
     query_vector = f"[{', '.join(map(str, query_embedding))}]"  
 
     conn = None
@@ -3485,17 +3490,17 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
         if conn: conn.close()
 
 
-def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
     """
     New Page Search: Finds document pages (images) in files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
-    if not LOCAL:
-        if IFXGPT: # Embedding
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    else:
+    else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
     if not query_embedding: return []
@@ -3570,19 +3575,22 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
         if conn: conn.close()
 
 
-def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
     """
     Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
     """
     # Encode query
     # query_embedding = encode_text_for_embedding(query_text)
-    if not LOCAL:
+    if (not LOCAL) and (query_embedding is not None):
         if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+
+    if not query_embedding: return []
+
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
 
     conn = None
@@ -3627,17 +3635,17 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
         if conn: conn.close()
 
 
-def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
     """
     New Page Search: Finds document pages (images) in all files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
-    if not LOCAL:
-        if IFXGPT: # Embedding
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
             query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    else:
+    else :
         query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
 
     if not query_embedding: return []

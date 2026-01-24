@@ -1196,6 +1196,7 @@ Output only the simulated excerpt.
                 # image_bytes_list=image_bytes_list,
                 model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
             )
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
         else:
             search_text = DeepInfraInference(
                 prompt=create_search_prompt,
@@ -1203,12 +1204,14 @@ Output only the simulated excerpt.
                 # image_bytes_list=image_bytes_list,
                 model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
             )
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
 
     else :
         search_text = ollama_generate_text(
             prompt=create_search_prompt,
             model="gemma3:4b"
         )
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
     print(f"Search prompt: {search_text}")
 
     # =========================================================
@@ -1225,6 +1228,7 @@ Output only the simulated excerpt.
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if legacy_results:
                     break
@@ -1255,6 +1259,7 @@ Output only the simulated excerpt.
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if legacy_results:
                     break
@@ -1301,6 +1306,7 @@ Output only the simulated excerpt.
                         chat_history_id=chat_history_id, 
                         top_k=top_k_text,
                         threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                        query_embedding=query_embedding,
                     )
                     if legacy_results:
                         break
