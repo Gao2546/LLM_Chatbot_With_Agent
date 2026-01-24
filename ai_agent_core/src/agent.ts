@@ -235,9 +235,9 @@ export default async function agentRouters(ios: SocketIOServer) {
 
 
 // Initialize IFX GPT Client
-// Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
+// Uses TOKEN (same as api_server) or IFXGPT_TOKEN for backward compatibility
 const ifxCertPath = process.env.IFXGPT_CERT_PATH || 'ca-bundle.crt';
-const ifxToken = process.env.IFXGPT_TOKEN;
+const ifxToken = process.env.TOKEN || process.env.IFXGPT_TOKEN;
 const ifxBaseUrl = process.env.IFXGPT_BASE_URL || 'https://gpt4ifx.icp.infineon.com';
 
 const httpsAgent = new https.Agent({
@@ -3047,12 +3047,13 @@ router.post('/verify-answer', uploadFiles.array('files', 10), async (req: Reques
         // Self-verified: Auto-accept immediately
         console.log(`✅ Auto-accepting self-verified question ${result.answerId}`);
         try {
-          // Mark as fully verified by setting sum_verified_answer
+          // Mark as fully verified by setting sum_verified_answer_embedding
+          // Note: Only update columns that actually exist in the verified_answers table
           await pool.query(
             `UPDATE verified_answers 
-             SET sum_verified_answer = answer,
-                 is_accepted = true,
-                 accepted_at = NOW()
+             SET sum_verified_answer_embedding = (
+               SELECT answer_embedding FROM verified_answers WHERE id = $1 LIMIT 1
+             )
              WHERE id = $1`,
             [result.answerId]
           );
