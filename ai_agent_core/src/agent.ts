@@ -5574,8 +5574,30 @@ ${context}
         }
         
         console.log(`📊 Core: Received ${chunkCount} chunks, total chars: ${aiGeneratedAnswer.length}`);
+        
+        // 🆕 ถ้า streaming ได้ 0 chars ให้ fallback ไป non-streaming mode
+        if (aiGeneratedAnswer.length === 0) {
+          console.log('⚠️ Core: Streaming returned 0 chars, trying non-streaming fallback...');
+          
+          const nonStreamResponse = await ifxClient.chat.completions.create({
+            model: ifxModel,
+            messages: ifxMessages,
+            temperature: 0.7,
+            max_tokens: 20000,
+            stream: false
+          });
+          
+          aiGeneratedAnswer = (nonStreamResponse.choices[0]?.message?.content || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          console.log(`✅ Core: Non-streaming fallback got ${aiGeneratedAnswer.length} chars`);
+          
+          // Emit the full answer to client
+          if (aiGeneratedAnswer && socket) {
+            socket.emit('StreamText', aiGeneratedAnswer);
+          }
+        }
+        
         aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        console.log('✅ Core: IFX GPT streaming completed');
+        console.log('✅ Core: IFX GPT completed');
         
       } catch (ifxError) {
         console.error('⚠️ Core: IFX GPT streaming failed, trying Ollama:', ifxError);
