@@ -181,6 +181,37 @@ def get_page(driver, url):
     page_source = driver.find_element(By.TAG_NAME, "body").get_attribute('innerHTML')
     return page_source
 
+@app.route('/system/info', methods=['GET'])
+def get_system_info():
+    """Get system information"""
+    try:
+        import psutil
+        import platform
+        
+        system_info = {
+            'platform': platform.system(),
+            'processor': platform.processor(),
+            'python_version': platform.python_version(),
+            'cpu_count': psutil.cpu_count(),
+            'cpu_percent': psutil.cpu_percent(interval=1),
+            'memory': {
+                'total_gb': round(psutil.virtual_memory().total / (1024**3), 2),
+                'used_gb': round(psutil.virtual_memory().used / (1024**3), 2),
+                'percent': psutil.virtual_memory().percent
+            },
+            'disk': {
+                'total_gb': round(psutil.disk_usage('/').total / (1024**3), 2),
+                'used_gb': round(psutil.disk_usage('/').used / (1024**3), 2),
+                'percent': psutil.disk_usage('/').percent
+            }
+        }
+        return jsonify(system_info), 200
+    except Exception as e:
+        print(f"Error getting system info: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/test_db', methods=['GET'])
 def test_db():
     """Test database connection and check document_embeddings table"""
@@ -1188,24 +1219,43 @@ User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
-    query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
+    # Try to get embedding with fallback
+    try:
+        if IFXGPT:
+            query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
+        else:
+            query_embeddingT = encode_text_for_embedding(queryT)
+    except Exception as e:
+        print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
+        query_embeddingT = encode_text_for_embedding(queryT)
+    
     if not LOCAL:
         if IFXGPT:
-            search_text = IFXGPTInference(
-                prompt=create_search_prompt,
-                # system_prompt=system_prompt,
-                # image_bytes_list=image_bytes_list,
-                model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-            )
-            query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
+            try:
+                search_text = IFXGPTInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
+            except Exception as e:
+                print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
         else:
-            search_text = DeepInfraInference(
-                prompt=create_search_prompt,
-                # system_prompt=system_prompt,
-                # image_bytes_list=image_bytes_list,
-                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-            )
-            query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
+            try:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
+            except Exception as e:
+                print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
 
     else :
         search_text = ollama_generate_text(
