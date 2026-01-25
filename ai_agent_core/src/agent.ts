@@ -4784,6 +4784,10 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             // Get full context for better classification
             const aiAnswerText = aiSuggestion.ai_generated_answer || '';
             
+            console.log('🏷️ Starting knowledge group classification...');
+            console.log(`  📝 Question: ${originalQuestion.substring(0, 100)}...`);
+            console.log(`  📝 Answer length: ${aiAnswerText.length || humanAnswer.length} chars`);
+            
             const classificationPrompt = `
 You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY.
 Your job is to classify Q&A into SPECIFIC technical categories.
@@ -4828,13 +4832,70 @@ Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
 `;
 
-            // 🔄 Use Google AI first, fallback to Ollama gemma3:1b for classification
-            console.log('🔍 Calling Google AI for knowledge group classification...');
-            
+            // 🔄 Use IFXGPT first, fallback to Google AI, then Ollama gemma3:1b for classification
             let classificationSucceeded = false;
             
-            // Try Google AI first
+            // ========== Try IFXGPT first ==========
+            console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
             try {
+              const ifxClient = new OpenAI({
+                apiKey: process.env.IFXGPT_API_KEY!,
+                baseURL: process.env.IFXGPT_URL!,
+              });
+              
+              const ifxResponse = await ifxClient.chat.completions.create({
+                model: 'gpt-5.2',
+                messages: [
+                  { role: 'system', content: 'You are a topic classifier. Return only valid JSON.' },
+                  { role: 'user', content: classificationPrompt }
+                ],
+                max_completion_tokens: 100,
+                temperature: 0.2,
+              });
+              
+              const classifyText = ifxResponse.choices[0]?.message?.content || '';
+              console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
+              
+              const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+              if (jsonMatch) {
+                const classification = JSON.parse(jsonMatch[0]);
+                const rawPredictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Raw Knowledge Group from IFXGPT: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                
+                if (rawPredictedGroup) {
+                  const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                  
+                  if (normalizedGroup) {
+                    const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                    if (similarGroup && similarGroup !== normalizedGroup) {
+                      console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                      predictedGroup = similarGroup;
+                    } else {
+                      predictedGroup = normalizedGroup;
+                    }
+                    classificationSucceeded = true;
+                    console.log(`✅ Classification succeeded with IFXGPT: ${predictedGroup}`);
+                  } else {
+                    console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try fallback`);
+                  }
+                }
+              }
+            } catch (ifxError) {
+              console.warn('❌ IFXGPT classification failed:', ifxError);
+              console.warn('  Will try Google AI fallback...');
+            }
+            
+            // ========== Fallback to Google AI ==========
+            if (!classificationSucceeded) {
+              console.log('🔍 Calling Google AI (gemma-3-4b-it) for knowledge group classification (fallback 1)...');
+            
+            // Try Google AI
+            try {
+              console.log('  📤 Sending request to Google AI...');
               const geminiResult = await ai.models.generateContent({
                 model: 'gemma-3-4b-it',
                 contents: classificationPrompt,
@@ -4871,6 +4932,7 @@ Return ONLY this JSON format (no markdown, no extra text):
                       predictedGroup = normalizedGroup;
                     }
                     classificationSucceeded = true;
+                    console.log(`✅ Classification succeeded with Google AI: ${predictedGroup}`);
                   } else {
                     console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try re-classification`);
                     // Don't mark as succeeded - will try Ollama fallback
@@ -4878,12 +4940,14 @@ Return ONLY this JSON format (no markdown, no extra text):
                 }
               }
             } catch (googleError) {
-              console.warn('Google AI classification failed, trying Ollama gemma3:1b:', googleError);
+              console.warn('❌ Google AI classification failed:', googleError);
+              console.warn('  Will try Ollama gemma3:1b fallback...');
             }
+            } // Close the "if (!classificationSucceeded)" for Google AI fallback
             
-            // 🔄 FALLBACK to Ollama gemma3:1b if Google AI failed
+            // 🔄 FALLBACK to Ollama gemma3:1b if still not succeeded
             if (!classificationSucceeded) {
-              console.log('🔍 Calling Ollama gemma3:1b for knowledge group classification (fallback)...');
+              console.log('🔍 Calling Ollama gemma3:1b for knowledge group classification (fallback 2)...');
               const classifyResponse = await fetch(process.env.API_OLLAMA!, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
