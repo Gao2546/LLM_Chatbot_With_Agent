@@ -5512,7 +5512,9 @@ ${context}
     if (streaming && socket) {
       // Streaming mode for AI Suggests - Use IFX GPT first, fallback to Ollama
       try {
-        console.log('🤖 Core: Trying IFX GPT (gpt-4o-mini) for streaming...');
+        // Use IFXGPT model from environment or default to gpt-5-mini (IFXGPT's mini model)
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) for streaming...`);
         
         // 🆕 Use IFX GPT instead of Google AI
         const ifxMessages = [
@@ -5521,7 +5523,7 @@ ${context}
         ];
         
         const stream = await ifxClient.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: ifxModel,
           messages: ifxMessages,
           temperature: 0.7,
           max_tokens: 20000,
@@ -5572,7 +5574,9 @@ ${context}
     } else {
       // Non-streaming mode for Q&A Detail - Use IFX GPT first
       try {
-        console.log('🤖 Core: Trying IFX GPT (gpt-4o-mini) non-streaming...');
+        // Use IFXGPT model from environment or default to gpt-5-mini
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) non-streaming...`);
         
         const ifxMessages = [
           { role: 'system' as const, content: systemPrompt },
@@ -5580,7 +5584,7 @@ ${context}
         ];
         
         const response = await ifxClient.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: ifxModel,
           messages: ifxMessages,
           temperature: 0.7,
           max_tokens: 20000,
@@ -5859,7 +5863,9 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
 
       // ===== 1. Try IFX GPT first =====
       try {
-        console.log(`🤖 [Background] Trying IFX GPT (gpt-4o-mini)...`);
+        // Use IFXGPT model from environment or default to gpt-5-mini
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        console.log(`🤖 [Background] Trying IFX GPT (${ifxModel})...`);
         
         const ifxMessages: any[] = [
           { role: 'system', content: systemPrompt },
@@ -5867,14 +5873,14 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
         ];
 
         const ifxResponse = await ifxClient.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: ifxModel,
           messages: ifxMessages as any,
           stream: false,
           temperature: 0.3,
         });
 
         suggestion = ifxResponse.choices?.[0]?.message?.content || '';
-        modelUsed = 'gpt-4o-mini (IFX)';
+        modelUsed = `${ifxModel} (IFX)`;
         console.log(`🤖 [Background] IFX GPT response length: ${suggestion.length} chars`);
         
       } catch (ifxError) {
