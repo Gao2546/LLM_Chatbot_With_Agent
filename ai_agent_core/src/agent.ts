@@ -1977,43 +1977,73 @@ ${context}
         : `Question: ${newMessage}\n\nGenerate answer:`;
       
       let aiGeneratedAnswer = '';
-      let aiModelUsed = modelToUse || 'gemma-3-4b-it';
+      let aiModelUsed = 'gpt-5.2';
       
-      // Call LLM
+      // Call LLM - Use IFXGPT (gpt-5.2) first, fallback to Gemma
       try {
-        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-        const aiResponse = await ai.models.generateContent({
-          model: aiModelUsed.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
-          contents: fullPrompt
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+        console.log(`🤖 AI Suggests: Trying IFX GPT (${ifxModel})...`);
+        
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const ifxResponse = await ifxClient.chat.completions.create({
+          model: ifxModel,
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_tokens: 4000,
+          stream: false
         });
         
-        if (aiResponse && aiResponse.text) {
-          aiGeneratedAnswer = aiResponse.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-          console.log('✅ AI Suggests: Google AI succeeded');
+        if (ifxResponse?.choices?.[0]?.message?.content) {
+          aiGeneratedAnswer = ifxResponse.choices[0].message.content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          aiModelUsed = ifxModel;
+          console.log('✅ AI Suggests: IFX GPT succeeded');
         }
-      } catch (llmError: any) {
-        console.error('⚠️ AI Suggests: Google AI failed:', llmError.message);
-        // 🔄 FALLBACK to Ollama gemma3:1b
+      } catch (ifxError: any) {
+        console.error('⚠️ AI Suggests: IFX GPT failed:', ifxError.message);
+        
+        // 🔄 FALLBACK 1: Try Google AI (Gemma)
         try {
-          console.log('🔄 AI Suggests: Trying Ollama gemma3:1b as fallback...');
-          const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              model: 'gemma3:1b', 
-              prompt: `${systemPrompt}\n\n${userPrompt}`, 
-              stream: false,
-              options: { temperature: 0.3, num_predict: 2000 }
-            })
+          console.log('🔄 AI Suggests: Trying Google AI as fallback...');
+          const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+          const aiResponse = await ai.models.generateContent({
+            model: modelToUse?.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+            contents: fullPrompt
           });
-          if (ollamaResponse.ok) {
-            const ollamaData = await ollamaResponse.json() as { response: string };
-            aiGeneratedAnswer = (ollamaData.response || '').replace(/\n{3,}/g, '\n\n').trim();
-            aiModelUsed = 'gemma3:1b (Ollama)';
-            console.log('✅ AI Suggests: Ollama gemma3:1b fallback succeeded');
+          
+          if (aiResponse && aiResponse.text) {
+            aiGeneratedAnswer = aiResponse.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            aiModelUsed = 'gemma-3-4b-it (Google)';
+            console.log('✅ AI Suggests: Google AI fallback succeeded');
           }
-        } catch (e) { 
-          console.error('⚠️ AI Suggests: Both Google AI and Ollama gemma3:1b failed');
+        } catch (googleError: any) {
+          console.error('⚠️ AI Suggests: Google AI also failed:', googleError.message);
+          
+          // 🔄 FALLBACK 2: Try Ollama gemma3:1b
+          try {
+            console.log('🔄 AI Suggests: Trying Ollama gemma3:1b as final fallback...');
+            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                model: 'gemma3:1b', 
+                prompt: `${systemPrompt}\n\n${userPrompt}`, 
+                stream: false,
+                options: { temperature: 0.3, num_predict: 2000 }
+              })
+            });
+            if (ollamaResponse.ok) {
+              const ollamaData = await ollamaResponse.json() as { response: string };
+              aiGeneratedAnswer = (ollamaData.response || '').replace(/\n{3,}/g, '\n\n').trim();
+              aiModelUsed = 'gemma3:1b (Ollama)';
+              console.log('✅ AI Suggests: Ollama gemma3:1b fallback succeeded');
+            }
+          } catch (e) { 
+            console.error('❌ AI Suggests: All AI models failed');
+          }
         }
       }
       
@@ -5512,8 +5542,8 @@ ${context}
     if (streaming && socket) {
       // Streaming mode for AI Suggests - Use IFX GPT first, fallback to Ollama
       try {
-        // Use IFXGPT model from environment or default to gpt-5-mini (IFXGPT's mini model)
-        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        // Use IFXGPT model from environment or default to gpt-5.2 (IFXGPT's best model)
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
         console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) for streaming...`);
         
         // 🆕 Use IFX GPT instead of Google AI
@@ -5530,14 +5560,20 @@ ${context}
           stream: true
         });
         
+        let chunkCount = 0;
         for await (const chunk of stream) {
+          chunkCount++;
           const chunkText = chunk.choices[0]?.delta?.content || '';
+          if (chunkCount <= 3) {
+            console.log(`📦 Chunk ${chunkCount}:`, JSON.stringify(chunk.choices[0]?.delta));
+          }
           if (chunkText) {
             aiGeneratedAnswer += chunkText;
             socket.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
           }
         }
         
+        console.log(`📊 Core: Received ${chunkCount} chunks, total chars: ${aiGeneratedAnswer.length}`);
         aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
         console.log('✅ Core: IFX GPT streaming completed');
         
@@ -5574,8 +5610,8 @@ ${context}
     } else {
       // Non-streaming mode for Q&A Detail - Use IFX GPT first
       try {
-        // Use IFXGPT model from environment or default to gpt-5-mini
-        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        // Use IFXGPT model from environment or default to gpt-5.2
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
         console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) non-streaming...`);
         
         const ifxMessages = [
@@ -5863,8 +5899,8 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
 
       // ===== 1. Try IFX GPT first =====
       try {
-        // Use IFXGPT model from environment or default to gpt-5-mini
-        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5-mini';
+        // Use IFXGPT model from environment or default to gpt-5.2
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
         console.log(`🤖 [Background] Trying IFX GPT (${ifxModel})...`);
         
         const ifxMessages: any[] = [
