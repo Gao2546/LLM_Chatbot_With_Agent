@@ -5556,7 +5556,7 @@ ${context}
           model: ifxModel,
           messages: ifxMessages,
           temperature: 0.7,
-          max_tokens: 20000,
+          max_completion_tokens: 20000,
           stream: true
         });
         
@@ -5583,7 +5583,7 @@ ${context}
             model: ifxModel,
             messages: ifxMessages,
             temperature: 0.7,
-            max_tokens: 20000,
+            max_completion_tokens: 20000,
             stream: false
           });
           
@@ -5645,7 +5645,7 @@ ${context}
           model: ifxModel,
           messages: ifxMessages,
           temperature: 0.7,
-          max_tokens: 20000,
+          max_completion_tokens: 20000,
           stream: false
         });
         
