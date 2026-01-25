@@ -603,13 +603,78 @@ async function getExistingKnowledgeGroups(): Promise<string[]> {
  * - Remove extra spaces
  * - Remove special characters
  */
+// Map of group names that should be normalized to a standard name
+// ⚠️ IMPORTANT: Only merge groups that are TRULY the same thing (just different spelling/format)
+// DO NOT merge specific technical topics (pad, die, wafer, defect, etc. must stay separate)
+const GROUP_NORMALIZATION_MAP: Record<string, string> = {
+  // Health related - only merge different spellings of same concept
+  'health and wellness': 'Health & Wellness',
+  'health & wellness': 'Health & Wellness',
+  
+  // IT related - only merge different spellings
+  'it and computer': 'IT & Computer',
+  'it & computer': 'IT & Computer',
+  'information technology': 'IT & Computer',
+  
+  // HR related - only merge different spellings  
+  'hr and training': 'HR & Training',
+  'hr & training': 'HR & Training',
+  'human resources': 'HR & Training',
+  
+  // ⛔ BANNED: General categories - these should NEVER be used
+  // AI must choose a specific category instead
+  'general knowledge': '__BANNED__',
+  'general': '__BANNED__',
+  'miscellaneous': '__BANNED__',
+  'other': '__BANNED__',
+  'others': '__BANNED__',
+  'อื่นๆ': '__BANNED__',
+  'ทั่วไป': '__BANNED__',
+  'ความรู้ทั่วไป': '__BANNED__',
+};
+
 function normalizeGroupName(groupName: string): string {
-  return groupName
+  const normalized = groupName
     .toLowerCase()
     .replace(/\s*&\s*/g, ' and ')  // "Health & Wellness" → "health and wellness"
     .replace(/[^a-z0-9\s]/g, '')    // Remove special chars
     .replace(/\s+/g, ' ')           // Normalize spaces
     .trim();
+  
+  // Check if this matches a known group that should be normalized
+  if (GROUP_NORMALIZATION_MAP[normalized]) {
+    return GROUP_NORMALIZATION_MAP[normalized].toLowerCase().replace(/\s*&\s*/g, ' and ');
+  }
+  
+  return normalized;
+}
+
+/**
+ * Get the standardized group name for display/storage
+ * Returns the properly formatted group name (e.g., "Health & Wellness" not "health and wellness")
+ * If the group is BANNED (like "General Knowledge"), returns null to force re-classification
+ */
+function getStandardGroupName(groupName: string): string | null {
+  const normalized = groupName
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/[^a-z0-9\sก-๙]/g, '')  // Keep Thai characters too
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Check if this is a BANNED category
+  if (GROUP_NORMALIZATION_MAP[normalized] === '__BANNED__') {
+    console.log(`  ⛔ BANNED group detected: "${groupName}" - will require re-classification`);
+    return null; // Force re-classification
+  }
+  
+  // Return the standard name if it exists in the map
+  if (GROUP_NORMALIZATION_MAP[normalized]) {
+    return GROUP_NORMALIZATION_MAP[normalized];
+  }
+  
+  // If not in map, return the original with proper capitalization
+  return groupName;
 }
 
 async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: number = 0.75): Promise<string | null> {
@@ -4516,55 +4581,78 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
 
           let judgeResult: any = null;
           
-          // Use Google Gemma-3-4B for FASTEST LLM Judge (⚡ MAXIMUM SPEED)
+          // 🚀 Use IFXGPT (gpt-5.2) for LLM Judge - PRIMARY
           try {
-            const geminiResult = await ai.models.generateContent({
-              model: 'gemma-3-4b-it',
-              contents: judgePrompt,
-              config: {
-                maxOutputTokens: 1000,
-                temperature: 0.1,
-              },
+            console.log('🔍 LLM Judge: Trying IFXGPT (gpt-5.2)...');
+            const ifxJudgeResponse = await ifxClient.chat.completions.create({
+              model: 'gpt-5.2',
+              messages: [
+                { role: 'system', content: 'You are an expert judge that evaluates AI responses. Always respond with valid JSON only.' },
+                { role: 'user', content: judgePrompt }
+              ],
+              max_completion_tokens: 1000,
+              temperature: 0.1,
             });
             
-            const responseText = geminiResult.text || '';
+            const responseText = ifxJudgeResponse.choices[0]?.message?.content || '';
             
             // Extract JSON from response
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
               judgeResult = JSON.parse(jsonMatch[0]);
-              console.log('✅ LLM Judge (Google AI) succeeded');
+              console.log('✅ LLM Judge (IFXGPT gpt-5.2) succeeded');
             }
-          } catch (llmError) {
-            console.warn('LLM Judge (Google AI) failed, trying Ollama gemma3:1b:', llmError);
+          } catch (ifxJudgeError) {
+            console.warn('LLM Judge (IFXGPT) failed, trying Google AI:', ifxJudgeError);
             
-            // 🔄 FALLBACK to Ollama gemma3:1b for LLM Judge
+            // 🔄 FALLBACK 1: Google AI (gemma-3-4b-it)
             try {
-              const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  model: 'gemma3:1b',
-                  prompt: judgePrompt,
-                  stream: false,
-                  options: { 
-                    temperature: 0.1,
-                    num_predict: 1000
-                  }
-                })
+              const geminiResult = await ai.models.generateContent({
+                model: 'gemma-3-4b-it',
+                contents: judgePrompt,
+                config: {
+                  maxOutputTokens: 1000,
+                  temperature: 0.1,
+                },
               });
               
-              if (ollamaJudgeResponse.ok) {
-                const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
-                const responseText = ollamaData.response || '';
-                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  judgeResult = JSON.parse(jsonMatch[0]);
-                  console.log('✅ LLM Judge (Ollama gemma3:1b) succeeded');
-                }
+              const responseText = geminiResult.text || '';
+              const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                judgeResult = JSON.parse(jsonMatch[0]);
+                console.log('✅ LLM Judge (Google AI) succeeded');
               }
-            } catch (ollamaJudgeError) {
-              console.warn('LLM Judge (Ollama gemma3:1b) also failed:', ollamaJudgeError);
+            } catch (llmError) {
+              console.warn('LLM Judge (Google AI) failed, trying Ollama gemma3:1b:', llmError);
+              
+              // 🔄 FALLBACK 2: Ollama gemma3:1b
+              try {
+                const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'gemma3:1b',
+                    prompt: judgePrompt,
+                    stream: false,
+                    options: { 
+                      temperature: 0.1,
+                      num_predict: 1000
+                    }
+                  })
+                });
+                
+                if (ollamaJudgeResponse.ok) {
+                  const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
+                  const responseText = ollamaData.response || '';
+                  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    judgeResult = JSON.parse(jsonMatch[0]);
+                    console.log('✅ LLM Judge (Ollama gemma3:1b) succeeded');
+                  }
+                }
+              } catch (ollamaJudgeError) {
+                console.warn('LLM Judge (Ollama gemma3:1b) also failed:', ollamaJudgeError);
+              }
             }
           }
           
@@ -4697,7 +4785,8 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             const aiAnswerText = aiSuggestion.ai_generated_answer || '';
             
             const classificationPrompt = `
-Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY.
+Your job is to classify Q&A into SPECIFIC technical categories.
 
 **Question:**
 ${originalQuestion}
@@ -4706,25 +4795,34 @@ ${originalQuestion}
 ${aiAnswerText.substring(0, 600) || humanAnswer.substring(0, 600)}
 
 **Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
-- Die Attach & Bonding
-- Wire Bonding
-- Molding & Encapsulation
-- Testing & Inspection
-- Wafer Processing
-- Equipment Maintenance
-- Quality Control
-- Yield Improvement
-- IT & Computer
-- Safety & Environment
-- HR & Training
-- Finance & Procurement
+- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
+- Die Processing (die attach, die bonding, die cutting, singulation)
+- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
+- Pad & Metallization (bond pad, metal layer, RDL, bump)
+- Defect Analysis (defect types, failure analysis, root cause, SEM)
+- Molding & Encapsulation (mold compound, underfill, encapsulation)
+- Testing & Inspection (electrical test, optical inspection, probe)
+- Equipment Maintenance (machine, tool, PM, breakdown)
+- Quality Control (SPC, CPK, yield, spec)
+- Yield Improvement (yield loss, optimization, improvement)
+- Safety & Environment (EHS, chemical, safety, clean room)
+- IT & Computer (software, network, system, programming)
+- HR & Training (employee, training, HR policy)
+- Finance & Procurement (cost, purchase, vendor, budget)
+- Health & Wellness (health, exercise, mental health, work-life balance)
+
+**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
+- General Knowledge
+- General
+- Miscellaneous
+- Other/Others
+- ทั่วไป/อื่นๆ
 
 **Instructions:**
 1. Read the Q&A and determine which predefined category fits BEST
-2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
-3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
-4. New categories should be at the same level of generality as predefined ones
-5. Do NOT create overly specific categories
+2. If about semiconductor components (pad, die, wafer, wire, mold), use that specific category
+3. ONLY if none fit, create a NEW specific category
+4. NEVER use "General Knowledge" or any banned category
 
 Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
@@ -4760,14 +4858,23 @@ Return ONLY this JSON format (no markdown, no extra text):
                 console.log(`📁 Raw Knowledge Group from Google AI: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
                 
                 if (rawPredictedGroup) {
-                  const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
-                  if (similarGroup && similarGroup !== rawPredictedGroup) {
-                    console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
-                    predictedGroup = similarGroup;
+                  // First normalize the group name (e.g., "General Knowledge" → null for banned)
+                  const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                  
+                  // If normalizedGroup is null, it means the group is BANNED - don't mark as succeeded
+                  if (normalizedGroup) {
+                    const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                    if (similarGroup && similarGroup !== normalizedGroup) {
+                      console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                      predictedGroup = similarGroup;
+                    } else {
+                      predictedGroup = normalizedGroup;
+                    }
+                    classificationSucceeded = true;
                   } else {
-                    predictedGroup = rawPredictedGroup;
+                    console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try re-classification`);
+                    // Don't mark as succeeded - will try Ollama fallback
                   }
-                  classificationSucceeded = true;
                 }
               }
             } catch (googleError) {
@@ -4813,13 +4920,23 @@ Return ONLY this JSON format (no markdown, no extra text):
                     
                     // ========== Similarity Check with Existing Groups ==========
                     if (rawPredictedGroup) {
-                      const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                      // First normalize the group name (e.g., "General Knowledge" → null for banned)
+                      const normalizedGroup = getStandardGroupName(rawPredictedGroup);
                       
-                      if (similarGroup && similarGroup !== rawPredictedGroup) {
-                        console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
-                        predictedGroup = similarGroup;
+                      // If normalizedGroup is null, the group is BANNED - use original with warning
+                      if (normalizedGroup) {
+                        const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                        
+                        if (similarGroup && similarGroup !== normalizedGroup) {
+                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                          predictedGroup = similarGroup;
+                        } else {
+                          predictedGroup = normalizedGroup;
+                        }
                       } else {
-                        predictedGroup = rawPredictedGroup;
+                        // Last resort: use "Unclassified" if even Ollama returns banned category
+                        console.log(`  ⚠️ Ollama also returned banned group "${rawPredictedGroup}", using original question context`);
+                        predictedGroup = 'Unclassified';
                       }
                     }
                     // ========== END Similarity Check ==========
@@ -6878,7 +6995,8 @@ Create an answer from the provided data:
           
           // Use AI to classify the question topic
           const classificationPrompt = `
-Classify this question into one of the predefined categories. If none fit well, create a new category.
+You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY. 
+Your job is to classify questions into SPECIFIC technical categories.
 
 **Question:**
 ${question}
@@ -6886,28 +7004,39 @@ ${question}
 ${questionBody ? `**Question Details:**\n${questionBody.substring(0, 500)}` : ''}
 
 **Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
-- Die Attach & Bonding
-- Wire Bonding
-- Molding & Encapsulation
-- Testing & Inspection
-- Wafer Processing
-- Equipment Maintenance
-- Quality Control
-- Yield Improvement
-- IT & Computer
-- Safety & Environment
-- HR & Training
-- Finance & Procurement
+- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
+- Die Processing (die attach, die bonding, die cutting, singulation)
+- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
+- Pad & Metallization (bond pad, metal layer, RDL, bump)
+- Defect Analysis (defect types, failure analysis, root cause, SEM)
+- Molding & Encapsulation (mold compound, underfill, encapsulation)
+- Testing & Inspection (electrical test, optical inspection, probe)
+- Equipment Maintenance (machine, tool, PM, breakdown)
+- Quality Control (SPC, CPK, yield, spec)
+- Yield Improvement (yield loss, optimization, improvement)
+- Safety & Environment (EHS, chemical, safety, clean room)
+- IT & Computer (software, network, system, programming)
+- HR & Training (employee, training, HR policy)
+- Finance & Procurement (cost, purchase, vendor, budget)
+- Health & Wellness (health, exercise, mental health, work-life balance)
+
+**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
+- General Knowledge
+- General
+- Miscellaneous
+- Other/Others
+- ทั่วไป/อื่นๆ
 
 **Instructions:**
 1. Read the question and determine which predefined category fits BEST
-2. If the question clearly fits a predefined category, use that category EXACTLY as written
-3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
-4. New categories should be at the same level of generality as predefined ones
-5. Do NOT create overly specific categories
+2. If the question is about semiconductor processes, ALWAYS use a specific technical category
+3. If the question relates to a specific component (pad, die, wafer, wire, mold), use that category
+4. ONLY if none of the predefined categories fit, create a NEW specific category
+5. New categories should be SPECIFIC (e.g., "Lead Frame Design" not "Manufacturing")
+6. NEVER use "General Knowledge" or any banned category
 
 Return ONLY this JSON format (no markdown, no extra text):
-{"group": "IT & Computer", "confidence": 0.9}
+{"group": "Category Name", "confidence": 0.9}
 `;
 
           const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
@@ -7048,7 +7177,8 @@ Return ONLY this JSON format (no markdown, no extra text):
               
               try {
                 const classificationPrompt = `
-Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY.
+Your job is to classify Q&A into SPECIFIC technical categories.
 
 **Question:**
 ${originalQuestion}
@@ -7057,25 +7187,34 @@ ${originalQuestion}
 ${humanAnswer.substring(0, 600)}
 
 **Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
-- Die Attach & Bonding
-- Wire Bonding
-- Molding & Encapsulation
-- Testing & Inspection
-- Wafer Processing
-- Equipment Maintenance
-- Quality Control
-- Yield Improvement
-- IT & Computer
-- Safety & Environment
-- HR & Training
-- Finance & Procurement
+- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
+- Die Processing (die attach, die bonding, die cutting, singulation)
+- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
+- Pad & Metallization (bond pad, metal layer, RDL, bump)
+- Defect Analysis (defect types, failure analysis, root cause, SEM)
+- Molding & Encapsulation (mold compound, underfill, encapsulation)
+- Testing & Inspection (electrical test, optical inspection, probe)
+- Equipment Maintenance (machine, tool, PM, breakdown)
+- Quality Control (SPC, CPK, yield, spec)
+- Yield Improvement (yield loss, optimization, improvement)
+- Safety & Environment (EHS, chemical, safety, clean room)
+- IT & Computer (software, network, system, programming)
+- HR & Training (employee, training, HR policy)
+- Finance & Procurement (cost, purchase, vendor, budget)
+- Health & Wellness (health, exercise, mental health, work-life balance)
+
+**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
+- General Knowledge
+- General
+- Miscellaneous
+- Other/Others
+- ทั่วไป/อื่นๆ
 
 **Instructions:**
 1. Read the Q&A and determine which predefined category fits BEST
-2. If the Q&A clearly fits a predefined category, use that category EXACTLY as written
-3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
-4. New categories should be at the same level of generality as predefined ones
-5. Do NOT create overly specific categories
+2. If about semiconductor components (pad, die, wafer, wire, mold), use that specific category
+3. ONLY if none fit, create a NEW specific category
+4. NEVER use "General Knowledge" or any banned category
 
 Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
