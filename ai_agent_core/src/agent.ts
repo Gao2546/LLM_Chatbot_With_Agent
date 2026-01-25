@@ -5496,7 +5496,7 @@ async function generateAISuggestionCore(
 1. **สร้างคำตอบใหม่**: อธิบายอย่างละเอียด ครบถ้วน และเข้าใจง่าย
 2. **ขยายความ**: ใช้ข้อมูลจากฐานความรู้เป็นแหล่งอ้างอิง แล้วอธิบายเพิ่มเติมให้ชัดเจน
 3. **จัดโครงสร้าง**: ใช้หัวข้อย่อย bullet points หรือลำดับเลขเพื่อให้อ่านง่าย
-4. **ความยาว**: ตอบอย่างน้อย 600-1500 คำ ให้ครอบคลุมทุกประเด็นอย่างละเอียด
+4. **ความยาว**: ตอบอย่างน้อย 200-500 คำ ให้ครอบคลุมทุกประเด็น
 5. **ตอบเป็นภาษาไทย**
 
 ⚠️ **ข้อจำกัด:**
@@ -5512,7 +5512,7 @@ ${context}
 1. **Create a NEW detailed answer**: Explain thoroughly, completely, and clearly
 2. **Expand on the data**: Use knowledge base as reference, then elaborate with additional explanations
 3. **Structure well**: Use headings, bullet points, or numbered lists for readability
-4. **Length**: Answer with at least 600-1500 words, covering all aspects comprehensively
+4. **Length**: Answer with at least 200-500 words, covering all aspects
 5. **Answer in English**
 
 ⚠️ **Constraints:**
@@ -5539,8 +5539,8 @@ ${context}
     }
     
     const userPrompt = isThaiQuestion 
-      ? `คำถาม: ${question}\n\nกรุณาสร้างคำตอบใหม่อย่างละเอียดและครบถ้วน (600-1500 คำ) โดยอ้างอิงจากข้อมูลในฐานความรู้ด้านบน อธิบายให้เข้าใจง่าย ใช้หัวข้อย่อยหลายหัวข้อ bullet points และตัวหนาเพื่อไฮไลต์จุดสำคัญ:`
-      : `Question: ${question}\n\nPlease create a comprehensive and detailed NEW answer (600-1500 words) based on the knowledge base data above. Explain clearly with multiple headings, bullet points, and bold text for important concepts:`;
+      ? `คำถาม: ${question}\n\nกรุณาสร้างคำตอบใหม่อย่างละเอียดและครบถ้วน โดยอ้างอิงจากข้อมูลในฐานความรู้ด้านบน อธิบายให้เข้าใจง่าย ใช้หัวข้อย่อยและ bullet points:`
+      : `Question: ${question}\n\nPlease create a comprehensive and detailed NEW answer based on the knowledge base data above. Explain clearly with headings and bullet points:`;
     
     let aiGeneratedAnswer = '';
     
