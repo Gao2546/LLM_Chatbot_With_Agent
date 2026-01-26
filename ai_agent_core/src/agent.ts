@@ -4804,21 +4804,27 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
             let classificationSucceeded = false;
             
             // ========== Try IFXGPT first (use global ifxClient with certificate) ==========
-            console.log('🔍 Calling IFXGPT (gpt-5-mini) for knowledge group classification...');
+            console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
             try {
               // Use global ifxClient (has certificate and proper auth configured)
               const ifxResponse = await ifxClient.chat.completions.create({
-                model: 'gpt-5-mini', // Use smaller/faster model for classification
+                model: 'gpt-5.2', // Use gpt-5.2 (same as LLM Judge) for better classification
                 messages: [
                   { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
                   { role: 'user', content: classificationPrompt }
                 ],
-                max_completion_tokens: 50, // Reduce tokens for faster response
-                // Note: gpt-5-mini does NOT support temperature parameter (only default 1)
+                max_completion_tokens: 150, // Increase tokens for proper JSON response
+                temperature: 0.2, // Add temperature for better response
               });
               
               const classifyText = ifxResponse.choices[0]?.message?.content || '';
               console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
+              
+              // Check for empty response and trigger fallback
+              if (!classifyText.trim()) {
+                console.warn('⚠️ IFXGPT returned empty response, will try fallback...');
+                throw new Error('Empty response from IFXGPT');
+              }
               
               const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
@@ -4847,6 +4853,8 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
                     console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try fallback`);
                   }
                 }
+              } else {
+                console.warn('⚠️ IFXGPT response does not contain valid JSON, will try fallback...');
               }
             } catch (ifxError) {
               console.warn('❌ IFXGPT classification failed:', ifxError);
