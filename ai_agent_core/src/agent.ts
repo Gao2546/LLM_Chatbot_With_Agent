@@ -4788,49 +4788,17 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             console.log(`  📝 Question: ${originalQuestion.substring(0, 100)}...`);
             console.log(`  📝 Answer length: ${aiAnswerText.length || humanAnswer.length} chars`);
             
-            const classificationPrompt = `
-You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY.
-Your job is to classify Q&A into SPECIFIC technical categories.
+            // Shorter prompt for faster classification
+            const classificationPrompt = `Classify this Q&A into ONE category.
 
-**Question:**
-${originalQuestion}
+Q: ${originalQuestion.substring(0, 200)}
+A: ${(aiAnswerText || humanAnswer).substring(0, 200)}
 
-**Answer:**
-${aiAnswerText.substring(0, 600) || humanAnswer.substring(0, 600)}
+Categories: Wafer Processing, Die Processing, Wire Bonding, Pad & Metallization, Defect Analysis, Molding & Encapsulation, Testing & Inspection, Equipment Maintenance, Quality Control, Yield Improvement, Safety & Environment, IT & Computer, HR & Training, Finance & Procurement, Health & Wellness
 
-**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
-- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
-- Die Processing (die attach, die bonding, die cutting, singulation)
-- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
-- Pad & Metallization (bond pad, metal layer, RDL, bump)
-- Defect Analysis (defect types, failure analysis, root cause, SEM)
-- Molding & Encapsulation (mold compound, underfill, encapsulation)
-- Testing & Inspection (electrical test, optical inspection, probe)
-- Equipment Maintenance (machine, tool, PM, breakdown)
-- Quality Control (SPC, CPK, yield, spec)
-- Yield Improvement (yield loss, optimization, improvement)
-- Safety & Environment (EHS, chemical, safety, clean room)
-- IT & Computer (software, network, system, programming)
-- HR & Training (employee, training, HR policy)
-- Finance & Procurement (cost, purchase, vendor, budget)
-- Health & Wellness (health, exercise, mental health, work-life balance)
+DO NOT use: General, Other, Miscellaneous
 
-**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
-- General Knowledge
-- General
-- Miscellaneous
-- Other/Others
-- ทั่วไป/อื่นๆ
-
-**Instructions:**
-1. Read the Q&A and determine which predefined category fits BEST
-2. If about semiconductor components (pad, die, wafer, wire, mold), use that specific category
-3. ONLY if none fit, create a NEW specific category
-4. NEVER use "General Knowledge" or any banned category
-
-Return ONLY this JSON format (no markdown, no extra text):
-{"group": "Wire Bonding", "confidence": 0.9}
-`;
+Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
 
             // 🔄 Use IFXGPT first, fallback to Google AI, then Ollama gemma3:1b for classification
             let classificationSucceeded = false;
@@ -4841,7 +4809,7 @@ Return ONLY this JSON format (no markdown, no extra text):
               const ifxClient = new OpenAI({
                 apiKey: process.env.IFXGPT_API_KEY!,
                 baseURL: process.env.IFXGPT_URL!,
-                timeout: 60000, // 60 seconds timeout for classification
+                timeout: 90000, // 90 seconds timeout for classification
               });
               
               const ifxResponse = await ifxClient.chat.completions.create({
