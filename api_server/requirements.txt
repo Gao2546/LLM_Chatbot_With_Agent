@@ -45,6 +45,7 @@ Flask
 requests
 python-dotenv
 httpx
+gunicorn
 
 # Database & Storage
 psycopg2-binary
