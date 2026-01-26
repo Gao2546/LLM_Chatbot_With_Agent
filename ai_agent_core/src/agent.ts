@@ -4814,7 +4814,7 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
                   { role: 'user', content: classificationPrompt }
                 ],
                 max_completion_tokens: 50, // Reduce tokens for faster response
-                temperature: 0.1,
+                // Note: gpt-5-mini does NOT support temperature parameter (only default 1)
               });
               
               const classifyText = ifxResponse.choices[0]?.message?.content || '';
