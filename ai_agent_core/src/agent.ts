@@ -4803,23 +4803,18 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
             // 🔄 Use IFXGPT first, fallback to Google AI, then Ollama gemma3:1b for classification
             let classificationSucceeded = false;
             
-            // ========== Try IFXGPT first ==========
-            console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
+            // ========== Try IFXGPT first (use global ifxClient with certificate) ==========
+            console.log('🔍 Calling IFXGPT (gpt-5-mini) for knowledge group classification...');
             try {
-              const ifxClient = new OpenAI({
-                apiKey: process.env.IFXGPT_API_KEY!,
-                baseURL: process.env.IFXGPT_URL!,
-                timeout: 90000, // 90 seconds timeout for classification
-              });
-              
+              // Use global ifxClient (has certificate and proper auth configured)
               const ifxResponse = await ifxClient.chat.completions.create({
-                model: 'gpt-5.2',
+                model: 'gpt-5-mini', // Use smaller/faster model for classification
                 messages: [
-                  { role: 'system', content: 'You are a topic classifier. Return only valid JSON.' },
+                  { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
                   { role: 'user', content: classificationPrompt }
                 ],
-                max_completion_tokens: 100,
-                temperature: 0.2,
+                max_completion_tokens: 50, // Reduce tokens for faster response
+                temperature: 0.1,
               });
               
               const classifyText = ifxResponse.choices[0]?.message?.content || '';
