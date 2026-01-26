@@ -4841,6 +4841,7 @@ Return ONLY this JSON format (no markdown, no extra text):
               const ifxClient = new OpenAI({
                 apiKey: process.env.IFXGPT_API_KEY!,
                 baseURL: process.env.IFXGPT_URL!,
+                timeout: 60000, // 60 seconds timeout for classification
               });
               
               const ifxResponse = await ifxClient.chat.completions.create({
