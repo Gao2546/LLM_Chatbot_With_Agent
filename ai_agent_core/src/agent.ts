@@ -254,8 +254,9 @@ const ifxCertPath = process.env.IFXGPT_CERT_PATH || "ca-bundle.crt";
 const ifxBaseUrl =
   process.env.IFXGPT_BASE_URL || "https://gpt4ifx.icp.infineon.com";
 
+// Create HTTPS agent with certificate (required for company security)
 const httpsAgent = new https.Agent({
-  ca: fs.readFileSync(ifxCertPath),
+  ca: fs.existsSync(ifxCertPath) ? fs.readFileSync(ifxCertPath) : undefined,
 });
 
 const ifxClient = new OpenAI({
@@ -270,6 +271,19 @@ const ifxClient = new OpenAI({
     Authorization: authHeader,
   },
 } as any);
+
+// Check if IFXGPT is properly configured
+const ifxClientAvailable = fs.existsSync(ifxCertPath) && (!!bearerToken || !!(windowUser && windowPassword));
+if (ifxClientAvailable) {
+  console.log('✅ IFXGPT client initialized successfully');
+  console.log(`  Certificate: ${ifxCertPath}`);
+  console.log(`  Auth: ${basicAuth ? 'Basic Auth' : 'Bearer Token'}`);
+} else {
+  console.warn('⚠️ IFXGPT may not work properly:');
+  console.warn(`  Certificate path: ${ifxCertPath} (exists: ${fs.existsSync(ifxCertPath)})`);
+  console.warn(`  Has bearer token: ${!!bearerToken}`);
+  console.warn(`  Has basic auth: ${!!(windowUser && windowPassword)}`);
+}
 
 
 export async function IFXGPTInference(
@@ -4804,15 +4818,16 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
             let classificationSucceeded = false;
             
             // ========== Try IFXGPT first (use global ifxClient with certificate) ==========
-            console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
-            try {
-              // Use global ifxClient (has certificate and proper auth configured)
-              const ifxResponse = await ifxClient.chat.completions.create({
-                model: 'gpt-5.2', // Use gpt-5.2 (same as LLM Judge) for better classification
-                messages: [
-                  { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
-                  { role: 'user', content: classificationPrompt }
-                ],
+            if (ifxClientAvailable && ifxClient) {
+              console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
+              try {
+                // Use global ifxClient (has certificate and proper auth configured)
+                const ifxResponse = await ifxClient.chat.completions.create({
+                  model: 'gpt-5.2', // Use gpt-5.2 (same as LLM Judge) for better classification
+                  messages: [
+                    { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
+                    { role: 'user', content: classificationPrompt }
+                  ],
                 max_completion_tokens: 150, // Increase tokens for proper JSON response
                 temperature: 0.2, // Add temperature for better response
               });
@@ -4856,9 +4871,12 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
               } else {
                 console.warn('⚠️ IFXGPT response does not contain valid JSON, will try fallback...');
               }
-            } catch (ifxError) {
-              console.warn('❌ IFXGPT classification failed:', ifxError);
-              console.warn('  Will try Google AI fallback...');
+              } catch (ifxError) {
+                console.warn('❌ IFXGPT classification failed:', ifxError);
+                console.warn('  Will try Google AI fallback...');
+              }
+            } else {
+              console.log('⚠️ IFXGPT not available, skipping to Google AI fallback...');
             }
             
             // ========== Fallback to Google AI ==========
@@ -7208,6 +7226,7 @@ Return ONLY this JSON format (no markdown, no extra text):
               const aiAnswer = aiSuggestion.ai_generated_answer || '';
               
               // ========== AI Knowledge Group Classification for Self-Verified ==========
+              // Uses same fallback chain as regular questions: IFXGPT → Google AI → Ollama
               let predictedGroup: string | null = null;
               let groupConfidence: number | null = null;
               
@@ -7256,63 +7275,185 @@ Return ONLY this JSON format (no markdown, no extra text):
 {"group": "Wire Bonding", "confidence": 0.9}
 `;
 
-                const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
-                console.log('🔍 Calling Ollama for knowledge group classification (self-verified)...');
-                console.log('🔍 Ollama URL:', ollamaUrl);
+                console.log('🏷️ Starting knowledge group classification (self-verified)...');
                 console.log('🔍 Question:', originalQuestion.substring(0, 100));
                 
-                const classifyResponse = await fetch(ollamaUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    model: 'llama3:latest',
-                    prompt: classificationPrompt,
-                    stream: false,
-                    options: { 
+                let classificationSucceeded = false;
+                
+                // ========== Try IFXGPT first (gpt-5.2) ==========
+                if (ifxClientAvailable) {
+                  console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification (self-verified)...');
+                  try {
+                    const ifxResponse = await ifxClient.chat.completions.create({
+                      model: 'gpt-5.2',
+                      messages: [
+                        { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
+                        { role: 'user', content: classificationPrompt }
+                      ],
+                      max_completion_tokens: 150,
                       temperature: 0.2,
-                      num_predict: 100
+                    });
+                  
+                    const classifyText = ifxResponse.choices[0]?.message?.content || '';
+                    console.log('🔍 IFXGPT classification response (self-verified):', classifyText.substring(0, 200));
+                  
+                    if (!classifyText.trim()) {
+                      console.warn('⚠️ IFXGPT returned empty response, will try fallback...');
+                      throw new Error('Empty response from IFXGPT');
                     }
-                  })
-                });
-                
-                console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
-                
-                if (classifyResponse.ok) {
-                  const classifyData = await classifyResponse.json() as { response?: string };
-                  const classifyText = classifyData.response || '';
                   
-                  console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
-                  
-                  const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
-                  if (jsonMatch) {
-                    try {
+                    const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                    if (jsonMatch) {
+                      const classification = JSON.parse(jsonMatch[0]);
+                      const rawPredictedGroup = classification.group || null;
+                      groupConfidence = typeof classification.confidence === 'number' 
+                        ? Math.min(1, Math.max(0, classification.confidence)) 
+                        : null;
+                    
+                      console.log(`📁 Raw Knowledge Group from IFXGPT (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                    
+                      if (rawPredictedGroup) {
+                      const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                      
+                      if (normalizedGroup) {
+                        const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                        if (similarGroup && similarGroup !== normalizedGroup) {
+                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                          predictedGroup = similarGroup;
+                        } else {
+                          predictedGroup = normalizedGroup;
+                        }
+                        classificationSucceeded = true;
+                        console.log(`✅ Classification succeeded with IFXGPT (self-verified): ${predictedGroup}`);
+                      } else {
+                        console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try fallback`);
+                      }
+                    }
+                    } else {
+                      console.warn('⚠️ IFXGPT response does not contain valid JSON, will try fallback...');
+                    }
+                  } catch (ifxError) {
+                    console.warn('❌ IFXGPT classification failed (self-verified):', ifxError);
+                    console.warn('  Will try Google AI fallback...');
+                  }
+                } else {
+                  console.log('⚠️ IFXGPT not available (self-verified), skipping to Google AI fallback...');
+                }
+                
+                // ========== Fallback to Google AI ==========
+                if (!classificationSucceeded) {
+                  console.log('🔍 Calling Google AI (gemma-3-4b-it) for knowledge group classification (self-verified, fallback 1)...');
+                  try {
+                    const geminiResult = await ai.models.generateContent({
+                      model: 'gemma-3-4b-it',
+                      contents: classificationPrompt,
+                      config: {
+                        maxOutputTokens: 100,
+                        temperature: 0.2,
+                      },
+                    });
+                    
+                    const classifyText = geminiResult.text || '';
+                    console.log('🔍 Google AI classification response (self-verified):', classifyText.substring(0, 200));
+                    
+                    const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                    if (jsonMatch) {
                       const classification = JSON.parse(jsonMatch[0]);
                       const rawPredictedGroup = classification.group || null;
                       groupConfidence = typeof classification.confidence === 'number' 
                         ? Math.min(1, Math.max(0, classification.confidence)) 
                         : null;
                       
-                      console.log(`📁 Raw Knowledge Group (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                      console.log(`📁 Raw Knowledge Group from Google AI (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
                       
-                      // ========== Similarity Check with Existing Groups ==========
                       if (rawPredictedGroup) {
-                        const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                        const normalizedGroup = getStandardGroupName(rawPredictedGroup);
                         
-                        if (similarGroup && similarGroup !== rawPredictedGroup) {
-                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
-                          predictedGroup = similarGroup;
+                        if (normalizedGroup) {
+                          const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                          if (similarGroup && similarGroup !== normalizedGroup) {
+                            console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                            predictedGroup = similarGroup;
+                          } else {
+                            predictedGroup = normalizedGroup;
+                          }
+                          classificationSucceeded = true;
+                          console.log(`✅ Classification succeeded with Google AI (self-verified): ${predictedGroup}`);
                         } else {
-                          predictedGroup = rawPredictedGroup;
+                          console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try Ollama fallback`);
                         }
                       }
-                      // ========== END Similarity Check ==========
-                      
-                      console.log(`📁 Final Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
-                    } catch (parseErr) {
-                      console.warn('Could not parse classification JSON:', parseErr);
                     }
+                  } catch (googleError) {
+                    console.warn('❌ Google AI classification failed (self-verified):', googleError);
+                    console.warn('  Will try Ollama fallback...');
                   }
                 }
+                
+                // ========== Fallback to Ollama ==========
+                if (!classificationSucceeded) {
+                  const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+                  console.log('🔍 Calling Ollama for knowledge group classification (self-verified, fallback 2)...');
+                  console.log('🔍 Ollama URL:', ollamaUrl);
+                  
+                  try {
+                    const classifyResponse = await fetch(ollamaUrl, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        model: 'gemma3:1b', // Use gemma3:1b like the regular classification
+                        prompt: classificationPrompt,
+                        stream: false,
+                        options: { 
+                          temperature: 0.2,
+                          num_predict: 100
+                        }
+                      })
+                    });
+                    
+                    console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+                    
+                    if (classifyResponse.ok) {
+                      const classifyData = await classifyResponse.json() as { response?: string };
+                      const classifyText = classifyData.response || '';
+                      
+                      console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+                      
+                      const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                      if (jsonMatch) {
+                        const classification = JSON.parse(jsonMatch[0]);
+                        const rawPredictedGroup = classification.group || null;
+                        groupConfidence = typeof classification.confidence === 'number' 
+                          ? Math.min(1, Math.max(0, classification.confidence)) 
+                          : null;
+                        
+                        console.log(`📁 Raw Knowledge Group from Ollama (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                        
+                        if (rawPredictedGroup) {
+                          const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                          
+                          if (normalizedGroup) {
+                            const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                            if (similarGroup && similarGroup !== normalizedGroup) {
+                              console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                              predictedGroup = similarGroup;
+                            } else {
+                              predictedGroup = normalizedGroup;
+                            }
+                            classificationSucceeded = true;
+                          } else {
+                            console.log(`  ⚠️ Ollama also returned banned group "${rawPredictedGroup}", using Unclassified`);
+                            predictedGroup = 'Unclassified';
+                          }
+                        }
+                      }
+                    }
+                  } catch (ollamaError) {
+                    console.warn('❌ Ollama classification failed (self-verified):', ollamaError);
+                  }
+                }
+                
+                console.log(`📁 Final Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
               } catch (classifyError) {
                 console.warn('Knowledge group classification failed (non-critical):', classifyError);
               }
