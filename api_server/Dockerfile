@@ -304,4 +304,4 @@ EXPOSE 5000
 
 # CMD ["python", "model.py"]
 # CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app", "--workers=2", "--threads=4", "--timeout=86400"]
-CMD ["gunicorn", ",model:app", "-b", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "86400", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "300", "--max-requests-jitter", "50"]
+CMD ["gunicorn", "model:app", "-b", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "86400", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "300", "--max-requests-jitter", "50"]

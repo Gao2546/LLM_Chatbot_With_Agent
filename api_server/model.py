@@ -111,6 +111,7 @@ if project_root not in sys.path:
 # from TextToImage.utils.node import *
 # from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
 
+print("App name:", __name__)
 app = Flask(__name__)
 
 def clear_gpu():
