@@ -7034,58 +7034,86 @@ Create an answer from the provided data:
     }
 
     let aiGeneratedAnswer = '';
-    let aiModelUsed = 'gemma-3-4b-it';
+    let aiModelUsed = 'ifx-gpt';
     
-    // Try to call LLM to synthesize answer
+    // 🆕 Try IFX GPT first, then fallback to Google AI, then Ollama
     try {
-      console.log('🤖 Calling Google AI to synthesize answer...');
+      const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+      console.log(`🤖 Trying IFX GPT (${ifxModel}) to synthesize answer...`);
       
-      // Use Google AI API (same as chat uses)
-      const ai = new GoogleGenAI({ apiKey: process.env.Google_API_KEY });
+      const ifxMessages = [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: userPrompt }
+      ];
       
-      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-      
-      const response = await ai.models.generateContent({
-        model: 'gemma-3-4b-it',
-        contents: fullPrompt
+      const response = await ifxClient.chat.completions.create({
+        model: ifxModel,
+        messages: ifxMessages,
+        temperature: 0.7,
+        max_completion_tokens: 20000,
+        stream: false
       });
       
-      if (response && response.text) {
-        aiGeneratedAnswer = response.text
-          .replace(/\r\n/g, '\n')  // Normalize line endings
-          .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
-          .replace(/\n\n\n/g, '\n\n')  // Ensure no triple newlines
+      if (response.choices[0]?.message?.content) {
+        aiGeneratedAnswer = response.choices[0].message.content
+          .replace(/\r\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
           .trim();
-        console.log('✅ Google AI generated answer successfully');
+        aiModelUsed = `ifx-gpt (${ifxModel})`;
+        console.log('✅ IFX GPT generated answer successfully');
       }
-    } catch (llmError) {
-      console.error('⚠️ Google AI call failed:', llmError);
+    } catch (ifxError) {
+      console.error('⚠️ IFX GPT call failed:', ifxError);
       
-      // 🔄 FALLBACK: Try Ollama gemma3:1b
+      // 🔄 FALLBACK 1: Try Google AI
       try {
-        console.log('🔄 Trying Ollama gemma3:1b as fallback...');
-        const llmResponse = await fetch(`${process.env.API_OLLAMA}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gemma3:1b',
-            prompt: `${systemPrompt}\n\n${userPrompt}`,
-            stream: false,
-            options: { temperature: 0.3, num_predict: 2000 }
-          })
+        console.log('🔄 Trying Google AI as fallback...');
+        const ai = new GoogleGenAI({ apiKey: process.env.Google_API_KEY });
+        
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        
+        const response = await ai.models.generateContent({
+          model: 'gemma-3-4b-it',
+          contents: fullPrompt
         });
         
-        if (llmResponse.ok) {
-          const llmData = await llmResponse.json() as { response: string };
-          aiGeneratedAnswer = (llmData.response || '')
+        if (response && response.text) {
+          aiGeneratedAnswer = response.text
             .replace(/\r\n/g, '\n')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
-          aiModelUsed = 'gemma3:1b (Ollama)';
-          console.log('✅ Ollama gemma3:1b generated answer successfully');
+          aiModelUsed = 'gemma-3-4b-it';
+          console.log('✅ Google AI generated answer successfully');
         }
-      } catch (ollamaError) {
-        console.error('⚠️ Ollama gemma3:1b also failed:', ollamaError);
+      } catch (googleError) {
+        console.error('⚠️ Google AI call failed:', googleError);
+        
+        // 🔄 FALLBACK 2: Try Ollama gemma3:1b
+        try {
+          console.log('🔄 Trying Ollama gemma3:1b as fallback...');
+          const llmResponse = await fetch(`${process.env.API_OLLAMA}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: `${systemPrompt}\n\n${userPrompt}`,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 2000 }
+            })
+          });
+          
+          if (llmResponse.ok) {
+            const llmData = await llmResponse.json() as { response: string };
+            aiGeneratedAnswer = (llmData.response || '')
+              .replace(/\r\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            aiModelUsed = 'gemma3:1b (Ollama)';
+            console.log('✅ Ollama gemma3:1b generated answer successfully');
+          }
+        } catch (ollamaError) {
+          console.error('⚠️ Ollama gemma3:1b also failed:', ollamaError);
+        }
       }
     }
     
