@@ -16,6 +16,7 @@ tmp/
 .save
 .env/
 *.png
+!ai_agent_core/public/image.png
 *.jpg
 *.jpeg
 *.xml
