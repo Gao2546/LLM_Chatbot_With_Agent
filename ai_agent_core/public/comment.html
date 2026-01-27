@@ -1073,6 +1073,9 @@
                 .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
                 .trim();
             
+            // 🆕 Convert markdown tables to HTML tables
+            formatted = convertMarkdownTablesToHtml(formatted);
+            
             // Convert markdown-style headers (must be before other formatting)
             formatted = formatted
                 .replace(/^### (.+)$/gm, '<h4>$1</h4>')
@@ -1101,10 +1104,129 @@
             
             // Convert line breaks to <br> (but not before/after block elements)
             formatted = formatted.replace(/\n(?!<)/g, '<br>\n');
-            formatted = formatted.replace(/<br>\n(<ul>|<\/ul>|<li>|<\/li>|<h)/g, '\n$1');
-            formatted = formatted.replace(/(<\/ul>|<\/h\d>)<br>/g, '$1');
+            formatted = formatted.replace(/<br>\n(<ul>|<\/ul>|<li>|<\/li>|<h|<table|<\/table)/g, '\n$1');
+            formatted = formatted.replace(/(<\/ul>|<\/h\d>|<\/table>)<br>/g, '$1');
             
             return formatted;
+        }
+        
+        /**
+         * Convert markdown tables to HTML tables
+         * Handles tables with | separators
+         */
+        function convertMarkdownTablesToHtml(text) {
+            if (!text) return '';
+            
+            const lines = text.split('\n');
+            let result = [];
+            let tableLines = [];
+            let inTable = false;
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Check if line looks like a table row (starts and ends with | or contains |)
+                const isTableRow = line.includes('|') && (
+                    (line.startsWith('|') && line.endsWith('|')) ||
+                    line.match(/^[^|]+\|[^|]+/) // At least one | in the middle
+                );
+                
+                // Check if line is a separator row (contains only |, -, :, and spaces)
+                const isSeparatorRow = /^[\|\-:\s]+$/.test(line) && line.includes('|');
+                
+                if (isTableRow || isSeparatorRow) {
+                    if (!inTable) {
+                        inTable = true;
+                        tableLines = [];
+                    }
+                    tableLines.push(line);
+                } else {
+                    if (inTable && tableLines.length >= 2) {
+                        // Convert collected table lines to HTML
+                        result.push(convertTableLinesToHtml(tableLines));
+                    } else if (inTable) {
+                        // Not enough lines for a table, add as regular text
+                        result.push(...tableLines);
+                    }
+                    inTable = false;
+                    tableLines = [];
+                    result.push(lines[i]); // Keep original line (not trimmed)
+                }
+            }
+            
+            // Handle table at end of text
+            if (inTable && tableLines.length >= 2) {
+                result.push(convertTableLinesToHtml(tableLines));
+            } else if (inTable) {
+                result.push(...tableLines);
+            }
+            
+            return result.join('\n');
+        }
+        
+        /**
+         * Convert array of markdown table lines to HTML table
+         */
+        function convertTableLinesToHtml(lines) {
+            if (lines.length < 2) return lines.join('\n');
+            
+            let html = '<table class="markdown-table">\n';
+            let isHeader = true;
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Skip separator rows (|---|---|)
+                if (/^[\|\-:\s]+$/.test(line)) {
+                    isHeader = false;
+                    continue;
+                }
+                
+                // Parse cells
+                let cells = line.split('|')
+                    .map(cell => cell.trim())
+                    .filter((cell, idx, arr) => {
+                        // Remove empty cells at start/end from leading/trailing |
+                        if (idx === 0 && cell === '') return false;
+                        if (idx === arr.length - 1 && cell === '') return false;
+                        return true;
+                    });
+                
+                if (cells.length === 0) continue;
+                
+                const tag = isHeader ? 'th' : 'td';
+                const rowTag = isHeader ? 'thead' : 'tbody';
+                
+                if (isHeader) {
+                    html += '<thead>\n';
+                } else if (i === 2 || (i > 0 && /^[\|\-:\s]+$/.test(lines[i-1]))) {
+                    html += '<tbody>\n';
+                }
+                
+                html += '<tr>';
+                cells.forEach(cell => {
+                    html += `<${tag}>${cell}</${tag}>`;
+                });
+                html += '</tr>\n';
+                
+                if (isHeader) {
+                    html += '</thead>\n';
+                    isHeader = false;
+                }
+            }
+            
+            // Close tbody if we have data rows
+            if (!lines.every(line => /^[\|\-:\s]+$/.test(line.trim()))) {
+                const hasDataRows = lines.some((line, idx) => 
+                    idx > 0 && !/^[\|\-:\s]+$/.test(line.trim())
+                );
+                if (hasDataRows) {
+                    html += '</tbody>\n';
+                }
+            }
+            
+            html += '</table>';
+            return html;
         }
 
         /**

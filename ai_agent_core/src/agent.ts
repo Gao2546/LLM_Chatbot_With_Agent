@@ -7899,13 +7899,17 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
       getKnowledgeGroupAnalytics(),
       getConfidenceDistribution(),
       // Get direct counts from ai_suggestions table
+      // 🔄 FIXED: Only count pending for questions that are NOT yet fully verified
       pool.query(`
         SELECT 
           COUNT(*) as total,
-          COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count,
-          COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
-          COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count
-        FROM ai_suggestions
+          COUNT(CASE WHEN ais.decision = 'pending' 
+                AND (va.verification_type IS NULL OR va.verification_type = 'request') 
+                THEN 1 END) as pending_count,
+          COUNT(CASE WHEN ais.decision = 'accepted' THEN 1 END) as accepted_count,
+          COUNT(CASE WHEN ais.decision = 'rejected' THEN 1 END) as rejected_count
+        FROM ai_suggestions ais
+        LEFT JOIN verified_answers va ON ais.verified_answer_id = va.id
       `)
     ]);
 

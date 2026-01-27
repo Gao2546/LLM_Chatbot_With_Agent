@@ -485,6 +485,84 @@ body[data-theme="dark"] .ai-sources i {
     font-size: 15px;
 }
 
+/* Markdown Table Styles */
+.ai-answer-text .markdown-table,
+.markdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.markdown-table thead {
+    background: linear-gradient(135deg, #017374, #0a8276);
+}
+
+.markdown-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #fff;
+    border-bottom: 2px solid #015a5a;
+    white-space: nowrap;
+}
+
+.markdown-table tbody tr {
+    border-bottom: 1px solid #e0e0e0;
+    transition: background 0.2s ease;
+}
+
+.markdown-table tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+.markdown-table tbody tr:hover {
+    background: #e8f5f5;
+}
+
+.markdown-table td {
+    padding: 10px 16px;
+    color: #333;
+    vertical-align: top;
+}
+
+.markdown-table td:first-child {
+    font-weight: 500;
+}
+
+/* Dark theme for markdown table */
+[data-theme="dark"] .markdown-table {
+    border-color: #404040;
+}
+
+[data-theme="dark"] .markdown-table thead {
+    background: linear-gradient(135deg, #0a6565, #0d7878);
+}
+
+[data-theme="dark"] .markdown-table th {
+    color: #fff;
+    border-bottom-color: #333;
+}
+
+[data-theme="dark"] .markdown-table tbody tr {
+    border-bottom-color: #404040;
+}
+
+[data-theme="dark"] .markdown-table tbody tr:nth-child(even) {
+    background: #2a2a2a;
+}
+
+[data-theme="dark"] .markdown-table tbody tr:hover {
+    background: #1a3535;
+}
+
+[data-theme="dark"] .markdown-table td {
+    color: #e0e0e0;
+}
+
 .ai-answer-formatted {
     display: flex;
     flex-direction: column;
