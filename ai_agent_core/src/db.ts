@@ -2491,17 +2491,29 @@ async function saveAILearningAnalysis(
 
 /**
  * Get AI performance summary (for dashboard)
+ * 🔧 FIXED: Count only the LATEST decision per verified_answer_id
  */
 async function getAIPerformanceSummary(days: number = 30) {
   try {
+    // Get only the latest AI suggestion per verified_answer_id
     const result = await pool.query(
-      `SELECT 
+      `WITH latest_suggestions AS (
+        SELECT DISTINCT ON (verified_answer_id)
+          verified_answer_id,
+          ai_model_used,
+          decision,
+          created_at
+        FROM ai_suggestions
+        WHERE verified_answer_id IS NOT NULL
+        ORDER BY verified_answer_id, created_at DESC
+      )
+      SELECT 
         ai_model_used,
         COUNT(*) as total_suggestions,
         COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
         COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count,
         COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count
-       FROM ai_suggestions
+       FROM latest_suggestions
        WHERE created_at >= NOW() - INTERVAL '${days} days'
        GROUP BY ai_model_used`
     );

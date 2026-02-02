@@ -1985,14 +1985,53 @@ router.post('/edit-message', async (req, res) => {
         const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
         const totalChars = thaiChars + englishChars;
         if (totalChars === 0) return 'english';
-        return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+        // 🔧 ลดค่า threshold เหลือ 0.1 เพื่อให้ถ้ามีตัวอักษรไทยน้อยมากก็ยังถือว่าเป็น English
+        return (thaiChars / totalChars) > 0.1 ? 'thai' : 'english';
       };
-      const isThaiQuestion = detectLang(newMessage) === 'thai';
+      const questionLanguage = detectLang(newMessage);
+      const isThaiQuestion = questionLanguage === 'thai';
+      console.log(`🌐 AI Suggests (edit-message): Detected language = ${questionLanguage}`);
+      
+      // 🆕 แปลคำถาม English → Thai ก่อน search (cross-lingual support)
+      let searchQuery = newMessage;
+      if (!isThaiQuestion) {
+        console.log(`🌐 AI Suggests (edit-message): Translating English question to Thai for better KB search...`);
+        try {
+          const translateRes = await axios.post(
+            `${process.env.IFXGPT_API_URL || 'https://ifxgpt.intra.infineon.com'}/api/chat/completions`,
+            {
+              model: process.env.IFXGPT_MODEL || 'gpt-5.2',
+              messages: [
+                { role: 'system', content: 'You are a translator. Translate the following English text to Thai. Output ONLY the Thai translation, nothing else.' },
+                { role: 'user', content: newMessage }
+              ],
+              temperature: 0.1,
+              max_tokens: 500
+            },
+            {
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.IFXGPT_API_KEY || ''}`
+              },
+              timeout: 15000
+            }
+          );
+          
+          const translateData = translateRes.data as { choices?: Array<{ message?: { content?: string } }> };
+          const thaiTranslation = translateData.choices?.[0]?.message?.content?.trim();
+          if (thaiTranslation) {
+            searchQuery = thaiTranslation;
+            console.log(`✅ Translated to Thai: "${thaiTranslation.substring(0, 100)}..."`);
+          }
+        } catch (translateError: any) {
+          console.log(`⚠️ Translation failed, using original English: ${translateError.message}`);
+        }
+      }
       
       try {
         const embeddingRes = await axios.post(
           `${API_SERVER_URL}/encode_embedding`,
-          { text: newMessage, dimensions: 2048, is_query: true },  // ← cross-lingual search
+          { text: searchQuery, dimensions: 2048, is_query: true },  // ← ใช้ searchQuery (แปลแล้ว)
           { timeout: 30000 }
         );
         
@@ -2006,8 +2045,8 @@ router.post('/edit-message', async (req, res) => {
         return res.json({ response: errorMsg });
       }
       
-      // Search verified answers with lower threshold for cross-lingual
-      const results = await searchVerifiedAnswers(embedding, 0.3, 5);
+      // 🆕 ใช้ searchVerifiedAnswersHybrid แทน searchVerifiedAnswers
+      const results = await searchVerifiedAnswersHybrid(searchQuery, 0.25, 10);
       
       let context = '';
       let sourcesUsed: any[] = [];
@@ -2015,14 +2054,24 @@ router.post('/edit-message', async (req, res) => {
       
       if (results && results.length > 0) {
         context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
-        results.forEach((result: any, idx: number) => {
-          const similarity = result.similarity ? Math.round(result.similarity * 100) : 0;
+        
+        for (const result of results) {
+          // 🆕 ใช้ confidenceScore จาก hybrid search (threshold >= 55%)
+          const confidenceScore = result.confidenceScore || 0;
+          if (confidenceScore < 0.55) {
+            console.log(`⏭️ AI Suggests (edit-message): Skip Q${result.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%)`);
+            continue;
+          }
+          
+          const similarity = Math.round(confidenceScore * 100);
           context += isThaiQuestion 
-            ? `[คำถาม ${idx + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
-            : `[Question ${idx + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
-          sourcesUsed.push({ type: 'verified_answer', question: result.question, similarity: result.similarity });
+            ? `[คำถาม ${totalSources + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
+            : `[Question ${totalSources + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
+          sourcesUsed.push({ type: 'verified_answer', question: result.question, confidence: confidenceScore });
           totalSources++;
-        });
+          
+          console.log(`✅ AI Suggests (edit-message): Q${result.id} confidence=${similarity}% "${result.question.substring(0, 50)}..."`);
+        }
       }
       
       // Build prompt for LLM
@@ -2033,27 +2082,40 @@ router.post('/edit-message', async (req, res) => {
         systemPrompt = isThaiQuestion
           ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
-กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
+🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
+
+📝 **วิธีการตอบ:**
+- ใช้ข้อมูลจากฐานความรู้เป็นหลัก
+- สรุปให้ชัดเจน กระชับ
+- ห้ามแนะนำคำถามต่อหรือถามกลับ
 
 ========== ข้อมูลจากฐานความรู้ ==========
 ${context}
 ==========================================`
           : `You are an AI Assistant that answers questions using verified knowledge base data.
 
-Rules: Use knowledge base as primary source, summarize clearly, answer in English
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST ANSWER IN ENGLISH ONLY** because the question is in English.
+Even if the knowledge base data below is in Thai or another language, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
+📝 **How to Answer:**
+- Use knowledge base as primary source (translate Thai content to English if needed)
+- Summarize clearly and concisely
+- Do NOT suggest follow-up questions or ask questions back
 
 ========== Knowledge Base Data ==========
 ${context}
 ==========================================`;
       } else {
         systemPrompt = isThaiQuestion
-          ? `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ ตอบตามความรู้ทั่วไปและระบุว่ายังไม่ได้รับการยืนยัน`
-          : `You are an AI Assistant. No data found in knowledge base. Answer based on general knowledge and indicate it has not been verified.`;
+          ? `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ กรุณาแจ้งว่าไม่พบข้อมูล`
+          : `You are an AI Assistant. No data found in knowledge base. Please indicate that no data was found.`;
       }
       
       const userPrompt = isThaiQuestion 
-        ? `คำถาม: ${newMessage}\n\nสร้างคำตอบ:`
-        : `Question: ${newMessage}\n\nGenerate answer:`;
+        ? `คำถาม: ${newMessage}\n\nสร้างคำตอบ (ห้ามแนะนำคำถามต่อ):`
+        : `Question: ${newMessage}\n\nGenerate answer (do NOT suggest follow-up questions):`;
       
       let aiGeneratedAnswer = '';
       let aiModelUsed = 'gpt-5.2';
@@ -4211,6 +4273,19 @@ router.post('/submit-verified-answer', async (req: Request, res: Response) => {
         VALUES ($1, $2, $3, $4, 'self', $5, NOW());
       `, [newQuestion.id, userId, username, 'Self-verified by department', [userDept]]);
       console.log('✅ Self-verification added');
+      
+      // 🤖 Auto-accept for self-verified: Set sum_verified_answer_embedding
+      try {
+        await pool.query(
+          `UPDATE verified_answers 
+           SET sum_verified_answer_embedding = answer_embedding
+           WHERE id = $1 AND answer_embedding IS NOT NULL`,
+          [newQuestion.id]
+        );
+        console.log(`✅ Question ${newQuestion.id} auto-accepted (self-verified) - sum_verified_answer_embedding set`);
+      } catch (acceptError) {
+        console.error('Error auto-accepting self-verified question:', acceptError);
+      }
     } else if (verificationType === 'request') {
       // For request verification, add a record to track the verification request
       await pool.query(`
@@ -5515,8 +5590,73 @@ async function generateAISuggestionCore(
     if (!isCurrentSelfVerified || totalSources === 0) {
       console.log(`🔍 Using HYBRID SEARCH for similar questions...`);
       
-      // 🆕 Use hybrid search instead of pure vector similarity
-      const hybridResults = await searchVerifiedAnswersHybrid(question, 0.25, 10);
+      // 🆕 Cross-language search: If question is English, also search with Thai translation
+      let searchQueries = [question]; // Start with original question
+      
+      // Detect if question is English
+      const thaiCharsInQuestion = (question.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const englishCharsInQuestion = (question.match(/[a-zA-Z]/g) || []).length;
+      const isQuestionEnglish = englishCharsInQuestion > 0 && 
+        (thaiCharsInQuestion / Math.max(1, thaiCharsInQuestion + englishCharsInQuestion)) < 0.1;
+      
+      if (isQuestionEnglish) {
+        console.log(`🌐 Question is in English - will translate to Thai for better KB matching`);
+        
+        // Try to translate question to Thai using LLM
+        try {
+          const translatePrompt = `Translate this English question to Thai. Return ONLY the Thai translation, nothing else:\n\n${question}`;
+          
+          // Use Ollama for quick translation
+          const translateResponse = await fetch(`${process.env.OLLAMA_URL || 'http://localhost:11434'}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: translatePrompt,
+              stream: false,
+              options: { temperature: 0.1, num_predict: 200 }
+            })
+          });
+          
+          if (translateResponse.ok) {
+            const translateData = await translateResponse.json() as { response?: string };
+            const thaiQuestion = translateData.response?.trim();
+            if (thaiQuestion && thaiQuestion.length > 5) {
+              console.log(`🔄 Translated question: "${thaiQuestion.substring(0, 100)}..."`);
+              searchQueries.push(thaiQuestion); // Add Thai translation for search
+            }
+          }
+        } catch (translateError) {
+          console.warn(`⚠️ Translation failed, using original English query only`);
+        }
+      }
+      
+      // Search with all queries and combine results
+      let allHybridResults: any[] = [];
+      const seenIds = new Set<number>();
+      
+      for (const searchQuery of searchQueries) {
+        console.log(`   Searching with: "${searchQuery.substring(0, 80)}..."`);
+        const results = await searchVerifiedAnswersHybrid(searchQuery, 0.25, 10);
+        
+        // Add unique results
+        for (const r of results) {
+          if (!seenIds.has(r.id)) {
+            seenIds.add(r.id);
+            allHybridResults.push(r);
+          }
+        }
+      }
+      
+      // Sort combined results by confidence score
+      allHybridResults.sort((a, b) => b.confidenceScore - a.confidenceScore);
+      const hybridResults = allHybridResults.slice(0, 10); // Limit to top 10
+      
+      // 🔍 DEBUG: Log all results before filtering
+      console.log(`🔍 DEBUG: Found ${allHybridResults.length} total results before filtering:`);
+      for (const r of hybridResults.slice(0, 5)) {
+        console.log(`   - Q${r.id}: ${(r.confidenceScore * 100).toFixed(1)}% "${r.question?.substring(0, 50)}..."`);
+      }
       
       // Filter out current question if provided
       const similarQuestions = questionId 
@@ -5531,9 +5671,9 @@ async function generateAISuggestionCore(
           // Use confidence score from hybrid search (already combines vector + keyword + freshness)
           const confidenceScore = q.confidenceScore || 0;
           
-          // Higher threshold (55%) to ensure better quality sources
-          if (confidenceScore < 0.55) {
-            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 55%`);
+          // 🔧 Lowered threshold to 40% to allow cross-language matching
+          if (confidenceScore < 0.40) {
+            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 40%`);
             continue;
           }
           
@@ -5636,15 +5776,20 @@ async function generateAISuggestionCore(
     console.log(`📚 Core: Total sources = ${totalSources}`);
 
     // 3. Generate AI answer using LLM
+    // 🆕 IMPROVED: Better language detection - prioritize question language
     const detectLanguage = (text: string): 'thai' | 'english' => {
       const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
       const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
       const totalChars = thaiChars + englishChars;
       if (totalChars === 0) return 'english';
-      return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+      // 🔧 ลดค่า threshold เหลือ 0.1 เพื่อให้ถ้ามีตัวอักษรไทยน้อยมากก็ยังถือว่าเป็น English
+      // เช่น คำถาม "What is AI?" ที่อาจมีภาษาไทยปนนิดหน่อยจะถือว่าเป็น English
+      return (thaiChars / totalChars) > 0.1 ? 'thai' : 'english';
     };
     
-    const isThaiQuestion = detectLanguage(question) === 'thai';
+    const questionLanguage = detectLanguage(question);
+    const isThaiQuestion = questionLanguage === 'thai';
+    console.log(`🌐 Detected question language: ${questionLanguage} (Thai chars ratio: ${((question.match(/[\u0E00-\u0E7F]/g) || []).length / Math.max(1, (question.match(/[\u0E00-\u0E7Fa-zA-Z]/g) || []).length) * 100).toFixed(1)}%)`);
     
     // 🔧 FIXED: ตรวจสอบว่ามี verified sources จริงหรือไม่ (รวมทุก type ที่เพิ่มไว้)
     const verifiedSources = sourcesUsed.filter(s => 
@@ -5667,8 +5812,12 @@ async function generateAISuggestionCore(
       // - คงความหมายเดิม แต่ปรับรูปแบบการนำเสนอ
       // - ไม่เปลี่ยนสาระ ไม่เพิ่มข้อมูลใหม่
       if (isCurrentSelfVerified && currentAnswer) {
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for self-verified question`);
+        
         systemPrompt = isThaiQuestion
           ? `คุณคือ AI Editor ที่ทำหน้าที่เรียบเรียงคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้อ่านง่ายขึ้น
+
+🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
 
 🎯 **บทบาทของคุณ: Editor (ไม่ใช่ Author)**
 คำตอบนี้ได้รับการยืนยันความถูกต้องจากผู้ใช้แล้ว คุณไม่ได้เป็นผู้สร้างเนื้อหาใหม่ แต่เป็นผู้ช่วยเรียบเรียงให้ดีขึ้น
@@ -5685,16 +5834,26 @@ async function generateAISuggestionCore(
 - ❌ ห้ามลบข้อมูลสำคัญออก
 - ❌ ห้ามตีความเพิ่มเติมจากความรู้ทั่วไป
 
+🚫 **ห้ามถามกลับหรือแนะนำต่อ:**
+- ❌ ห้ามถามกลับผู้ใช้ เช่น "ต้องการให้อธิบายเพิ่มไหม?"
+- ❌ ห้ามแนะนำหัวข้อหรือคำถามต่อ
+- ตอบให้จบในตัวเอง ไม่ต้องเชื้อเชิญให้ถามต่อ
+
 ========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
 ${currentAnswer}
 ===============================================================`
           : `You are an AI Editor who rephrases and restructures user-verified answers for better readability.
 
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST RESPOND IN ENGLISH ONLY** because the question is in English.
+Even if the verified answer below is in Thai, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
 🎯 **Your Role: Editor (NOT Author)**
 This answer has been verified by the user. You are NOT creating new content, but helping to improve the presentation.
 
 📝 **What you SHOULD do:**
-1. **Rephrase for clarity** - Make it easier to understand
+1. **Rephrase for clarity** - Make it easier to understand (translate to English if needed)
 2. **Structure the content** - Break into bullet points or sections
 3. **Use Markdown** - Use **bold**, bullet points, numbered lists for readability
 4. **Keep 100% original meaning** - Change only "presentation format", not "substance"
@@ -5705,38 +5864,63 @@ This answer has been verified by the user. You are NOT creating new content, but
 - ❌ Do NOT remove important information
 - ❌ Do NOT interpret or add from general knowledge
 
+🚫 **DO NOT ask follow-up or suggest topics:**
+- ❌ Do NOT ask "Would you like me to elaborate?"
+- ❌ Do NOT suggest related topics or questions
+- Answer completely and end definitively. No follow-up suggestions.
+
 ========== User-Verified Answer (by ${currentCreatedBy}) ==========
 ${currentAnswer}
 ===================================================================`;
       } else {
         // ไม่ใช่ self-verified: AI สังเคราะห์จากหลายแหล่ง (เดิม)
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for non-self-verified question`);
+        
         systemPrompt = isThaiQuestion
           ? `คุณคือ AI Assistant ที่ตอบคำถามโดยอ้างอิงจากฐานความรู้ที่ยืนยันแล้ว
+
+🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
 
 📝 **วิธีการตอบ:**
 1. **สรุปประเด็นหลัก**: ตอบตรงคำถาม กระชับ ได้ใจความ
 2. **จัดโครงสร้าง**: ใช้ bullet points หรือลำดับเลข
 3. **ความยาว**: ตอบ 100-200 คำ พอดี ไม่ยาวเกิน
-4. **ตอบเป็นภาษาไทย**
 
 ⚠️ **ข้อจำกัด:**
 - ใช้ข้อมูลจากฐานความรู้เป็นหลัก
 - ถ้าข้อมูลไม่ตรงกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลในฐานความรู้ที่ตรงกับคำถามนี้"
+
+🚫 **ห้ามทำ:**
+- ❌ ห้ามถามกลับผู้ใช้ เช่น "ต้องการให้อธิบายเพิ่มไหม?"
+- ❌ ห้ามแนะนำหัวข้อหรือคำถามต่อ เช่น "หากสนใจเรื่อง..."
+- ❌ ห้ามใช้ประโยคลงท้ายแบบเปิด เช่น "หากมีคำถามเพิ่มเติม..."
+- ตอบให้จบในตัวเอง ไม่ต้องเชื้อเชิญให้ถามต่อ
 
 ========== ข้อมูลอ้างอิงจากฐานความรู้ ==========
 ${context}
 ================================================`
           : `You are an AI Assistant that answers questions based on verified knowledge base data.
 
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST ANSWER IN ENGLISH ONLY** because the question is in English.
+Even if the reference data below is in Thai or another language, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
 📝 **How to Answer:**
 1. **Summarize key points**: Answer directly, concise, to the point
 2. **Structure well**: Use bullet points or numbered lists
 3. **Length**: Answer in 100-200 words, not too long
-4. **Answer in English**
 
 ⚠️ **Constraints:**
-- Use knowledge base data as the primary source
+- Use knowledge base data as the primary source (translate Thai content to English if needed)
 - If data doesn't match the question, respond: "No relevant data found in knowledge base for this question"
+
+🚫 **DO NOT:**
+- ❌ Do NOT ask follow-up questions like "Would you like me to elaborate?"
+- ❌ Do NOT suggest related topics like "You might also be interested in..."
+- ❌ Do NOT end with open invitations like "Feel free to ask if..."
+- ❌ Do NOT offer to explain more or provide additional information
+- Answer completely and end definitively. No follow-up suggestions.
 
 ========== Reference Data from Knowledge Base ==========
 ${context}
@@ -7205,6 +7389,36 @@ Create a comprehensive and detailed answer from the provided data:
 
     console.log(`✅ AI suggestion generated for question ${verifiedAnswerId} with ${totalSources} sources`);
 
+    // 🤖 IMMEDIATE Auto-accept for self-verified questions
+    if (isCurrentSelfVerified && saveResult.suggestionId) {
+      console.log(`✅ Auto-accepting AI suggestion for self-verified question ${verifiedAnswerId}`);
+      try {
+        await updateAISuggestionDecision(
+          saveResult.suggestionId,
+          'accepted',
+          currentAnswer,
+          currentCreatedBy
+        );
+        
+        // Also save learning analysis for tracking
+        await saveAILearningAnalysis(saveResult.suggestionId, {
+          conflictType: 'none',
+          conflictDetails: 'Self-verified question - auto-accepted',
+          severity: undefined,
+          similarityScore: 1.0,
+          keyDifferences: [],
+          suggestedPromptFix: '',
+          suggestedRouting: 'none',
+          errorTags: [],
+          analyzedBy: 'auto-accept'
+        });
+        
+        console.log(`✅ AI suggestion ${saveResult.suggestionId} auto-accepted for self-verified question`);
+      } catch (autoAcceptError) {
+        console.error('Error auto-accepting AI suggestion:', autoAcceptError);
+      }
+    }
+
     // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
     // Auto-reject ONLY when:
     // 1. No knowledge base sources (totalSources === 0)
@@ -7895,7 +8109,7 @@ router.get('/missing-knowledge-topics', async (req: Request, res: Response) => {
  */
 router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
   try {
-    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts] = await Promise.all([
+    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts, allQuestionsCounts] = await Promise.all([
       getKnowledgeGroupAnalytics(),
       getConfidenceDistribution(),
       // Get direct counts from ai_suggestions table
@@ -7910,6 +8124,15 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
           COUNT(CASE WHEN ais.decision = 'rejected' THEN 1 END) as rejected_count
         FROM ai_suggestions ais
         LEFT JOIN verified_answers va ON ais.verified_answer_id = va.id
+      `),
+      // 🆕 NEW: Get total questions count from verified_answers (all questions, not just those with AI suggestions)
+      pool.query(`
+        SELECT 
+          COUNT(*) as total_all_questions,
+          COUNT(CASE WHEN va.id NOT IN (SELECT verified_answer_id FROM ai_suggestions WHERE decision != 'pending') 
+                     AND (va.verification_type IS NULL OR va.verification_type = 'request')
+                THEN 1 END) as pending_verification
+        FROM verified_answers va
       `)
     ]);
 
@@ -7925,14 +8148,20 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
     const totalRejected = parseInt(aiCounts.rejected_count) || 0;
     const totalDecisions = totalRejected + totalAccepted;
     
+    // 🆕 Get actual total questions from verified_answers
+    const allQuestionsCount = allQuestionsCounts.rows[0] || {};
+    const actualTotalQuestions = parseInt(allQuestionsCount.total_all_questions) || 0;
+    const actualPendingVerification = parseInt(allQuestionsCount.pending_verification) || 0;
+    
     res.json({
       success: true,
       data: {
         groupDistribution: groupAnalytics,
         confidenceDistribution,
         summary: {
-          totalQuestions: parseInt(aiCounts.total) || totalQuestions,
-          totalPending,
+          // 🔧 Use actual count from verified_answers instead of ai_suggestions
+          totalQuestions: actualTotalQuestions,
+          totalPending: actualPendingVerification,
           totalRejected,
           totalAccepted,
           rejectionRate: totalDecisions > 0 ? Math.round(100 * totalRejected / totalDecisions) : 0,

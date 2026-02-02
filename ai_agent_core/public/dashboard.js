@@ -201,8 +201,13 @@ async function loadKnowledgeGapHeatmap() {
                 const normalizedTotal = total / maxTotal;
                 
                 // 3️⃣ Calculate Criticality Score
-                // Formula: (Reject % × 0.5) + (Normalized Rejected × 0.3) + (Normalized Total × 0.2)
-                const criticalityScore = (rejectPct * 0.5) + (normalizedRejected * 0.3) + (normalizedTotal * 0.2);
+                // Formula: Score based on rejection rate, only non-zero if there are rejections
+                // If no rejections, score = 0
+                let criticalityScore = 0;
+                if (rejected > 0) {
+                    // (Reject % × 0.5) + (Normalized Rejected × 0.3) + (Normalized Total × 0.2)
+                    criticalityScore = (rejectPct * 0.5) + (normalizedRejected * 0.3) + (normalizedTotal * 0.2);
+                }
                 
                 console.log(`📈 ${item.predicted_group}:`, {
                     rejected,

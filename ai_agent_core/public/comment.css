@@ -563,6 +563,132 @@ body[data-theme="dark"] .ai-sources i {
     color: #e0e0e0;
 }
 
+/* 🆕 Enhanced Markdown Styles */
+.ai-answer-text .md-h2 {
+    font-size: 1.4em;
+    font-weight: 700;
+    color: #017374;
+    margin: 20px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e0f0ef;
+}
+
+.ai-answer-text .md-h3 {
+    font-size: 1.2em;
+    font-weight: 600;
+    color: #0a8276;
+    margin: 16px 0 10px 0;
+}
+
+.ai-answer-text .md-h4 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #066b63;
+    margin: 14px 0 8px 0;
+}
+
+.ai-answer-text .md-title {
+    display: inline-block;
+    color: #0a8276;
+    font-weight: 600;
+    margin-top: 12px;
+}
+
+.ai-answer-text .md-list {
+    margin: 8px 0 16px 0;
+    padding-left: 0;
+    list-style: none;
+}
+
+.ai-answer-text .md-list li {
+    position: relative;
+    padding-left: 24px;
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.ai-answer-text .md-list li::before {
+    content: "•";
+    position: absolute;
+    left: 8px;
+    color: #0a8276;
+    font-weight: bold;
+    font-size: 1.2em;
+}
+
+.ai-answer-text .md-ordered-list {
+    margin: 8px 0 16px 0;
+    padding-left: 0;
+    list-style: none;
+    counter-reset: item;
+}
+
+.ai-answer-text .md-ordered-list li {
+    position: relative;
+    padding-left: 32px;
+    margin-bottom: 8px;
+    line-height: 1.6;
+    counter-increment: item;
+}
+
+.ai-answer-text .md-ordered-list li::before {
+    content: counter(item) ".";
+    position: absolute;
+    left: 8px;
+    color: #0a8276;
+    font-weight: 600;
+}
+
+.ai-answer-text .md-code {
+    background: #f0f4f4;
+    color: #c7254e;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 0.9em;
+}
+
+/* Dark theme for enhanced markdown */
+[data-theme="dark"] .ai-answer-text .md-h2 {
+    color: #4fd1c5;
+    border-bottom-color: #2d4a4a;
+}
+
+[data-theme="dark"] .ai-answer-text .md-h3,
+[data-theme="dark"] .ai-answer-text .md-h4,
+[data-theme="dark"] .ai-answer-text .md-title {
+    color: #4fd1c5;
+}
+
+[data-theme="dark"] .ai-answer-text .md-list li::before,
+[data-theme="dark"] .ai-answer-text .md-ordered-list li::before {
+    color: #4fd1c5;
+}
+
+[data-theme="dark"] .ai-answer-text .md-code {
+    background: #2a2a2a;
+    color: #f08d8d;
+}
+
+/* Enhanced styling for bold and italic text */
+.ai-answer-text strong {
+    color: #0a8276;
+    font-weight: 600;
+}
+
+.ai-answer-text em {
+    font-style: italic;
+    color: #555;
+}
+
+[data-theme="dark"] .ai-answer-text strong {
+    color: #4fd1c5;
+}
+
+[data-theme="dark"] .ai-answer-text em {
+    color: #b0b0b0;
+}
+
 .ai-answer-formatted {
     display: flex;
     flex-direction: column;
