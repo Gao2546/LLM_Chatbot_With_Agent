@@ -1,6 +1,6 @@
 # Stage 1: Build ai_agent_core
-# FROM node:22-bookworm AS builder_app
-FROM node:22-alpine AS builder_app
+# Use RedHat UBI for OpenShift compatibility
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder_app
 WORKDIR /app
 
 COPY package*.json ./
@@ -30,15 +30,15 @@ RUN npm run build
 
 
 # Stage 3: Production image
-FROM node:22-bookworm
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y bash
-
-RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates
+# UBI uses microdnf instead of apt-get
+RUN microdnf update -y && \
+    microdnf install -y bash ca-certificates && \
+    microdnf clean all && \
+    update-ca-trust
 
 # Setup ai_agent_core
 COPY package.json ./
