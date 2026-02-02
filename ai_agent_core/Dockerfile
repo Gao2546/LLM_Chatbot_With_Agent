@@ -1,6 +1,6 @@
 # Stage 1: Build ai_agent_core
-FROM node:22-bookworm AS builder_app
-
+# FROM node:22-bookworm AS builder_app
+FROM node:22-alpine AS builder_app
 WORKDIR /app
 
 COPY package*.json ./
