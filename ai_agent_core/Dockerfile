@@ -1,6 +1,6 @@
 # Stage 1: Build ai_agent_core
 # Use RedHat UBI for OpenShift compatibility
-FROM node:25-bookworm AS builder_app
+FROM node:22-bookworm AS builder_app
 WORKDIR /app
 
 COPY package*.json ./
