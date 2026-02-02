@@ -34,15 +34,12 @@ FROM registry.access.redhat.com/ubi9/nodejs-22:latest
 
 WORKDIR /app
 
-# UBI uses microdnf instead of apt-get
-RUN microdnf update -y && \
-    microdnf install -y bash ca-certificates && \
-    microdnf clean all && \
-    update-ca-trust
+# Copy CA certificate first (UBI already has ca-certificates installed)
+COPY ca-bundle.crt ./
+RUN cp ca-bundle.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust extract || true
 
 # Setup ai_agent_core
 COPY package.json ./
-COPY ca-bundle.crt ./
 COPY --from=builder_app /app/node_modules ./node_modules
 COPY --from=builder_app /app/build ./build
 COPY build/setting.txt ./build/setting.txt
