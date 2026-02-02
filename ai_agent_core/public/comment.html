@@ -1073,10 +1073,19 @@
                 .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
                 .trim();
             
-            // 🆕 Convert inline bullet points to proper format (e.g., "text: * item1 * item2" → newlines)
+            // 🆕 AI Suggests specific formatting improvements
+            // Handle special Thai patterns from AI suggestions
+            formatted = formatted.replace(/ได้แก่\s*:\s*\*\s+/g, 'ได้แก่:\n* ');
+            formatted = formatted.replace(/คือ\s*:\s*\*\s+/g, 'คือ:\n* ');
+            formatted = formatted.replace(/ประกอบด้วย\s*:\s*\*\s+/g, 'ประกอบด้วย:\n* ');
+            
+            // 🔧 IMPROVED: Convert inline bullet points to proper format (e.g., "text: * item1 * item2" → newlines)
             // This handles cases where AI generates inline bullets like "ได้แก่: * **Windows:** เป็น..."
             formatted = formatted.replace(/:\s*\*\s+\*\*/g, ':\n* **');  // Convert ": * **" → ":\n* **"
             formatted = formatted.replace(/([^\n\*])\s+\*\s+\*\*/g, '$1\n* **');  // Convert inline "* **" to newline
+            
+            // Handle patterns like "1. **หัวข้อ**: เนื้อหา" - make headers more prominent
+            formatted = formatted.replace(/^(\d+)\.\s*\*\*([^*]+?)\*\*:\s*(.+)$/gm, '$1. **$2:**\n   $3');
             
             // 🆕 Convert markdown tables to HTML tables
             formatted = convertMarkdownTablesToHtml(formatted);
@@ -1087,44 +1096,87 @@
                 .replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>')
                 .replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
             
-            // 🔧 FIXED: Convert bold text **text** - MUST handle all patterns
-            // Pattern 1: **text:** (title with colon inside)
-            formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong class="md-title">$1:</strong>');
+            // 🔧 IMPROVED: Convert bold text **text** - handle Thai content better
+            // Pattern 1: **text:** (title with colon inside - more prominent styling)
+            formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong class="md-title-colon">$1:</strong>');
             
             // Pattern 2: **text** (general bold - more permissive regex)
-            formatted = formatted.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/\*\*([^*\n]+?)\*\*/g, '<strong class="md-bold">$1</strong>');
             
             // Convert italic with underscore _text_
-            formatted = formatted.replace(/_([^_\n]+?)_/g, '<em>$1</em>');
+            formatted = formatted.replace(/_([^_\n]+?)_/g, '<em class="md-italic">$1</em>');
             
             // Convert single *text* to italic ONLY if not a bullet point
             // Must be surrounded by space or punctuation
-            formatted = formatted.replace(/(\s)\*([^*\n]+?)\*(\s|[,.\-:;!?])/g, '$1<em>$2</em>$3');
+            formatted = formatted.replace(/(\s)\*([^*\n]+?)\*(\s|[,.\-:;!?])/g, '$1<em class="md-italic-single">$2</em>$3');
             
-            // Convert bullet points: lines starting with - or * (with optional leading spaces)
-            formatted = formatted.replace(/^[\s]*[\-\•]\s+(.+)$/gm, '<li>$1</li>');
-            formatted = formatted.replace(/^[\s]*\*\s+(.+)$/gm, '<li>$1</li>');
+            // 🔧 FIXED: Remove underlines from text content
+            formatted = formatted.replace(/<u>(.*?)<\/u>/g, '$1');
+            formatted = formatted.replace(/text-decoration:\s*underline;?/g, '');
+            formatted = formatted.replace(/style="[^"]*text-decoration:\s*underline[^"]*"/g, '');
             
-            // Wrap consecutive <li> in <ul>
-            formatted = formatted.replace(/(<li>[\s\S]*?<\/li>)(\n<li>[\s\S]*?<\/li>)*/g, function(match) {
+            // 🔧 REMOVE: Common AI-generated prefixes to clean up content
+            formatted = formatted.replace(/^Title:\s*/gmi, '');
+            formatted = formatted.replace(/^Introduction:\s*/gmi, '');
+            formatted = formatted.replace(/^Summary:\s*/gmi, '');
+            formatted = formatted.replace(/^Conclusion:\s*/gmi, '');
+            formatted = formatted.replace(/^Overview:\s*/gmi, '');
+            
+            // 🔧 FIXED: Convert bullet points properly - handle underlined headers vs bullet lists
+            // First, protect underlined headers from being converted to bullet points
+            formatted = formatted.replace(/^([^\n]+):\s*$/gm, '<div class="md-section-header">$1:</div>');
+            
+            // 🔧 IMPROVED: Convert numbered lists with better formatting and auto-renumbering
+            // First collect all numbered items and renumber them sequentially
+            const numberedItems = [];
+            let tempFormatted = formatted;
+            
+            // Extract all numbered items
+            tempFormatted = tempFormatted.replace(/^[\s]*(\d+)\.\s+(.+)$/gm, function(match, num, content) {
+                numberedItems.push(content);
+                return `__NUMBERED_ITEM_${numberedItems.length - 1}__`;
+            });
+            
+            // Replace back with sequential numbering
+            for (let i = 0; i < numberedItems.length; i++) {
+                tempFormatted = tempFormatted.replace(`__NUMBERED_ITEM_${i}__`, 
+                    `<li class="md-numbered" data-number="${i + 1}">${numberedItems[i]}</li>`);
+            }
+            
+            formatted = tempFormatted;
+            
+            // Handle different bullet types: -, *, •, ◦ (but NOT if it's part of underlined text or already numbered)
+            formatted = formatted.replace(/^[\s]*[\-\•◦]\s+(.+)$/gm, '<li class="md-bullet">$1</li>');
+            // Handle asterisk bullets but be more careful to avoid conflicts with numbered items
+            formatted = formatted.replace(/^[\s]*\*\s+([^*]+)$/gm, function(match, content) {
+                // Don't convert if it's already a numbered item
+                if (/<li class="md-numbered"/.test(content)) {
+                    return match;
+                }
+                return '<li class="md-bullet">' + content + '</li>';
+            });
+            
+            // Wrap consecutive <li> in <ul> with better formatting
+            formatted = formatted.replace(/(<li class="md-bullet">[\s\S]*?<\/li>)(\n<li class="md-bullet">[\s\S]*?<\/li>)*/g, function(match) {
                 return '<ul class="md-list">' + match.replace(/\n/g, '') + '</ul>';
             });
             
-            // Convert numbered lists
-            formatted = formatted.replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li class="md-numbered">$1</li>');
-            
             // Wrap consecutive numbered <li> in <ol>
-            formatted = formatted.replace(/(<li class="md-numbered">[\s\S]*?<\/li>)(\n<li class="md-numbered">[\s\S]*?<\/li>)*/g, function(match) {
+            formatted = formatted.replace(/(<li class="md-numbered"[\s\S]*?<\/li>)(\n<li class="md-numbered"[\s\S]*?<\/li>)*/g, function(match) {
                 return '<ol class="md-ordered-list">' + match.replace(/\n/g, '') + '</ol>';
             });
             
             // Convert inline code `code`
             formatted = formatted.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
             
+            // 🔧 IMPROVED: Better line break handling for AI content
             // Convert line breaks to <br> (but not before/after block elements)
-            formatted = formatted.replace(/\n(?!<)/g, '<br>\n');
-            formatted = formatted.replace(/<br>\n(<ul>|<\/ul>|<ol>|<\/ol>|<li>|<\/li>|<h|<table|<\/table)/g, '\n$1');
-            formatted = formatted.replace(/(<\/ul>|<\/ol>|<\/h\d>|<\/table>)<br>/g, '$1');
+            formatted = formatted.replace(/\n(?!<)/g, '<br class="md-break">\n');
+            formatted = formatted.replace(/<br class="md-break">\n(<ul>|<\/ul>|<ol>|<\/ol>|<li>|<\/li>|<h|<table|<\/table)/g, '\n$1');
+            formatted = formatted.replace(/(<\/ul>|<\/ol>|<\/h\d>|<\/table>)<br class="md-break">/g, '$1');
+            
+            // Remove excessive <br> tags between list items
+            formatted = formatted.replace(/<\/li><br class="md-break"><li/g, '</li><li');
             
             return formatted;
         }

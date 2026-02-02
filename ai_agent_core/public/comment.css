@@ -326,7 +326,6 @@ body[data-theme="dark"] .ai-sources i {
 
 .attachments-link:hover {
     color: #066b63;
-    text-decoration: underline;
 }
 
 .attachments-link i {
@@ -418,6 +417,7 @@ body[data-theme="dark"] .ai-sources i {
     line-height: 1.7;
     word-wrap: break-word;
     overflow-wrap: break-word;
+    font-weight: 400;
 }
 
 .ai-answer-text p {
@@ -468,8 +468,8 @@ body[data-theme="dark"] .ai-sources i {
 }
 
 .ai-answer-text strong {
-    color: #0a8276;
-    font-weight: 600;
+    color: #333;
+    font-weight: 400;
 }
 
 .ai-answer-text em {
@@ -569,8 +569,6 @@ body[data-theme="dark"] .ai-sources i {
     font-weight: 700;
     color: #017374;
     margin: 20px 0 12px 0;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #e0f0ef;
 }
 
 .ai-answer-text .md-h3 {
@@ -600,44 +598,128 @@ body[data-theme="dark"] .ai-sources i {
     list-style: none;
 }
 
-.ai-answer-text .md-list li {
+.ai-answer-text .md-list .md-bullet {
     position: relative;
     padding-left: 24px;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     line-height: 1.6;
+    color: #333;
 }
 
-.ai-answer-text .md-list li::before {
+.ai-answer-text .md-list .md-bullet:before {
     content: "•";
     position: absolute;
-    left: 8px;
+    left: 0;
+    top: 0;
     color: #0a8276;
     font-weight: bold;
-    font-size: 1.2em;
+    font-size: 16px;
+    line-height: 1.5;
 }
 
 .ai-answer-text .md-ordered-list {
     margin: 8px 0 16px 0;
     padding-left: 0;
     list-style: none;
-    counter-reset: item;
+    counter-reset: md-counter;
 }
 
-.ai-answer-text .md-ordered-list li {
+.ai-answer-text .md-ordered-list .md-numbered {
     position: relative;
     padding-left: 32px;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     line-height: 1.6;
-    counter-increment: item;
+    color: #333;
+    counter-increment: md-counter;
 }
 
-.ai-answer-text .md-ordered-list li::before {
-    content: counter(item) ".";
+.ai-answer-text .md-ordered-list .md-numbered:before {
+    content: counter(md-counter) ".";
     position: absolute;
-    left: 8px;
+    left: 0;
+    top: 0;
+    color: #0a8276;
+    font-weight: 600;
+    min-width: 24px;
+    text-align: left;
+}
+
+/* Enhanced styling for section headers - no underlines */
+.ai-answer-text .md-section-header {
+    display: block;
+    color: #333;
+    font-weight: 700;
+    margin: 16px 0 8px 0;
+    font-size: 1.1em;
+}
+
+.ai-answer-text .md-title-colon {
+    display: inline;
+    color: #0a8276;
+    font-weight: 600;
+    font-size: 1.05em;
+}
+
+.ai-answer-text .md-bold {
     color: #0a8276;
     font-weight: 600;
 }
+
+.ai-answer-text .md-italic,
+.ai-answer-text .md-italic-single {
+    color: #555;
+    font-style: italic;
+}
+
+.ai-answer-text .md-code {
+    background: #f5f7fa;
+    color: #0066cc;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+    font-size: 0.9em;
+    border: 1px solid #e0e6ed;
+}
+
+.ai-answer-text .md-break {
+    margin: 4px 0;
+}
+
+/* Dark theme for enhanced markdown */
+[data-theme="dark"] .ai-answer-text .md-list .md-bullet,
+[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .ai-answer-text .md-list .md-bullet:before,
+[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered:before {
+    color: #4fd1c7;
+}
+
+[data-theme="dark"] .ai-answer-text .md-section-header {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .ai-answer-text .md-title-colon {
+    color: #4fd1c7;
+}
+
+[data-theme="dark"] .ai-answer-text .md-bold {
+    color: #4fd1c7;
+}
+
+[data-theme="dark"] .ai-answer-text .md-italic,
+[data-theme="dark"] .ai-answer-text .md-italic-single {
+    color: #b0b0b0;
+}
+
+[data-theme="dark"] .ai-answer-text .md-code {
+    background: #2a2a2a;
+    color: #66b3ff;
+    border-color: #404040;
+}
+
+/* Remove duplicate CSS - the enhanced styles are defined above */
 
 .ai-answer-text .md-code {
     background: #f0f4f4;
@@ -672,8 +754,8 @@ body[data-theme="dark"] .ai-sources i {
 
 /* Enhanced styling for bold and italic text */
 .ai-answer-text strong {
-    color: #0a8276;
-    font-weight: 600;
+    color: #333;
+    font-weight: 400;
 }
 
 .ai-answer-text em {
@@ -682,7 +764,7 @@ body[data-theme="dark"] .ai-sources i {
 }
 
 [data-theme="dark"] .ai-answer-text strong {
-    color: #4fd1c5;
+    color: #e0e0e0;
 }
 
 [data-theme="dark"] .ai-answer-text em {
@@ -2740,6 +2822,7 @@ body[data-theme="dark"] .ai-sources i {
 /* Fix AI Answer text visibility in dark theme */
 [data-theme="dark"] .ai-answer-text {
     color: #e0e0e0 !important;
+    font-weight: 400;
 }
 
 [data-theme="dark"] .ai-answer-meta {
