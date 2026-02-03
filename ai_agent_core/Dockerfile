@@ -3,6 +3,9 @@
 FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder_app
 WORKDIR /app
 
+RUN ls -la
+RUN mkdir node_modules
+
 COPY package*.json ./
 RUN npm install
 
