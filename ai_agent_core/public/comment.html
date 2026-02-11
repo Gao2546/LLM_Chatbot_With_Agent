@@ -881,11 +881,34 @@
             
             const sourcesCount = filteredAndSorted.length;
 
-            // Format answer - convert newlines to HTML if not already HTML
-            if (!answer.includes('<div') && !answer.includes('<p>') && !answer.includes('<ul>')) {
-                // Convert plain text with newlines to formatted HTML
-                answer = formatPlainTextAnswer(answer);
-            }
+            // Format answer - ALWAYS process through formatPlainTextAnswer for consistent numbering
+            // Strip existing HTML list tags first to reprocess
+            let cleanAnswer = answer
+                .replace(/<ol[^>]*>/gi, '')
+                .replace(/<\/ol>/gi, '\n')
+                .replace(/<ul[^>]*>/gi, '')
+                .replace(/<\/ul>/gi, '\n')
+                .replace(/<li[^>]*data-number="?\d+"?[^>]*>/gi, '')  // Remove li with data-number
+                .replace(/<li[^>]*>/gi, '')
+                .replace(/<\/li>/gi, '\n')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<p[^>]*>/gi, '')
+                .replace(/<\/p>/gi, '\n')
+                .replace(/<div[^>]*>/gi, '')
+                .replace(/<\/div>/gi, '\n')
+                .replace(/<strong[^>]*>/gi, '**')
+                .replace(/<\/strong>/gi, '**')
+                .replace(/&nbsp;/gi, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            
+            // Debug: log the cleaned answer
+            console.log('🔍 AI Answer (cleaned):', cleanAnswer.substring(0, 200));
+            
+            answer = formatPlainTextAnswer(cleanAnswer);
+            
+            // Debug: log after formatting
+            console.log('🔍 AI Answer (formatted):', answer.substring(0, 300));
 
             // Decision badge styling
             let decisionBadge = '';
@@ -1067,116 +1090,116 @@
         function formatPlainTextAnswer(text) {
             if (!text) return '';
             
-            // Clean up excessive whitespace first
+            // Clean up whitespace
             let formatted = text
-                .replace(/\r\n/g, '\n')  // Normalize line endings
-                .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+                .replace(/\r\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
                 .trim();
             
-            // 🆕 AI Suggests specific formatting improvements
-            // Handle special Thai patterns from AI suggestions
-            formatted = formatted.replace(/ได้แก่\s*:\s*\*\s+/g, 'ได้แก่:\n* ');
-            formatted = formatted.replace(/คือ\s*:\s*\*\s+/g, 'คือ:\n* ');
-            formatted = formatted.replace(/ประกอบด้วย\s*:\s*\*\s+/g, 'ประกอบด้วย:\n* ');
-            
-            // 🔧 IMPROVED: Convert inline bullet points to proper format (e.g., "text: * item1 * item2" → newlines)
-            // This handles cases where AI generates inline bullets like "ได้แก่: * **Windows:** เป็น..."
-            formatted = formatted.replace(/:\s*\*\s+\*\*/g, ':\n* **');  // Convert ": * **" → ":\n* **"
-            formatted = formatted.replace(/([^\n\*])\s+\*\s+\*\*/g, '$1\n* **');  // Convert inline "* **" to newline
-            
-            // Handle patterns like "1. **หัวข้อ**: เนื้อหา" - make headers more prominent
-            formatted = formatted.replace(/^(\d+)\.\s*\*\*([^*]+?)\*\*:\s*(.+)$/gm, '$1. **$2:**\n   $3');
-            
-            // 🆕 Convert markdown tables to HTML tables
+            // Convert markdown tables first
             formatted = convertMarkdownTablesToHtml(formatted);
             
-            // Convert markdown-style headers (must be before other formatting)
+            // Convert markdown headers
             formatted = formatted
                 .replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>')
                 .replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>')
                 .replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
             
-            // 🔧 IMPROVED: Convert bold text **text** - handle Thai content better
-            // Pattern 1: **text:** (title with colon inside - more prominent styling)
+            // Convert bold **text:** and **text**
             formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong class="md-title-colon">$1:</strong>');
-            
-            // Pattern 2: **text** (general bold - more permissive regex)
             formatted = formatted.replace(/\*\*([^*\n]+?)\*\*/g, '<strong class="md-bold">$1</strong>');
             
-            // Convert italic with underscore _text_
+            // Convert italic _text_
             formatted = formatted.replace(/_([^_\n]+?)_/g, '<em class="md-italic">$1</em>');
             
-            // Convert single *text* to italic ONLY if not a bullet point
-            // Must be surrounded by space or punctuation
-            formatted = formatted.replace(/(\s)\*([^*\n]+?)\*(\s|[,.\-:;!?])/g, '$1<em class="md-italic-single">$2</em>$3');
-            
-            // 🔧 FIXED: Remove underlines from text content
+            // Remove underlines
             formatted = formatted.replace(/<u>(.*?)<\/u>/g, '$1');
-            formatted = formatted.replace(/text-decoration:\s*underline;?/g, '');
-            formatted = formatted.replace(/style="[^"]*text-decoration:\s*underline[^"]*"/g, '');
             
-            // 🔧 REMOVE: Common AI-generated prefixes to clean up content
-            formatted = formatted.replace(/^Title:\s*/gmi, '');
-            formatted = formatted.replace(/^Introduction:\s*/gmi, '');
-            formatted = formatted.replace(/^Summary:\s*/gmi, '');
-            formatted = formatted.replace(/^Conclusion:\s*/gmi, '');
-            formatted = formatted.replace(/^Overview:\s*/gmi, '');
+            // Words that indicate a conclusion/summary paragraph (should NOT be bullet)
+            const conclusionPatterns = /^(ดังนั้น|สรุป|เพราะฉะนั้น|โดยสรุป|กล่าวคือ|therefore|thus|hence|in summary|in conclusion|to summarize)/i;
             
-            // 🔧 FIXED: Convert bullet points properly - handle underlined headers vs bullet lists
-            // First, protect underlined headers from being converted to bullet points
-            formatted = formatted.replace(/^([^\n]+):\s*$/gm, '<div class="md-section-header">$1:</div>');
+            // Split into lines for processing
+            const lines = formatted.split('\n');
+            const processedLines = [];
+            let globalNumberCounter = 0;
             
-            // 🔧 IMPROVED: Convert numbered lists with better formatting and auto-renumbering
-            // First collect all numbered items and renumber them sequentially
-            const numberedItems = [];
-            let tempFormatted = formatted;
+            console.log('📝 formatPlainTextAnswer - Lines count:', lines.length);
             
-            // Extract all numbered items
-            tempFormatted = tempFormatted.replace(/^[\s]*(\d+)\.\s+(.+)$/gm, function(match, num, content) {
-                numberedItems.push(content);
-                return `__NUMBERED_ITEM_${numberedItems.length - 1}__`;
-            });
-            
-            // Replace back with sequential numbering
-            for (let i = 0; i < numberedItems.length; i++) {
-                tempFormatted = tempFormatted.replace(`__NUMBERED_ITEM_${i}__`, 
-                    `<li class="md-numbered" data-number="${i + 1}">${numberedItems[i]}</li>`);
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (!line) {
+                    processedLines.push('');
+                    continue;
+                }
+                
+                // Check for numbered item: "1. text" or "1.text" (with or without space)
+                const numberedMatch = line.match(/^(\d+)\.\s*(.+)$/);
+                if (numberedMatch) {
+                    globalNumberCounter++;
+                    const content = numberedMatch[2];
+                    console.log(`  📌 Numbered item #${globalNumberCounter}: "${content.substring(0, 50)}..."`);
+                    processedLines.push(`<li class="md-numbered" data-number="${globalNumberCounter}">${content}</li>`);
+                    continue;
+                }
+                
+                // Check for bullet: "* text" or "- text" or "• text"
+                const bulletMatch = line.match(/^[\*\-\•◦]\s+(.+)$/);
+                if (bulletMatch) {
+                    const content = bulletMatch[1];
+                    
+                    // Skip bullet if it's a conclusion/summary line
+                    if (conclusionPatterns.test(content)) {
+                        processedLines.push(`<p class="md-conclusion">${content}</p>`);
+                        continue;
+                    }
+                    
+                    // Skip bullet if line is too long (> 150 chars) - likely a paragraph
+                    if (content.length > 150) {
+                        processedLines.push(`<p class="md-paragraph">${content}</p>`);
+                        continue;
+                    }
+                    
+                    processedLines.push(`<li class="md-bullet">${content}</li>`);
+                    continue;
+                }
+                
+                // Check if line starts with conclusion words (without bullet)
+                if (conclusionPatterns.test(line)) {
+                    processedLines.push(`<p class="md-conclusion">${line}</p>`);
+                    continue;
+                }
+                
+                // Keep other lines as-is
+                processedLines.push(line);
             }
             
-            formatted = tempFormatted;
+            formatted = processedLines.join('\n');
             
-            // Handle different bullet types: -, *, •, ◦ (but NOT if it's part of underlined text or already numbered)
-            formatted = formatted.replace(/^[\s]*[\-\•◦]\s+(.+)$/gm, '<li class="md-bullet">$1</li>');
-            // Handle asterisk bullets but be more careful to avoid conflicts with numbered items
-            formatted = formatted.replace(/^[\s]*\*\s+([^*]+)$/gm, function(match, content) {
-                // Don't convert if it's already a numbered item
-                if (/<li class="md-numbered"/.test(content)) {
-                    return match;
-                }
-                return '<li class="md-bullet">' + content + '</li>';
-            });
-            
-            // Wrap consecutive <li> in <ul> with better formatting
-            formatted = formatted.replace(/(<li class="md-bullet">[\s\S]*?<\/li>)(\n<li class="md-bullet">[\s\S]*?<\/li>)*/g, function(match) {
+            // Wrap consecutive bullets in <ul>
+            formatted = formatted.replace(/(<li class="md-bullet">[^\n]*<\/li>\n?)+/g, function(match) {
                 return '<ul class="md-list">' + match.replace(/\n/g, '') + '</ul>';
             });
             
-            // Wrap consecutive numbered <li> in <ol>
-            formatted = formatted.replace(/(<li class="md-numbered"[\s\S]*?<\/li>)(\n<li class="md-numbered"[\s\S]*?<\/li>)*/g, function(match) {
+            // Wrap consecutive numbered items in <ol>
+            formatted = formatted.replace(/(<li class="md-numbered"[^\n]*<\/li>\n?)+/g, function(match) {
                 return '<ol class="md-ordered-list">' + match.replace(/\n/g, '') + '</ol>';
             });
             
-            // Convert inline code `code`
+            // Convert inline code
             formatted = formatted.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
             
-            // 🔧 IMPROVED: Better line break handling for AI content
-            // Convert line breaks to <br> (but not before/after block elements)
+            // Line break handling
+            formatted = formatted.replace(/(<\/ol>|<\/ul>|<\/p>)(?=\n[^\n<])/g, '$1<br class="md-break">');
             formatted = formatted.replace(/\n(?!<)/g, '<br class="md-break">\n');
-            formatted = formatted.replace(/<br class="md-break">\n(<ul>|<\/ul>|<ol>|<\/ol>|<li>|<\/li>|<h|<table|<\/table)/g, '\n$1');
-            formatted = formatted.replace(/(<\/ul>|<\/ol>|<\/h\d>|<\/table>)<br class="md-break">/g, '$1');
             
-            // Remove excessive <br> tags between list items
+            // Clean up breaks around block elements
+            formatted = formatted.replace(/<br class="md-break">\s*(<ul>|<ol>|<\/ul>|<\/ol>|<li>|<\/li>|<h\d|<p)/g, '$1');
+            formatted = formatted.replace(/(<\/ul>|<\/ol>|<\/h\d>|<\/p>)<br class="md-break">/g, '$1');
             formatted = formatted.replace(/<\/li><br class="md-break"><li/g, '</li><li');
+            
+            // Remove excessive breaks
+            formatted = formatted.replace(/<br class="md-break">(\s*<br class="md-break">)+/g, '<br class="md-break">');
+            formatted = formatted.replace(/^<br class="md-break">/, '');
             
             return formatted;
         }
@@ -1308,9 +1331,22 @@
             if (!aiAnswerContent) return;
 
             let formattedAnswer = fallbackAnswer || 'No AI answer available yet';
-            if (!formattedAnswer.includes('<div') && !formattedAnswer.includes('<p>')) {
-                formattedAnswer = formatPlainTextAnswer(formattedAnswer);
-            }
+            
+            // Strip existing HTML and reprocess for consistent numbering
+            let cleanAnswer = formattedAnswer
+                .replace(/<ol[^>]*>/gi, '')
+                .replace(/<\/ol>/gi, '')
+                .replace(/<ul[^>]*>/gi, '')
+                .replace(/<\/ul>/gi, '')
+                .replace(/<li[^>]*>/gi, '')
+                .replace(/<\/li>/gi, '\n')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<p>/gi, '')
+                .replace(/<\/p>/gi, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            
+            formattedAnswer = formatPlainTextAnswer(cleanAnswer);
 
             aiAnswerContent.innerHTML = `
                 <div class="ai-answer-box">

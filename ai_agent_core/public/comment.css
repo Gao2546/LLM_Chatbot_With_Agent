@@ -592,6 +592,34 @@ body[data-theme="dark"] .ai-sources i {
     margin-top: 12px;
 }
 
+/* Section headers (text ending with :) */
+.ai-answer-text .md-section-header {
+    font-weight: 600;
+    color: #0a8276;
+    margin: 16px 0 8px 0;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+/* Conclusion paragraphs (ดังนั้น, สรุป, etc.) */
+.ai-answer-text .md-conclusion {
+    margin: 16px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border-left: 4px solid #0a8276;
+    border-radius: 0 8px 8px 0;
+    line-height: 1.7;
+    color: #1a1a1a;
+    font-weight: 500;
+}
+
+/* Regular paragraphs (long text without bullet) */
+.ai-answer-text .md-paragraph {
+    margin: 12px 0;
+    line-height: 1.7;
+    color: #333;
+}
+
 .ai-answer-text .md-list {
     margin: 8px 0 16px 0;
     padding-left: 0;
@@ -621,7 +649,6 @@ body[data-theme="dark"] .ai-sources i {
     margin: 8px 0 16px 0;
     padding-left: 0;
     list-style: none;
-    counter-reset: md-counter;
 }
 
 .ai-answer-text .md-ordered-list .md-numbered {
@@ -630,11 +657,10 @@ body[data-theme="dark"] .ai-sources i {
     margin-bottom: 12px;
     line-height: 1.6;
     color: #333;
-    counter-increment: md-counter;
 }
 
 .ai-answer-text .md-ordered-list .md-numbered:before {
-    content: counter(md-counter) ".";
+    content: attr(data-number) ".";
     position: absolute;
     left: 0;
     top: 0;
@@ -642,6 +668,32 @@ body[data-theme="dark"] .ai-sources i {
     font-weight: 600;
     min-width: 24px;
     text-align: left;
+}
+
+/* Sub-list styling within numbered items */
+.ai-answer-text .md-sublist {
+    margin: 8px 0 8px 0;
+    padding-left: 0;
+    list-style: none;
+}
+
+.ai-answer-text .md-sublist .md-bullet {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 8px;
+    line-height: 1.6;
+    color: #333;
+}
+
+.ai-answer-text .md-sublist .md-bullet:before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: #0a8276;
+    font-weight: bold;
+    font-size: 14px;
+    line-height: 1.6;
 }
 
 /* Enhanced styling for section headers - no underlines */
@@ -687,16 +739,32 @@ body[data-theme="dark"] .ai-sources i {
 
 /* Dark theme for enhanced markdown */
 [data-theme="dark"] .ai-answer-text .md-list .md-bullet,
-[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered {
+[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered,
+[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet {
     color: #e0e0e0;
 }
 
 [data-theme="dark"] .ai-answer-text .md-list .md-bullet:before,
-[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered:before {
+[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered:before,
+[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet:before {
     color: #4fd1c7;
 }
 
 [data-theme="dark"] .ai-answer-text .md-section-header {
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .ai-answer-text .md-section-header {
+    color: #4fd1c7;
+}
+
+[data-theme="dark"] .ai-answer-text .md-conclusion {
+    background: linear-gradient(135deg, #1a332a 0%, #1f3d32 100%);
+    border-left-color: #4fd1c7;
+    color: #e0e0e0;
+}
+
+[data-theme="dark"] .ai-answer-text .md-paragraph {
     color: #e0e0e0;
 }
 
