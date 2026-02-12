@@ -7579,19 +7579,7 @@ Create a comprehensive and detailed answer from the provided data:
           currentCreatedBy
         );
         
-        // Also save learning analysis for tracking
-        await saveAILearningAnalysis(saveResult.suggestionId, {
-          conflictType: 'none',
-          conflictDetails: 'Self-verified question - auto-accepted',
-          severity: undefined,
-          similarityScore: 1.0,
-          keyDifferences: [],
-          suggestedPromptFix: '',
-          suggestedRouting: 'none',
-          errorTags: [],
-          analyzedBy: 'auto-accept'
-        });
-        
+        // Note: ai_learning_analysis will be saved later with LLM-judge group classification
         console.log(`✅ AI suggestion ${saveResult.suggestionId} auto-accepted for self-verified question`);
       } catch (autoAcceptError) {
         console.error('Error auto-accepting AI suggestion:', autoAcceptError);
@@ -7776,7 +7764,8 @@ Return ONLY this JSON format (no markdown, no extra text):
             
             // Now run LLM Judge analysis (copy the logic from submit-verification)
             const aiSuggestion = await getAISuggestion(parseInt(verifiedAnswerId));
-            if (aiSuggestion && aiSuggestion.decision === 'pending') {
+            // Note: decision is already 'accepted' from IMMEDIATE auto-accept above, so check both
+            if (aiSuggestion && (aiSuggestion.decision === 'pending' || aiSuggestion.decision === 'accepted')) {
               // Get question data
               const questionResult = await pool.query(
                 `SELECT question, answer FROM verified_answers WHERE id = $1`,
@@ -8021,29 +8010,23 @@ Return ONLY this JSON format (no markdown, no extra text):
               }
               // ========== END AI Knowledge Group Classification ==========
               
-              // Simplified LLM Judge for self-verified (always accept)
-              await updateAISuggestionDecision(
-                aiSuggestion.id,
-                'accepted',
-                humanAnswer,
-                currentCreatedBy
-              );
+              // Decision already set to 'accepted' in IMMEDIATE auto-accept above, no need to update again
               
               await saveAILearningAnalysis(aiSuggestion.id, {
                 conflictType: 'none',
-                conflictDetails: 'Self-verified question - auto-accepted',
+                conflictDetails: 'Self-verified question - accepted with LLM group classification',
                 severity: undefined,
                 similarityScore: 1.0,
                 keyDifferences: [],
                 suggestedPromptFix: '',
                 suggestedRouting: 'none',
                 errorTags: [],
-                analyzedBy: 'auto-accept',
+                analyzedBy: 'llm-judge',
                 predictedGroup: predictedGroup || undefined,
                 groupConfidence: groupConfidence || undefined
               });
               
-              console.log('✅ LLM Judge auto-accept completed for self-verified question');
+              console.log('✅ LLM Judge group classification completed for self-verified question');
             }
           } else {
             console.log('ℹ️ Verification record already exists, skipping');

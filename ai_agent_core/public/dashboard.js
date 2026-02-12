@@ -413,17 +413,17 @@ function renderRetrainingZone(data) {
     
     const acceptedPercent = Math.round((accepted / total) * 100);
     const rejectedPercent = Math.round((rejected / total) * 100);
-    
+    // เปลี่ยนสีแดงเป็นน้ำเงิน RGB (38,123,189)
+    const blueRGB = 'rgb(38,123,189)';
     // Create donut chart using conic-gradient
     const acceptedDeg = (accepted / total) * 360;
-    
     const html = `
         <div class="donut-chart-container">
             <div class="donut-chart-wrapper">
                 <div class="donut-chart" style="
                     background: conic-gradient(
                         #009374 0deg ${acceptedDeg}deg,
-                        #dc3545 ${acceptedDeg}deg 360deg
+                        ${blueRGB} ${acceptedDeg}deg 360deg
                     );
                 ">
                     <div class="donut-center">
@@ -438,13 +438,12 @@ function renderRetrainingZone(data) {
                     <span><strong>Accepted:</strong> ${accepted} (${acceptedPercent}%)</span>
                 </div>
                 <div class="legend-item">
-                    <div class="legend-color" style="background: #dc3545;"></div>
+                    <div class="legend-color" style="background: ${blueRGB};"></div>
                     <span><strong>Rejected:</strong> ${rejected} (${rejectedPercent}%)</span>
                 </div>
             </div>
         </div>
     `;
-    
     container.innerHTML = html;
 }
 
@@ -677,21 +676,20 @@ function renderDepartmentChart(data) {
     // Find max value for scaling
     const maxValue = Math.max(...data.map(d => Math.max(d.requestUsers, d.verifyUsers)));
     const maxHeight = 200; // pixels
-    
+    // สีใหม่สำหรับแท่ง verifications (น้ำเงิน RGB)
+    const blueRGB = 'rgb(38,123,189)';
     // Create chart HTML
     let chartHtml = '<div class="bar-chart-container">';
-    
     data.forEach(item => {
         const requestHeight = maxValue > 0 ? (item.requestUsers / maxValue) * maxHeight : 0;
         const verifyHeight = maxValue > 0 ? (item.verifyUsers / maxValue) * maxHeight : 0;
-        
         chartHtml += `
             <div class="bar-group">
                 <div class="bars-wrapper">
                     <div class="bar bar-accepted" style="height: ${requestHeight}px;" title="Requests: ${item.requestUsers}">
                         ${item.requestUsers > 0 ? `<span class="bar-label">${item.requestUsers}</span>` : ''}
                     </div>
-                    <div class="bar bar-rejected" style="height: ${verifyHeight}px;" title="Verifications: ${item.verifyUsers}">
+                    <div class="bar bar-rejected" style="height: ${verifyHeight}px; background: ${blueRGB};" title="Verifications: ${item.verifyUsers}">
                         ${item.verifyUsers > 0 ? `<span class="bar-label">${item.verifyUsers}</span>` : ''}
                     </div>
                 </div>
@@ -699,9 +697,7 @@ function renderDepartmentChart(data) {
             </div>
         `;
     });
-    
     chartHtml += '</div>';
-    
     // Add legend
     chartHtml += `
         <div class="chart-legend">
@@ -710,11 +706,10 @@ function renderDepartmentChart(data) {
                 <span>Requests</span>
             </div>
             <div class="legend-item">
-                <div class="legend-color legend-rejected"></div>
+                <div class="legend-color legend-rejected" style="background: ${blueRGB};"></div>
                 <span>Verifications</span>
             </div>
         </div>
     `;
-    
     container.innerHTML = chartHtml;
 }
