@@ -772,6 +772,54 @@
         // =====================================================
 
         /**
+         * Strip follow-up questions and suggestions from AI answer text
+         */
+        function stripFollowUpLines(text) {
+            if (!text) return '';
+            const lines = text.split('\n');
+            const filtered = [];
+            let skipRest = false;
+            
+            const followUpPatterns = [
+                /^(do you have any|would you like|feel free to|if you (have|need|want|would)|let me know)/i,
+                /^(is there anything|shall I|want me to|need (more|any|further))/i,
+                /^(you (might|may|can) also|please (let|feel|don't))/i,
+                /^(any (questions|other|further|more)|hope this helps|I hope)/i,
+                /^(if (there are|you'd|this|that)|I('d| would) be happy)/i,
+                /^(หากมี|ถ้ามี|หากต้องการ|ถ้าต้องการ|หากสนใจ|ต้องการ(ให้|ทราบ))/,
+                /^(สามารถ(สอบถาม|ติดต่อ|ถาม)|สอบถามเพิ่มเติม)/,
+                /^(ไม่ลังเล|อย่าลังเล|ยินดี(ช่วย|ตอบ)|หวังว่า)/,
+                /^(มีอะไร(เพิ่มเติม|อื่น)|มีคำถาม(อื่น|เพิ่ม))/,
+            ];
+            const inlinePatterns = [
+                /do you have any (attachments|questions|other)/i,
+                /would you like (me to|to know|more)/i,
+                /feel free to (ask|contact|reach)/i,
+                /หากมีคำถามเพิ่มเติม/,
+                /ต้องการให้อธิบายเพิ่ม/,
+                /สามารถสอบถามเพิ่มเติม/,
+                /หากสนใจเรื่อง/,
+                /อย่าลังเลที่จะ/,
+            ];
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (skipRest) {
+                    if (trimmed === '') continue;
+                    const isFollowUp = followUpPatterns.some(p => p.test(trimmed)) || inlinePatterns.some(p => p.test(trimmed));
+                    if (isFollowUp) continue;
+                    skipRest = false;
+                }
+                const isFollowUp = followUpPatterns.some(p => p.test(trimmed)) || inlinePatterns.some(p => p.test(trimmed));
+                if (isFollowUp) { skipRest = true; continue; }
+                filtered.push(line);
+            }
+            
+            while (filtered.length > 0 && filtered[filtered.length - 1].trim() === '') filtered.pop();
+            return filtered.join('\n').trim();
+        }
+
+        /**
          * Load AI suggestion for the current question
          * @param {number} questionId - The question ID
          * @param {string} fallbackAnswer - The original answer to use as fallback
@@ -901,6 +949,9 @@
                 .replace(/&nbsp;/gi, ' ')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
+            
+            // 🧹 Strip follow-up questions/suggestions from AI answer
+            cleanAnswer = stripFollowUpLines(cleanAnswer);
             
             // Debug: log the cleaned answer
             console.log('🔍 AI Answer (cleaned):', cleanAnswer.substring(0, 200));
@@ -1120,82 +1171,176 @@
             
             // Split into lines for processing
             const lines = formatted.split('\n');
-            const processedLines = [];
-            let globalNumberCounter = 0;
             
             console.log('📝 formatPlainTextAnswer - Lines count:', lines.length);
+            
+            // ===== PASS 1: Parse lines into structured items =====
+            const items = []; // { type: 'numbered'|'bullet'|'text'|'heading'|'conclusion'|'empty', content, number }
+            let globalNumberCounter = 0;
             
             for (let i = 0; i < lines.length; i++) {
                 let line = lines[i].trim();
                 if (!line) {
-                    processedLines.push('');
+                    items.push({ type: 'empty', content: '' });
                     continue;
                 }
                 
-                // Check for numbered item: "1. text" or "1.text" (with or without space)
+                // Skip if line is already an HTML block element
+                if (/^<(h[2-4]|table|thead|tbody|tr)/.test(line)) {
+                    items.push({ type: 'html', content: line });
+                    continue;
+                }
+                
+                // Check for numbered item: "1. text"
                 const numberedMatch = line.match(/^(\d+)\.\s*(.+)$/);
                 if (numberedMatch) {
                     globalNumberCounter++;
-                    const content = numberedMatch[2];
-                    console.log(`  📌 Numbered item #${globalNumberCounter}: "${content.substring(0, 50)}..."`);
-                    processedLines.push(`<li class="md-numbered" data-number="${globalNumberCounter}">${content}</li>`);
+                    items.push({ type: 'numbered', content: numberedMatch[2], number: globalNumberCounter });
                     continue;
                 }
                 
-                // Check for bullet: "* text" or "- text" or "• text"
+                // Check for bullet: "* text" or "- text" or "• text" or "◦ text"
                 const bulletMatch = line.match(/^[\*\-\•◦]\s+(.+)$/);
                 if (bulletMatch) {
                     const content = bulletMatch[1];
                     
                     // Skip bullet if it's a conclusion/summary line
                     if (conclusionPatterns.test(content)) {
-                        processedLines.push(`<p class="md-conclusion">${content}</p>`);
+                        items.push({ type: 'conclusion', content: content });
                         continue;
                     }
                     
-                    // Skip bullet if line is too long (> 150 chars) - likely a paragraph
-                    if (content.length > 150) {
-                        processedLines.push(`<p class="md-paragraph">${content}</p>`);
+                    // Skip bullet if line is too long (> 200 chars) - likely a paragraph
+                    if (content.length > 200) {
+                        items.push({ type: 'text', content: content });
                         continue;
                     }
                     
-                    processedLines.push(`<li class="md-bullet">${content}</li>`);
+                    items.push({ type: 'bullet', content: content });
                     continue;
                 }
                 
-                // Check if line starts with conclusion words (without bullet)
+                // Check if line starts with conclusion words
                 if (conclusionPatterns.test(line)) {
-                    processedLines.push(`<p class="md-conclusion">${line}</p>`);
+                    items.push({ type: 'conclusion', content: line });
                     continue;
                 }
                 
-                // Keep other lines as-is
-                processedLines.push(line);
+                // Regular text
+                items.push({ type: 'text', content: line });
             }
             
-            formatted = processedLines.join('\n');
+            // ===== PASS 2: Group sub-bullets under numbered items =====
+            const structured = []; // nested structure
             
-            // Wrap consecutive bullets in <ul>
-            formatted = formatted.replace(/(<li class="md-bullet">[^\n]*<\/li>\n?)+/g, function(match) {
-                return '<ul class="md-list">' + match.replace(/\n/g, '') + '</ul>';
-            });
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                
+                if (item.type === 'numbered') {
+                    // Collect following bullets as sub-items
+                    const subItems = [];
+                    let j = i + 1;
+                    // Skip empty lines between numbered item and its bullets
+                    while (j < items.length && items[j].type === 'empty') j++;
+                    // Collect consecutive bullets
+                    while (j < items.length && (items[j].type === 'bullet' || items[j].type === 'empty')) {
+                        if (items[j].type === 'bullet') {
+                            subItems.push(items[j].content);
+                        } else if (items[j].type === 'empty') {
+                            // Check if next non-empty is still a bullet
+                            let k = j + 1;
+                            while (k < items.length && items[k].type === 'empty') k++;
+                            if (k < items.length && items[k].type === 'bullet') {
+                                j++;
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                        j++;
+                    }
+                    
+                    structured.push({ type: 'numbered', content: item.content, number: item.number, subItems: subItems });
+                    i = j - 1; // advance main loop
+                } else {
+                    structured.push(item);
+                }
+            }
             
-            // Wrap consecutive numbered items in <ol>
-            formatted = formatted.replace(/(<li class="md-numbered"[^\n]*<\/li>\n?)+/g, function(match) {
-                return '<ol class="md-ordered-list">' + match.replace(/\n/g, '') + '</ol>';
-            });
+            // ===== PASS 3: Build HTML =====
+            const htmlParts = [];
+            let inOrderedList = false;
+            let inBulletList = false;
+            
+            for (let i = 0; i < structured.length; i++) {
+                const item = structured[i];
+                
+                // Close open lists if needed
+                if (item.type !== 'numbered' && inOrderedList) {
+                    htmlParts.push('</ol>');
+                    inOrderedList = false;
+                }
+                if (item.type !== 'bullet' && inBulletList) {
+                    htmlParts.push('</ul>');
+                    inBulletList = false;
+                }
+                
+                switch (item.type) {
+                    case 'numbered':
+                        if (!inOrderedList) {
+                            htmlParts.push('<ol class="md-ordered-list">');
+                            inOrderedList = true;
+                        }
+                        let liContent = `<li class="md-numbered" data-number="${item.number}">${item.content}`;
+                        if (item.subItems && item.subItems.length > 0) {
+                            liContent += '<ul class="md-sublist">';
+                            item.subItems.forEach(sub => {
+                                liContent += `<li class="md-sub-bullet">${sub}</li>`;
+                            });
+                            liContent += '</ul>';
+                        }
+                        liContent += '</li>';
+                        htmlParts.push(liContent);
+                        break;
+                        
+                    case 'bullet':
+                        if (!inBulletList) {
+                            htmlParts.push('<ul class="md-list">');
+                            inBulletList = true;
+                        }
+                        htmlParts.push(`<li class="md-bullet">${item.content}</li>`);
+                        break;
+                        
+                    case 'conclusion':
+                        htmlParts.push(`<p class="md-conclusion">${item.content}</p>`);
+                        break;
+                        
+                    case 'html':
+                        htmlParts.push(item.content);
+                        break;
+                        
+                    case 'empty':
+                        // Only add break if not between block elements
+                        if (htmlParts.length > 0 && i + 1 < structured.length && structured[i + 1].type === 'text') {
+                            htmlParts.push('<br class="md-break">');
+                        }
+                        break;
+                        
+                    case 'text':
+                    default:
+                        htmlParts.push(`<p class="md-paragraph">${item.content}</p>`);
+                        break;
+                }
+            }
+            
+            // Close any remaining open lists
+            if (inOrderedList) htmlParts.push('</ol>');
+            if (inBulletList) htmlParts.push('</ul>');
+            
+            formatted = htmlParts.join('\n');
             
             // Convert inline code
             formatted = formatted.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
-            
-            // Line break handling
-            formatted = formatted.replace(/(<\/ol>|<\/ul>|<\/p>)(?=\n[^\n<])/g, '$1<br class="md-break">');
-            formatted = formatted.replace(/\n(?!<)/g, '<br class="md-break">\n');
-            
-            // Clean up breaks around block elements
-            formatted = formatted.replace(/<br class="md-break">\s*(<ul>|<ol>|<\/ul>|<\/ol>|<li>|<\/li>|<h\d|<p)/g, '$1');
-            formatted = formatted.replace(/(<\/ul>|<\/ol>|<\/h\d>|<\/p>)<br class="md-break">/g, '$1');
-            formatted = formatted.replace(/<\/li><br class="md-break"><li/g, '</li><li');
             
             // Remove excessive breaks
             formatted = formatted.replace(/<br class="md-break">(\s*<br class="md-break">)+/g, '<br class="md-break">');

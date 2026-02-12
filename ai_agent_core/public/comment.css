@@ -414,14 +414,14 @@ body[data-theme="dark"] .ai-sources i {
 .ai-answer-text {
     color: #333;
     font-size: 15px;
-    line-height: 1.7;
+    line-height: 1.6;
     word-wrap: break-word;
     overflow-wrap: break-word;
     font-weight: 400;
 }
 
 .ai-answer-text p {
-    margin: 0 0 16px 0;
+    margin: 0 0 4px 0;
     text-align: justify;
 }
 
@@ -433,8 +433,8 @@ body[data-theme="dark"] .ai-sources i {
     font-size: 18px;
     font-weight: 700;
     color: #0a8276;
-    margin: 20px 0 12px 0;
-    padding-bottom: 6px;
+    margin: 10px 0 2px 0;
+    padding-bottom: 3px;
     border-bottom: 2px solid #e8f5e9;
 }
 
@@ -442,24 +442,24 @@ body[data-theme="dark"] .ai-sources i {
     font-size: 16px;
     font-weight: 600;
     color: #0a8276;
-    margin: 16px 0 10px 0;
+    margin: 8px 0 2px 0;
 }
 
 .ai-answer-text h4 {
     font-size: 14px;
     font-weight: 600;
     color: #066b63;
-    margin: 14px 0 8px 0;
+    margin: 6px 0 2px 0;
 }
 
 .ai-answer-text ul, .ai-answer-text ol {
-    margin: 12px 0 16px 0;
+    margin: 2px 0 6px 0;
     padding-left: 24px;
 }
 
 .ai-answer-text li {
-    margin-bottom: 10px;
-    line-height: 1.6;
+    margin-bottom: 2px;
+    line-height: 1.5;
     padding-left: 4px;
 }
 
@@ -565,24 +565,33 @@ body[data-theme="dark"] .ai-sources i {
 
 /* 🆕 Enhanced Markdown Styles */
 .ai-answer-text .md-h2 {
-    font-size: 1.4em;
+    font-size: 1.3em;
     font-weight: 700;
     color: #017374;
-    margin: 20px 0 12px 0;
+    margin: 10px 0 2px 0;
+    padding-bottom: 3px;
+    border-bottom: 2px solid #e0f2f1;
+    line-height: 1.4;
+}
+
+.ai-answer-text .md-h2:first-child {
+    margin-top: 0;
 }
 
 .ai-answer-text .md-h3 {
-    font-size: 1.2em;
-    font-weight: 600;
+    font-size: 1.12em;
+    font-weight: 700;
     color: #0a8276;
-    margin: 16px 0 10px 0;
+    margin: 8px 0 2px 0;
+    line-height: 1.4;
 }
 
 .ai-answer-text .md-h4 {
-    font-size: 1.1em;
+    font-size: 1.05em;
     font-weight: 600;
     color: #066b63;
-    margin: 14px 0 8px 0;
+    margin: 6px 0 2px 0;
+    line-height: 1.4;
 }
 
 .ai-answer-text .md-title {
@@ -603,25 +612,25 @@ body[data-theme="dark"] .ai-sources i {
 
 /* Conclusion paragraphs (ดังนั้น, สรุป, etc.) */
 .ai-answer-text .md-conclusion {
-    margin: 16px 0;
-    padding: 12px 16px;
+    margin: 6px 0;
+    padding: 6px 12px;
     background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
     border-left: 4px solid #0a8276;
     border-radius: 0 8px 8px 0;
-    line-height: 1.7;
+    line-height: 1.55;
     color: #1a1a1a;
     font-weight: 500;
 }
 
 /* Regular paragraphs (long text without bullet) */
 .ai-answer-text .md-paragraph {
-    margin: 12px 0;
-    line-height: 1.7;
+    margin: 2px 0;
+    line-height: 1.55;
     color: #333;
 }
 
 .ai-answer-text .md-list {
-    margin: 8px 0 16px 0;
+    margin: 2px 0 6px 0;
     padding-left: 0;
     list-style: none;
 }
@@ -629,34 +638,43 @@ body[data-theme="dark"] .ai-sources i {
 .ai-answer-text .md-list .md-bullet {
     position: relative;
     padding-left: 24px;
-    margin-bottom: 12px;
-    line-height: 1.6;
+    margin-bottom: 2px;
+    line-height: 1.5;
     color: #333;
 }
 
 .ai-answer-text .md-list .md-bullet:before {
     content: "•";
     position: absolute;
-    left: 0;
+    left: 4px;
     top: 0;
     color: #0a8276;
     font-weight: bold;
-    font-size: 16px;
-    line-height: 1.5;
+    font-size: 15px;
+    line-height: 1.6;
 }
 
 .ai-answer-text .md-ordered-list {
-    margin: 8px 0 16px 0;
+    margin: 2px 0 6px 0;
     padding-left: 0;
     list-style: none;
+    counter-reset: none;
 }
 
 .ai-answer-text .md-ordered-list .md-numbered {
     position: relative;
     padding-left: 32px;
-    margin-bottom: 12px;
-    line-height: 1.6;
+    margin-bottom: 4px;
+    line-height: 1.55;
     color: #333;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.ai-answer-text .md-ordered-list .md-numbered:last-child {
+    border-bottom: none;
+    margin-bottom: 2px;
+    padding-bottom: 0;
 }
 
 .ai-answer-text .md-ordered-list .md-numbered:before {
@@ -665,35 +683,58 @@ body[data-theme="dark"] .ai-sources i {
     left: 0;
     top: 0;
     color: #0a8276;
-    font-weight: 600;
+    font-weight: 700;
+    font-size: 1.05em;
     min-width: 24px;
     text-align: left;
 }
 
 /* Sub-list styling within numbered items */
 .ai-answer-text .md-sublist {
-    margin: 8px 0 8px 0;
+    margin: 3px 0 2px 4px;
     padding-left: 0;
     list-style: none;
 }
 
+.ai-answer-text .md-sublist .md-sub-bullet {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 2px;
+    line-height: 1.55;
+    color: #444;
+    font-size: 0.95em;
+}
+
+.ai-answer-text .md-sublist .md-sub-bullet:before {
+    content: "•";
+    position: absolute;
+    left: 2px;
+    top: 0;
+    color: #0a8276;
+    font-weight: bold;
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+/* Legacy bullet class in sublist */
 .ai-answer-text .md-sublist .md-bullet {
     position: relative;
     padding-left: 20px;
-    margin-bottom: 8px;
-    line-height: 1.6;
-    color: #333;
+    margin-bottom: 2px;
+    line-height: 1.55;
+    color: #444;
+    font-size: 0.95em;
 }
 
 .ai-answer-text .md-sublist .md-bullet:before {
     content: "•";
     position: absolute;
-    left: 0;
+    left: 2px;
     top: 0;
     color: #0a8276;
     font-weight: bold;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 13px;
+    line-height: 1.65;
 }
 
 /* Enhanced styling for section headers - no underlines */
@@ -708,13 +749,13 @@ body[data-theme="dark"] .ai-sources i {
 .ai-answer-text .md-title-colon {
     display: inline;
     color: #0a8276;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 1.05em;
 }
 
 .ai-answer-text .md-bold {
     color: #0a8276;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .ai-answer-text .md-italic,
@@ -740,14 +781,20 @@ body[data-theme="dark"] .ai-sources i {
 /* Dark theme for enhanced markdown */
 [data-theme="dark"] .ai-answer-text .md-list .md-bullet,
 [data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered,
-[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet {
+[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet,
+[data-theme="dark"] .ai-answer-text .md-sublist .md-sub-bullet {
     color: #e0e0e0;
 }
 
 [data-theme="dark"] .ai-answer-text .md-list .md-bullet:before,
 [data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered:before,
-[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet:before {
+[data-theme="dark"] .ai-answer-text .md-sublist .md-bullet:before,
+[data-theme="dark"] .ai-answer-text .md-sublist .md-sub-bullet:before {
     color: #4fd1c7;
+}
+
+[data-theme="dark"] .ai-answer-text .md-ordered-list .md-numbered {
+    border-bottom-color: #333;
 }
 
 [data-theme="dark"] .ai-answer-text .md-section-header {
@@ -823,7 +870,7 @@ body[data-theme="dark"] .ai-sources i {
 /* Enhanced styling for bold and italic text */
 .ai-answer-text strong {
     color: #333;
-    font-weight: 400;
+    font-weight: 600;
 }
 
 .ai-answer-text em {

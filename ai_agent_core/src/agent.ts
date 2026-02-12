@@ -535,16 +535,88 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // =================================================================================
 
 /**
+ * Strip follow-up questions and suggestions from AI-generated answer.
+ * Removes lines like "Do you have any attachments?", "Would you like to know more?",
+ * "หากมีคำถามเพิ่มเติม...", "ต้องการให้อธิบายเพิ่มไหม?" etc.
+ */
+function stripFollowUpQuestions(text: string): string {
+  if (!text) return '';
+  
+  const lines = text.split('\n');
+  const filteredLines: string[] = [];
+  
+  // Patterns that indicate follow-up/suggestion lines to remove
+  const followUpPatterns = [
+    // English patterns
+    /^(do you have any|would you like|feel free to|if you (have|need|want|would)|let me know|don't hesitate)/i,
+    /^(is there anything|shall I|want me to|need (more|any|further)|for (more|further|additional))/i,
+    /^(you (might|may|can) also|you('re| are) welcome to|please (let|feel|don't))/i,
+    /^(if (there are|you'd|this|that)|I('d| would) be happy to|I can also)/i,
+    /^(any (questions|other|further|more)|hope this helps|I hope)/i,
+    // Thai patterns
+    /^(หากมี|ถ้ามี|หากต้องการ|ถ้าต้องการ|หากสนใจ|ถ้าสนใจ|ต้องการ(ให้|ทราบ)|อยากทราบ)/,
+    /^(สามารถ(สอบถาม|ติดต่อ|ถาม)|สอบถามเพิ่มเติม|ติดต่อ(สอบถาม|เรา))/,
+    /^(ไม่ลังเล|อย่าลังเล|ยินดี(ช่วย|ตอบ|ให้)|หวังว่า)/,
+    /^(มีอะไร(เพิ่มเติม|อื่น)|มีคำถาม(อื่น|เพิ่ม))/,
+  ];
+  
+  // Patterns within any position in line
+  const followUpInlinePatterns = [
+    /do you have any (attachments|questions|other)/i,
+    /would you like (me to|to know|more|further)/i,
+    /feel free to (ask|contact|reach)/i,
+    /หากมีคำถามเพิ่มเติม/,
+    /ต้องการให้อธิบายเพิ่ม/,
+    /สามารถสอบถามเพิ่มเติม/,
+    /หากสนใจเรื่อง/,
+    /อย่าลังเลที่จะ/,
+  ];
+  
+  let skipRemaining = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Skip empty lines at the end if we already started skipping
+    if (skipRemaining) {
+      if (trimmed === '') continue;
+      // Check if this line is also a follow-up
+      const isFollowUp = followUpPatterns.some(p => p.test(trimmed)) || 
+                          followUpInlinePatterns.some(p => p.test(trimmed));
+      if (isFollowUp) continue;
+      // If it's not a follow-up, stop skipping and include it
+      skipRemaining = false;
+    }
+    
+    // Check if this line matches follow-up patterns
+    const isFollowUpLine = followUpPatterns.some(p => p.test(trimmed)) ||
+                           followUpInlinePatterns.some(p => p.test(trimmed));
+    
+    if (isFollowUpLine) {
+      skipRemaining = true; // Skip this and any trailing lines
+      continue;
+    }
+    
+    filteredLines.push(line);
+  }
+  
+  // Remove trailing empty lines
+  while (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].trim() === '') {
+    filteredLines.pop();
+  }
+  
+  return filteredLines.join('\n').trim();
+}
+
+/**
  * Detect language of text (Thai vs English/Other)
  * Returns 'thai' if text contains significant Thai characters, otherwise 'english'
  */
 function detectTextLanguage(text: string): 'thai' | 'english' {
   const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
-  const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-  const totalChars = thaiChars + englishChars;
-  
-  if (totalChars === 0) return 'english';
-  return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+  // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+  if (thaiChars > 0) return 'thai';
+  return 'english';
 }
 
 /**
@@ -1162,10 +1234,9 @@ router.post('/message', async (req : Request, res : Response) => {
       // Detect language (outside try block for error handler)
       const detectLanguage = (text: string): 'thai' | 'english' => {
         const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
-        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-        const totalChars = thaiChars + englishChars;
-        if (totalChars === 0) return 'english';
-        return (thaiChars / totalChars) > 0.3 ? 'thai' : 'english';
+        // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+        if (thaiChars > 0) return 'thai';
+        return 'english';
       };
       
       const isThaiQuestion = detectLanguage(userQuestion) === 'thai';
@@ -1982,11 +2053,9 @@ router.post('/edit-message', async (req, res) => {
       // Detect language of the question
       const detectLang = (text: string): 'thai' | 'english' => {
         const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
-        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-        const totalChars = thaiChars + englishChars;
-        if (totalChars === 0) return 'english';
-        // 🔧 ลดค่า threshold เหลือ 0.1 เพื่อให้ถ้ามีตัวอักษรไทยน้อยมากก็ยังถือว่าเป็น English
-        return (thaiChars / totalChars) > 0.1 ? 'thai' : 'english';
+        // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+        if (thaiChars > 0) return 'thai';
+        return 'english';
       };
       const questionLanguage = detectLang(newMessage);
       const isThaiQuestion = questionLanguage === 'thai';
@@ -2187,6 +2256,9 @@ ${context}
           }
         }
       }
+      
+      // 🧹 Strip follow-up questions/suggestions from AI answer
+      aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
       
       // Build final response
       let finalResponse = aiGeneratedAnswer || (totalSources > 0 
@@ -5779,12 +5851,9 @@ async function generateAISuggestionCore(
     // 🆕 IMPROVED: Better language detection - prioritize question language
     const detectLanguage = (text: string): 'thai' | 'english' => {
       const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
-      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-      const totalChars = thaiChars + englishChars;
-      if (totalChars === 0) return 'english';
-      // 🔧 ลดค่า threshold เหลือ 0.1 เพื่อให้ถ้ามีตัวอักษรไทยน้อยมากก็ยังถือว่าเป็น English
-      // เช่น คำถาม "What is AI?" ที่อาจมีภาษาไทยปนนิดหน่อยจะถือว่าเป็น English
-      return (thaiChars / totalChars) > 0.1 ? 'thai' : 'english';
+      // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+      if (thaiChars > 0) return 'thai';
+      return 'english';
     };
     
     const questionLanguage = detectLanguage(question);
@@ -5812,10 +5881,45 @@ async function generateAISuggestionCore(
       // - คงความหมายเดิม แต่ปรับรูปแบบการนำเสนอ
       // - ไม่เปลี่ยนสาระ ไม่เพิ่มข้อมูลใหม่
       if (isCurrentSelfVerified && currentAnswer) {
-        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for self-verified question`);
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for self-verified question (streaming=${streaming})`);
         
-        systemPrompt = isThaiQuestion
-          ? `คุณคือ AI Editor ที่ทำหน้าที่เรียบเรียงคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้อ่านง่ายขึ้น
+        if (streaming) {
+          // ========== AI Agent Interface (Chat) - ตอบแบบธรรมชาติ ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Assistant ที่ช่วยอธิบายคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้เข้าใจง่าย
+
+ตอบเป็นภาษาไทยเท่านั้น
+
+สิ่งสำคัญ:
+- ตอบแบบธรรมชาติเหมือนคนอธิบายให้เพื่อนฟัง ไม่ต้องจัดเป็นหัวข้อ ไม่ต้องใช้โครงสร้างแข็งๆ
+- อธิบายตรงตามคำถามที่ถาม ไม่ต้องพูดทุกเรื่อง เน้นเฉพาะสิ่งที่ถูกถาม
+- เขียนเป็นย่อหน้าที่อ่านลื่น ใช้ภาษาง่ายๆ
+- ถ้าจำเป็นต้องแจกแจง ใช้ bullet points สั้นๆ ได้ แต่ไม่ต้องจัดเป็นโครงสร้างทั้งหมด
+- คงความหมายเดิม 100% ห้ามเพิ่มข้อมูลใหม่
+- ห้ามถามกลับ ห้ามแนะนำหัวข้อต่อ ตอบให้จบในตัวเอง
+
+========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
+${currentAnswer}
+===============================================================`
+            : `You are an AI Assistant that explains user-verified answers in a clear and easy-to-understand way.
+
+You MUST respond in English only.
+
+Important:
+- Answer naturally, like explaining to a friend. Do NOT use rigid structure with headers and sections.
+- Focus on what was actually asked. Don't cover everything, just answer the specific question.
+- Write in flowing paragraphs that are easy to read.
+- Use bullet points briefly only when listing is truly needed, but don't structure the whole answer that way.
+- Keep 100% of the original meaning. Do NOT add new information.
+- Do NOT ask follow-up questions. Do NOT suggest related topics. Answer completely.
+
+========== User-Verified Answer (by ${currentCreatedBy}) ==========
+${currentAnswer}
+===================================================================`;
+        } else {
+          // ========== Q&A Detail Page - ตอบแบบจัดโครงสร้าง (เดิม) ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Editor ที่ทำหน้าที่เรียบเรียงคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้อ่านง่ายขึ้น
 
 🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
 
@@ -5842,7 +5946,7 @@ async function generateAISuggestionCore(
 ========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
 ${currentAnswer}
 ===============================================================`
-          : `You are an AI Editor who rephrases and restructures user-verified answers for better readability.
+            : `You are an AI Editor who rephrases and restructures user-verified answers for better readability.
 
 🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
 **YOU MUST RESPOND IN ENGLISH ONLY** because the question is in English.
@@ -5872,11 +5976,47 @@ This answer has been verified by the user. You are NOT creating new content, but
 ========== User-Verified Answer (by ${currentCreatedBy}) ==========
 ${currentAnswer}
 ===================================================================`;
+        }
       } else {
-        // ไม่ใช่ self-verified: AI สังเคราะห์จากหลายแหล่ง (เดิม)
-        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for non-self-verified question`);
+        // ไม่ใช่ self-verified: AI สังเคราะห์จากหลายแหล่ง
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for non-self-verified question (streaming=${streaming})`);
         
-        systemPrompt = isThaiQuestion
+        if (streaming) {
+          // ========== AI Agent Interface (Chat) - ตอบแบบธรรมชาติ ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Assistant ที่ตอบคำถามโดยอ้างอิงจากฐานความรู้ที่ยืนยันแล้ว
+
+ตอบเป็นภาษาไทยเท่านั้น
+
+สิ่งสำคัญ:
+- ตอบแบบธรรมชาติเหมือนคนอธิบายให้เพื่อนฟัง ไม่ต้องจัดเป็นหัวข้อ ไม่ต้องใช้โครงสร้างแข็งๆ
+- ตอบตรงคำถามที่ถูกถาม อธิบายให้เข้าใจง่ายด้วยภาษาพูดธรรมดา
+- เขียนเป็นย่อหน้าที่อ่านลื่น ไม่ต้องแบ่งเป็นหมวดหมู่
+- ถ้ามีหลายประเด็นจริงๆ ใช้ bullet points สั้นๆ ได้บ้าง แต่ไม่ต้องจัดเป็นโครงสร้างทั้งหมด
+- ใช้ข้อมูลจากฐานความรู้เป็นหลัก ถ้าข้อมูลไม่ตรงกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลในฐานความรู้ที่ตรงกับคำถามนี้"
+- ห้ามถามกลับ ห้ามแนะนำหัวข้อต่อ ตอบให้จบในตัวเอง
+
+========== ข้อมูลอ้างอิงจากฐานความรู้ ==========
+${context}
+================================================`
+            : `You are an AI Assistant that answers questions based on verified knowledge base data.
+
+You MUST answer in English only. If the reference data is in Thai, translate it.
+
+Important:
+- Answer naturally, like explaining to a friend. Do NOT use rigid structure with headers and sections.
+- Answer the specific question that was asked. Explain in simple, easy-to-understand language.
+- Write in flowing paragraphs. Don't break everything into categories or sections.
+- If there are truly multiple points to list, you can use brief bullet points, but don't structure the whole answer that way.
+- Use knowledge base data as primary source. If data doesn't match, say "No relevant data found in knowledge base for this question."
+- Do NOT ask follow-up questions. Do NOT suggest related topics. Answer completely.
+
+========== Reference Data from Knowledge Base ==========
+${context}
+========================================================`;
+        } else {
+          // ========== Q&A Detail Page - ตอบแบบจัดโครงสร้าง (เดิม) ==========
+          systemPrompt = isThaiQuestion
           ? `คุณคือ AI Assistant ที่ตอบคำถามโดยอ้างอิงจากฐานความรู้ที่ยืนยันแล้ว
 
 🌐 **ภาษา: ตอบเป็นภาষาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
@@ -5945,6 +6085,7 @@ Do NOT mix languages. Your entire response must be in English.
 ========== Reference Data from Knowledge Base ==========
 ${context}
 ========================================================`;
+        }
       }
     } else {
       // 🆕 ไม่มีข้อมูลที่ยืนยันแล้ว - ไม่ต้องเรียก LLM แค่ return ข้อความบอกว่าไม่มีข้อมูล
@@ -5963,29 +6104,44 @@ ${context}
     }
     
     // 🆕 User prompt แยกตาม mode: Editor (self-verified) vs Author (สังเคราะห์จากหลายแหล่ง)
+    // และแยกตาม streaming (AI Agent Interface) vs non-streaming (Q&A Detail)
     let userPrompt = '';
     if (isCurrentSelfVerified && currentAnswer) {
-      // Editor mode: เรียบเรียงคำตอบที่ยืนยันแล้ว
-      userPrompt = isThaiQuestion 
-        ? `คำถาม: ${question}
+      if (streaming) {
+        // Editor mode + AI Agent Interface: เรียบเรียงแบบธรรมชาติ
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาอธิบายคำตอบด้านบนใหม่ด้วยภาษาที่เข้าใจง่าย ตอบตรงคำถาม เน้นอธิบายแบบธรรมชาติ ไม่ต้องจัดเป็นโครงสร้าง`
+          : `Question: ${question}\n\nPlease explain the answer above in simple, natural language. Answer the question directly without rigid formatting.`;
+      } else {
+        // Editor mode + Q&A Detail: เรียบเรียงแบบจัดโครงสร้าง (เดิม)
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}
 
 กรุณาเรียบเรียงคำตอบด้านบนใหม่ โดย:
 - จัดโครงสร้างให้อ่านง่าย (ใช้ bullet points, ลำดับเลข, หัวข้อย่อย)
 - ใช้ภาษาที่ชัดเจน กระชับ
 - คงความหมายเดิมทั้งหมด ห้ามเพิ่มข้อมูลใหม่
 - แสดงข้อมูลสำคัญให้เห็นชัด (ใช้ **ตัวหนา**)`
-        : `Question: ${question}
+          : `Question: ${question}
 
 Please rephrase and restructure the answer above by:
 - Organize for better readability (use bullet points, numbered lists, headings)
 - Use clear and concise language
 - Keep 100% of the original meaning - do NOT add new information
 - Highlight important information (use **bold**)`;
+      }
     } else {
-      // Author mode: สร้างคำตอบใหม่จากหลายแหล่ง
-      userPrompt = isThaiQuestion 
-        ? `คำถาม: ${question}\n\nกรุณาสร้างคำตอบใหม่อย่างละเอียดและครบถ้วน โดยอ้างอิงจากข้อมูลในฐานความรู้ด้านบน อธิบายให้เข้าใจง่าย ใช้หัวข้อย่อยและ bullet points:`
-        : `Question: ${question}\n\nPlease create a comprehensive and detailed NEW answer based on the knowledge base data above. Explain clearly with headings and bullet points:`;
+      if (streaming) {
+        // Author mode + AI Agent Interface: ตอบแบบธรรมชาติ
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาตอบคำถามนี้โดยอ้างอิงจากข้อมูลด้านบน อธิบายด้วยภาษาง่ายๆ แบบธรรมชาติ ตอบตรงคำถาม ไม่ต้องจัดเป็นโครงสร้าง`
+          : `Question: ${question}\n\nPlease answer this question based on the data above. Explain naturally in simple language, directly addressing what was asked.`;
+      } else {
+        // Author mode + Q&A Detail: ตอบแบบจัดโครงสร้าง (เดิม)
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาสร้างคำตอบใหม่อย่างละเอียดและครบถ้วน โดยอ้างอิงจากข้อมูลในฐานความรู้ด้านบน อธิบายให้เข้าใจง่าย ใช้หัวข้อย่อยและ bullet points:`
+          : `Question: ${question}\n\nPlease create a comprehensive and detailed NEW answer based on the knowledge base data above. Explain clearly with headings and bullet points:`;
+      }
     }
     
     let aiGeneratedAnswer = '';
@@ -6164,6 +6320,9 @@ Please rephrase and restructure the answer above by:
     
     // Calculate confidence (simplified)
     const confidence = totalSources > 0 ? Math.min(0.7 + (totalSources * 0.1), 0.95) : 0.3;
+    
+    // 🧹 Strip follow-up questions/suggestions from AI answer
+    aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
     
     console.log(`✅ Core: Generated answer (${aiGeneratedAnswer.length} chars, confidence=${confidence.toFixed(2)})`);
     
