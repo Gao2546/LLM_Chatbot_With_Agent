@@ -1568,8 +1568,23 @@ async function searchVerifiedAnswersHybrid(
       const ageDays = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
       const freshnessScore = Math.max(Math.pow(0.5, ageDays / 180), 0.01); // Min 0.01
 
-      // Weighted combination: Vector 55% + Keyword 30% + Freshness 15%
-      const confidenceScore = (vectorScore * 0.55) + (keywordScore * 0.30) + (freshnessScore * 0.15);
+      // Detect cross-lingual: query vs document in different languages
+      const queryThaiChars = (questionText.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const docThaiChars = (row.question.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const queryIsMainlyThai = queryThaiChars > 0 && queryThaiChars / Math.max(1, questionText.length) > 0.2;
+      const docIsMainlyThai = docThaiChars > 0 && docThaiChars / Math.max(1, row.question.length) > 0.2;
+      const isCrossLingual = queryIsMainlyThai !== docIsMainlyThai;
+
+      // Weighted combination - adjust weights for cross-lingual queries
+      // Cross-lingual: keyword matching is unreliable, rely more on vector similarity
+      let confidenceScore: number;
+      if (isCrossLingual) {
+        // Cross-lingual: Vector 80% + Keyword 5% + Freshness 15%
+        confidenceScore = (vectorScore * 0.80) + (keywordScore * 0.05) + (freshnessScore * 0.15);
+      } else {
+        // Same language: Vector 55% + Keyword 30% + Freshness 15%
+        confidenceScore = (vectorScore * 0.55) + (keywordScore * 0.30) + (freshnessScore * 0.15);
+      }
 
       return {
         ...row,
@@ -1578,12 +1593,13 @@ async function searchVerifiedAnswersHybrid(
         freshnessScore,
         confidenceScore,
         matchedKeywords: intersection.length,
-        totalKeywords: queryKeywords.length
+        totalKeywords: queryKeywords.length,
+        isCrossLingual
       };
     });
 
-    // 5. Filter by minimum confidence (increased to 0.50 for better quality)
-    const minConfidence = 0.50;
+    // 5. Filter by minimum confidence (lowered to 0.40 for cross-lingual support)
+    const minConfidence = 0.40;
     const filtered = hybridResults.filter(r => r.confidenceScore >= minConfidence);
 
     // 6. Sort by confidence score
@@ -1595,7 +1611,7 @@ async function searchVerifiedAnswersHybrid(
     console.log(`   Hybrid results: ${vectorResults.rows.length} → ${filtered.length} → ${final.length} (after scoring & limit)`);
     if (final.length > 0) {
       final.forEach((r, idx) => {
-        console.log(`   ${idx + 1}. Q${r.id}: confidence=${(r.confidenceScore * 100).toFixed(1)}% [vec:${(r.vectorScore * 100).toFixed(0)}% kw:${(r.keywordScore * 100).toFixed(0)}% fresh:${(r.freshnessScore * 100).toFixed(0)}%] "${r.question.substring(0, 60)}..."`);
+        console.log(`   ${idx + 1}. Q${r.id}: confidence=${(r.confidenceScore * 100).toFixed(1)}% [vec:${(r.vectorScore * 100).toFixed(0)}% kw:${(r.keywordScore * 100).toFixed(0)}% fresh:${(r.freshnessScore * 100).toFixed(0)}%]${r.isCrossLingual ? ' 🌐CROSS-LANG' : ''} "${r.question.substring(0, 60)}..."`);
       });
     }
 

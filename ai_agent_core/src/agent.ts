@@ -5907,7 +5907,7 @@ async function generateAISuggestionCore(
       
       for (const searchQuery of searchQueries) {
         console.log(`   Searching with: "${searchQuery.substring(0, 80)}..."`);
-        const results = await searchVerifiedAnswersHybrid(searchQuery, 0.25, 10);
+        const results = await searchVerifiedAnswersHybrid(searchQuery, 0.40, 5);
         
         // Add unique results
         for (const r of results) {
@@ -5920,7 +5920,7 @@ async function generateAISuggestionCore(
       
       // Sort combined results by confidence score
       allHybridResults.sort((a, b) => b.confidenceScore - a.confidenceScore);
-      const hybridResults = allHybridResults.slice(0, 10); // Limit to top 10
+      const hybridResults = allHybridResults.slice(0, 5); // Limit to top 5 (same as Q&A Detail)
       
       // 🔍 DEBUG: Log all results before filtering
       console.log(`🔍 DEBUG: Found ${allHybridResults.length} total results before filtering:`);
@@ -5941,9 +5941,9 @@ async function generateAISuggestionCore(
           // Use confidence score from hybrid search (already combines vector + keyword + freshness)
           const confidenceScore = q.confidenceScore || 0;
           
-          // 🔧 Lowered threshold to 40% to allow cross-language matching
-          if (confidenceScore < 0.40) {
-            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 40%`);
+          // 🔧 Use same threshold as Q&A Detail (50%)
+          if (confidenceScore < 0.50) {
+            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 50%`);
             continue;
           }
           
