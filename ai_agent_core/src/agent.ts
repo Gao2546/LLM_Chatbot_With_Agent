@@ -609,6 +609,69 @@ function stripFollowUpQuestions(text: string): string {
 }
 
 /**
+ * Strip prompt structural markers that LLM may echo back in its response
+ * e.g. "========== ฐานความรู้ (ลำดับที่ 1) =========="
+ */
+function stripPromptMarkers(text: string): string {
+  if (!text) return '';
+  
+  // Remove lines that are purely structural markers from the prompt
+  const markerPatterns = [
+    /^={3,}.*={3,}$/,                            // ========== ... ==========
+    /^-{3,}$/,                                    // ---
+    /^#{1,2}\s*ฐานความรู้/,                        // # ฐานความรู้ or ## ฐานความรู้
+    /^#{1,2}\s*KNOWLEDGE BASE/i,                  // # KNOWLEDGE BASE
+    /^ลำดับที่\s*\d/,                              // ลำดับที่ 1
+    /^PRIORITY\s*\d/i,                            // PRIORITY 1
+    /^คำถามที่คล้ายกัน:\s*/,                         // คำถามที่คล้ายกัน:
+    /^คำตอบ:\s*##/,                                // คำตอบ: ##
+    /^ความคล้าย:\s*\d+/,                           // ความคล้าย: 85%
+    /^ประเภท:\s*(ยืนยัน|self|request)/,             // ประเภท: ยืนยัน...
+    /^แหล่งที่มา:\s*/,                               // แหล่งที่มา:
+    /^\[\d+\]\s*คำถาม:/,                           // [1] คำถาม:
+    /^\s*ข้อมูลฐานความรู้/,                          // ข้อมูลฐานความรู้
+    /^\s*KNOWLEDGE BASE DATA/i,
+    /^\s*ATTACHED FILES DATA/i,
+    /^\s*ข้อมูลจากไฟล์แนบ/,
+    /^\s*Reference Data from/i,
+    /^\s*User-Verified Answer \(by/i,
+    /^\s*คำตอบที่ยืนยันแล้วจากผู้ใช้/,
+  ];
+  
+  const lines = text.split('\n');
+  const filteredLines: string[] = [];
+  let consecutiveRemoved = 0;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Check if line matches any marker pattern
+    const isMarker = markerPatterns.some(p => p.test(trimmed));
+    
+    if (isMarker) {
+      consecutiveRemoved++;
+      // Don't add more than 1 blank line when removing markers
+      if (consecutiveRemoved <= 1 && filteredLines.length > 0) {
+        // Add a blank line only if previous line wasn't blank
+        const lastLine = filteredLines[filteredLines.length - 1];
+        if (lastLine && lastLine.trim() !== '') {
+          filteredLines.push('');
+        }
+      }
+      continue;
+    }
+    
+    consecutiveRemoved = 0;
+    filteredLines.push(line);
+  }
+  
+  // Clean up multiple blank lines and trim
+  return filteredLines.join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Detect language of text (Thai vs English/Other)
  * Returns 'thai' if text contains significant Thai characters, otherwise 'english'
  */
@@ -617,6 +680,141 @@ function detectTextLanguage(text: string): 'thai' | 'english' {
   // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
   if (thaiChars > 0) return 'thai';
   return 'english';
+}
+
+/**
+ * Strip echoed source data / raw context that LLM may have appended
+ * e.g. "คำตอบนี้ถูกสังเคราะห์จากความเห็น..." followed by raw English answers
+ * or trailing "คำตอบ: <english text>" blocks that are raw source echoes
+ */
+function stripEchoedSources(text: string, isThaiQuestion: boolean): string {
+  if (!text) return '';
+  
+  // Pattern 1: Remove "คำตอบนี้ถูกสังเคราะห์จาก..." and everything after it
+  const synthesisIdx = text.indexOf('คำตอบนี้ถูกสังเคราะห์จาก');
+  if (synthesisIdx > 100) { // Only if there's substantial content before it
+    text = text.substring(0, synthesisIdx).trim();
+  }
+  
+  // Pattern 2: For Thai questions, remove trailing "คำตอบ:" blocks that are in English
+  if (isThaiQuestion) {
+    const lines = text.split('\n');
+    let cutIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      
+      // Detect "คำตอบ:" followed by mostly English text (raw source echo)
+      if (/^คำตอบ:\s*.+/.test(trimmed)) {
+        // Check if the content after "คำตอบ:" is mostly English
+        const afterLabel = trimmed.replace(/^คำตอบ:\s*/, '');
+        const thaiChars = (afterLabel.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const englishChars = (afterLabel.match(/[a-zA-Z]/g) || []).length;
+        
+        if (englishChars > 20 && thaiChars < englishChars * 0.3) {
+          // This is a raw English source echo - cut from here
+          cutIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (cutIndex > 5) { // Only if there's substantial Thai content before
+      // Also remove any blank lines right before the cut
+      while (cutIndex > 0 && lines[cutIndex - 1].trim() === '') {
+        cutIndex--;
+      }
+      text = lines.slice(0, cutIndex).join('\n').trim();
+    }
+    
+    // Pattern 3: Remove large trailing English-only blocks (3+ paragraphs of pure English)
+    const paragraphs = text.split(/\n\n+/);
+    let lastThaiParaIdx = -1;
+    
+    for (let i = paragraphs.length - 1; i >= 0; i--) {
+      const para = paragraphs[i].trim();
+      if (!para) continue;
+      
+      const thaiInPara = (para.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const englishInPara = (para.match(/[a-zA-Z]/g) || []).length;
+      
+      // If paragraph has Thai content, this is the boundary
+      if (thaiInPara > 5 || (thaiInPara > 0 && englishInPara < thaiInPara * 3)) {
+        lastThaiParaIdx = i;
+        break;
+      }
+    }
+    
+    // If we found trailing English-only paragraphs (at least 2)
+    if (lastThaiParaIdx >= 0 && lastThaiParaIdx < paragraphs.length - 2) {
+      text = paragraphs.slice(0, lastThaiParaIdx + 1).join('\n\n').trim();
+    }
+  }
+  
+  return text.trim();
+}
+
+/**
+ * Check if AI answer language matches expected language
+ * Returns true if the answer is in the wrong language and needs re-generation
+ */
+function isAnswerWrongLanguage(answer: string, isThaiQuestion: boolean): boolean {
+  if (!answer || answer.length < 50) return false;
+  
+  const thaiChars = (answer.match(/[\u0E00-\u0E7F]/g) || []).length;
+  const englishChars = (answer.match(/[a-zA-Z]/g) || []).length;
+  const totalChars = thaiChars + englishChars;
+  if (totalChars === 0) return false;
+  
+  const thaiRatio = thaiChars / totalChars;
+  
+  if (isThaiQuestion) {
+    // คำถามเป็นไทย แต่คำตอบเป็นอังกฤษ (Thai chars < 15% of all chars)
+    if (thaiRatio < 0.15) {
+      console.log(`⚠️ Language mismatch: Question is Thai but answer has only ${(thaiRatio * 100).toFixed(1)}% Thai chars`);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Attempt to fix answer language by re-generating with explicit language instruction
+ */
+async function fixAnswerLanguage(
+  answer: string, 
+  isThaiQuestion: boolean,
+  ifxClient: any
+): Promise<string> {
+  if (!isThaiQuestion) return answer;
+  
+  try {
+    console.log('🔄 Fixing answer language: translating to Thai...');
+    const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+    
+    const fixMessages = [
+      { role: 'system' as const, content: 'คุณคือนักแปล แปลข้อความต่อไปนี้เป็นภาษาไทยทั้งหมด คงรูปแบบ Markdown เดิมไว้ คำศัพท์เทคนิคภาษาอังกฤษให้คงไว้เป็นภาษาอังกฤษได้ แต่คำอธิบายต้องเป็นภาษาไทย' },
+      { role: 'user' as const, content: `แปลเป็นภาษาไทย:\n\n${answer}` }
+    ];
+    
+    const response = await ifxClient.chat.completions.create({
+      model: ifxModel,
+      messages: fixMessages,
+      temperature: 0.3,
+      max_completion_tokens: 20000,
+      stream: false
+    });
+    
+    const fixedAnswer = response.choices[0]?.message?.content?.trim();
+    if (fixedAnswer && fixedAnswer.length > 50) {
+      console.log('✅ Answer language fixed to Thai');
+      return fixedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+    }
+  } catch (fixError) {
+    console.warn('⚠️ Failed to fix answer language:', fixError);
+  }
+  
+  return answer; // Return original if fix fails
 }
 
 /**
@@ -6324,6 +6522,17 @@ Please rephrase and restructure the answer above by:
     // 🧹 Strip follow-up questions/suggestions from AI answer
     aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
     
+    // 🧹 Strip prompt structural markers that LLM may have echoed
+    aiGeneratedAnswer = stripPromptMarkers(aiGeneratedAnswer);
+    
+    // 🧹 Strip echoed source data (raw context appended by LLM)
+    aiGeneratedAnswer = stripEchoedSources(aiGeneratedAnswer, isThaiQuestion);
+    
+    // 🆕 Post-generation language check: ถ้าคำถามเป็นไทยแต่คำตอบเป็นอังกฤษ ให้แปลกลับ
+    if (isAnswerWrongLanguage(aiGeneratedAnswer, isThaiQuestion)) {
+      aiGeneratedAnswer = await fixAnswerLanguage(aiGeneratedAnswer, isThaiQuestion, ifxClient);
+    }
+    
     console.log(`✅ Core: Generated answer (${aiGeneratedAnswer.length} chars, confidence=${confidence.toFixed(2)})`);
     
     return {
@@ -6346,6 +6555,13 @@ Please rephrase and restructure the answer above by:
 async function generateAISuggestionBackground(questionId: number, questionText: string, answerText: string) {
   try {
     console.log(`🤖 [Background] Generating AI suggestion for question ${questionId}`);
+    
+    // 🆕 Check if suggestion already exists (e.g., generated by frontend)
+    const existingSuggestion = await getAISuggestion(questionId);
+    if (existingSuggestion) {
+      console.log(`⏭️ [Background] Suggestion already exists for question ${questionId} (id=${existingSuggestion.id}), skipping background generation`);
+      return;
+    }
     
     // Generate embedding for the question
     const fullQuestionText = answerText 
@@ -6506,19 +6722,34 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
     const hasKnowledgeData = context.trim().length > 0;
     const hasAttachments = attachmentContext.trim().length > 0;
     
-    console.log(`📊 [Background] hasKnowledgeData=${hasKnowledgeData}, hasAttachments=${hasAttachments}`);
+    // 🆕 Detect language of question for background generation
+    const bgThaiChars = (questionText.match(/[\u0E00-\u0E7F]/g) || []).length;
+    const bgIsThaiQuestion = bgThaiChars > 0;
+    console.log(`📊 [Background] hasKnowledgeData=${hasKnowledgeData}, hasAttachments=${hasAttachments}, isThaiQuestion=${bgIsThaiQuestion}`);
 
     // Generate AI suggestion using the context - if we have verified data OR attachments
     if (hasKnowledgeData || hasAttachments) {
       console.log(`🤖 [Background] Generating AI response with KB=${hasKnowledgeData}, Attachments=${hasAttachments}`);
       
-      let systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้และไฟล์แนบที่ให้มาเท่านั้น
+      let systemPrompt = bgIsThaiQuestion 
+        ? `⚠️ คุณต้องตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ แม้ข้อมูลจะมีคำศัพท์ภาษาอังกฤษปนอยู่
+
+คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้และไฟล์แนบที่ให้มาเท่านั้น
 
 ⚠️ กฎสำคัญ:
 1. ตอบเฉพาะจากข้อมูลที่ให้ไว้เท่านั้น - ห้ามสร้างข้อมูลใหม่
 2. ลำดับความสำคัญ: ฐานความรู้ > ไฟล์แนบ
 3. ถ้ามีเฉพาะไฟล์แนบ ให้ใช้ข้อมูลจากไฟล์แนบตอบคำถาม
-4. สรุปและเรียบเรียงจากข้อมูลที่ให้`;
+4. สรุปและเรียบเรียงจากข้อมูลที่ให้
+5. ตอบเป็นภาษาไทยเท่านั้น (ใช้คำศัพท์เทคนิคภาษาอังกฤษได้ แต่อธิบายเป็นภาษาไทย)`
+        : `You are an AI assistant that answers questions based on verified knowledge base and attached files only.
+
+IMPORTANT RULES:
+1. Answer ONLY from the data provided - do NOT create new information
+2. Priority: Knowledge Base > Attachments
+3. If only attachments available, use them to answer
+4. Summarize and rephrase from the provided data
+5. You MUST answer in English only`;
 
       if (hasKnowledgeData) {
         systemPrompt += `\n\n========== ฐานความรู้ (ลำดับที่ 1) ==========\n${context}\n`;
@@ -6528,7 +6759,9 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
         systemPrompt += `\n\n========== ไฟล์แนบ (ลำดับที่ 2) ==========\n${attachmentContext}\n`;
       }
 
-      const userMessage = `คำถาม: ${questionText}\n\nกรุณาตอบคำถามโดยอ้างอิงจากข้อมูลที่ให้ไว้:`;
+      const userMessage = bgIsThaiQuestion
+        ? `คำถาม: ${questionText}\n\nกรุณาตอบคำถามโดยอ้างอิงจากข้อมูลที่ให้ไว้ (ตอบเป็นภาษาไทยเท่านั้น):`
+        : `Question: ${questionText}\n\nPlease answer the question based on the provided data (answer in English only):`;
       let suggestion = '';
       let modelUsed = '';
 
@@ -6636,7 +6869,18 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
           return;
         }
         
-        // LLM ตอบปกติ - save คำตอบ
+        // LLM ตอบปกติ - strip prompt markers and echoed sources
+        suggestion = stripPromptMarkers(suggestion);
+        suggestion = stripFollowUpQuestions(suggestion);
+        suggestion = stripEchoedSources(suggestion, bgIsThaiQuestion);
+        
+        // 🆕 Check again if suggestion was created while we were generating
+        const existingCheck = await getAISuggestion(questionId);
+        if (existingCheck) {
+          console.log(`⏭️ [Background] Suggestion was created while generating (id=${existingCheck.id}), skipping save`);
+          return;
+        }
+        
         await saveAISuggestion(
           questionId,
           suggestion,
@@ -6647,7 +6891,7 @@ async function generateAISuggestionBackground(questionId: number, questionText: 
             sourcesUsed: sourcesUsed
           }
         );
-        console.log(`✅ [Background] AI suggestion saved for question ${questionId} (model: ${modelUsed})`);
+        console.log(`✅ [Background] AI suggestion saved for question ${questionId} (model: ${modelUsed})`)
         return; // Success - exit early
       }
       
@@ -7232,7 +7476,9 @@ ${currentAnswer}
 ===================================================================`;
       } else if (isThaiQuestion) {
         // Author mode - synthesize from multiple sources (Thai)
-        systemPrompt = `คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
+        systemPrompt = `⚠️ คุณต้องตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ แม้ข้อมูลจะมีคำศัพท์ภาษาอังกฤษปนอยู่
+
+คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
 
 ⚠️ **สำคัญมาก - คุณต้องใช้เฉพาะข้อมูลที่ให้ไว้ด้านล่าง:**
 - คุณต้องตอบคำถามโดยใช้ข้อมูลจากฐานความรู้และไฟล์แนบที่ให้ไว้เท่านั้น
@@ -7480,6 +7726,11 @@ Create a comprehensive and detailed answer from the provided data:
       }
     }
     
+    // 🆕 Post-generation language check: ถ้าคำถามเป็นไทยแต่คำตอบเป็นอังกฤษ ให้แปลกลับ
+    if (isAnswerWrongLanguage(aiGeneratedAnswer, isThaiQuestion)) {
+      aiGeneratedAnswer = await fixAnswerLanguage(aiGeneratedAnswer, isThaiQuestion, ifxClient);
+    }
+    
     // Check if LLM incorrectly said "no data" when we actually have sources
     const noDataPhrases = [
       'ยังไม่มีคำตอบที่ยืนยันแล้ว',
@@ -7500,6 +7751,13 @@ Create a comprehensive and detailed answer from the provided data:
     if (llmSaidNoData && totalSources > 0) {
       console.log('⚠️ LLM incorrectly said no data, using fallback with actual sources');
       aiGeneratedAnswer = ''; // Reset to trigger fallback below
+    }
+    
+    // 🧹 Strip prompt structural markers and echoed sources
+    if (aiGeneratedAnswer) {
+      aiGeneratedAnswer = stripPromptMarkers(aiGeneratedAnswer);
+      aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
+      aiGeneratedAnswer = stripEchoedSources(aiGeneratedAnswer, isThaiQuestion);
     }
     
     // Fallback if LLM fails or returns empty
