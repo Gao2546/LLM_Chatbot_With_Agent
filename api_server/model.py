@@ -1076,7 +1076,7 @@ def process_document_api():
                 if file_text and file_text.strip():
                     # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
                     text_splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=6000,  # Conservative chunk size to stay under 8164 tokens
+                        chunk_size=1000,  # Conservative chunk size to stay under 8164 tokens
                         chunk_overlap=200,
                         separators=["\n\n", "\n", "。", "!", "?", " ", ""] # Added common punctuation
                     )
