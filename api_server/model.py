@@ -11,6 +11,7 @@ import concurrent.futures
 import multiprocessing
 import numpy as np
 import unicodedata
+import time
 
 # Third-party libraries
 # import bs4
@@ -78,6 +79,13 @@ from utils.util import (
 )
 
 from utils.util import LOCAL
+
+MAX_RETRIES = 3
+RATE_LIMIT_SLEEP = 60  # 1 minute
+
+def is_rate_limit_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return ("rate limit" in msg) or ("error code: 429" in msg) or ("429" in msg)
 
 conn = get_db_connection()
 
@@ -1091,30 +1099,59 @@ def process_document_api():
                     
                     print(f"Processing {len(text_chunks)} chunks from {filename}")
                     
-                    # Process each chunk
+                    # # Process each chunk
+                    # chunk_count = 0
+                    # for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                    #     try:
+                    #         # Generate embedding for this chunk
+                    #         if IFXGPT:
+                    #             data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                    #         else:
+                    #             data_vector = encode_text_for_embedding(chunk_text)
+                            
+                    #         # Save chunk to database
+                    #         save_vector_to_db(
+                    #             user_id=user_id,
+                    #             chat_history_id=chat_history_id,
+                    #             uploaded_file_id=uploaded_file_id,
+                    #             file_name=filename,
+                    #             text=chunk_text,
+                    #             embedding=data_vector,
+                    #             page_number=chunk_idx  # Use chunk index as page number
+                    #         )
+                    #         chunk_count += 1
+                    #     except Exception as chunk_err:
+                    #         print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                    #         continue
+
                     chunk_count = 0
                     for chunk_idx, chunk_text in enumerate(text_chunks, 1):
-                        try:
-                            # Generate embedding for this chunk
-                            if IFXGPT:
-                                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
-                            else:
-                                data_vector = encode_text_for_embedding(chunk_text)
-                            
-                            # Save chunk to database
-                            save_vector_to_db(
-                                user_id=user_id,
-                                chat_history_id=chat_history_id,
-                                uploaded_file_id=uploaded_file_id,
-                                file_name=filename,
-                                text=chunk_text,
-                                embedding=data_vector,
-                                page_number=chunk_idx  # Use chunk index as page number
-                            )
-                            chunk_count += 1
-                        except Exception as chunk_err:
-                            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
-                            continue
+                        for attempt in range(1, MAX_RETRIES + 1):
+                            try:
+                                if IFXGPT:
+                                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                                else:
+                                    data_vector = encode_text_for_embedding(chunk_text)
+                    
+                                save_vector_to_db(
+                                    user_id=user_id,
+                                    chat_history_id=chat_history_id,
+                                    uploaded_file_id=uploaded_file_id,
+                                    file_name=filename,
+                                    text=chunk_text,
+                                    embedding=data_vector,
+                                    page_number=chunk_idx
+                                )
+                                chunk_count += 1
+                                break  # success
+                            except Exception as chunk_err:
+                                if is_rate_limit_error(chunk_err) and attempt < MAX_RETRIES:
+                                    print(f"Rate limit on chunk {chunk_idx}. Sleeping {RATE_LIMIT_SLEEP}s then retrying...")
+                                    time.sleep(RATE_LIMIT_SLEEP)
+                                    continue
+
+            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+            break
                     
                     if chunk_count > 0:
                         processed_files.append({
