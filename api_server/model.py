@@ -1150,8 +1150,8 @@ def process_document_api():
                                     time.sleep(RATE_LIMIT_SLEEP)
                                     continue
 
-            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
-            break
+                                print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                                break
                     
                     if chunk_count > 0:
                         processed_files.append({
