@@ -130,30 +130,106 @@ interface SimilarDocument {
 interface SearchSimilarResponse {
   results: SimilarDocument[];
 }
-const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
-  const parser = new XMLParser({ignoreAttributes: false, cdataPropName: false});
-  
-  const jsonObj = parser.parse(xml);
-  const toolName = Object.keys(jsonObj)[0];
-  const content = jsonObj[toolName];
 
-  const toolData: ToolData = {
+
+// const xmlToJson = async (xml: string): Promise<Record<string , any>> => {
+//   const parser = new XMLParser({ignoreAttributes: false, cdataPropName: false});
+  
+//   const jsonObj = parser.parse(xml);
+//   const toolName = Object.keys(jsonObj)[0];
+//   const content = jsonObj[toolName];
+
+//   const toolData: ToolData = {
+//     toolName,
+//     arguments: {}
+//   };
+
+//   for (const key in content) {
+//     let value = content[key];
+
+//     // Check if the tool is CreateFile or EditFile and if the value is a string
+//     if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
+//       // Replace html entities globally
+//       console.log("Before replace: ", value.substring(0, 100), "...");
+//       value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&#x2F;/g, '/').replace(/&#x60;/g, '`').replace(/&#x3D;/g, '=').replace(/&#10;/g, '\n').replace(/&#13;/g, '\r').replace(/&#9;/g, '\t').replace(/&#x0;/g, '').replace(/&nbsp;/g, ' ').replace(/&#xA0;/g, ' ');
+//       console.log("After replace: ", value.substring(0, 100), "...");
+//     }
+
+//     toolData.arguments[key] = value;
+//   }
+
+//   return toolData;
+// };
+
+
+
+const xmlToJson = async (xml: string): Promise<Record<string, any>> => {
+  // 1. Extract the <text> and <command> content MANUALLY before parsing
+  // This prevents the parser from ever seeing the HTML/Code inside and nesting it.
+  const placeholders: Record<string, string> = {};
+  let processedXml = xml;
+
+  // We look for common "heavy" tags used in your tools
+  const tagsToProtect = ["text", "command", "prompt", "query", "initial_content"];
+  
+  tagsToProtect.forEach((tag, index) => {
+    const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "g");
+    processedXml = processedXml.replace(regex, (match, content) => {
+      const id = `__PLACEHOLDER_${index}__`;
+      placeholders[id] = content; // Store the raw code/text
+      return `<${tag}>${id}</${tag}>`; // Put a safe token in the XML
+    });
+  });
+
+  // 2. Configure Parser to handle the "cleaned" XML
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    processEntities: true,
+    htmlEntities: true,
+    trimValues: false
+  });
+
+  const jsonObj = parser.parse(processedXml);
+  
+  // Navigate to the tool content (handling <use_tool> wrapper)
+  const root = jsonObj.use_tool || jsonObj;
+  const toolName = Object.keys(root)[0];
+  const content = root[toolName];
+
+  if (!toolName) throw new Error("No tool name found");
+
+  const toolData: any = {
     toolName,
     arguments: {}
   };
 
-  for (const key in content) {
-    let value = content[key];
+  // 3. Process arguments and swap placeholders back
+  if (typeof content === 'object') {
+    for (const key in content) {
+      let value = content[key];
 
-    // Check if the tool is CreateFile or EditFile and if the value is a string
-    if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
-      // Replace html entities globally
-      console.log("Before replace: ", value.substring(0, 100), "...");
-      value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&#x2F;/g, '/').replace(/&#x60;/g, '`').replace(/&#x3D;/g, '=').replace(/&#10;/g, '\n').replace(/&#13;/g, '\r').replace(/&#9;/g, '\t').replace(/&#x0;/g, '').replace(/&nbsp;/g, ' ').replace(/&#xA0;/g, ' ');
-      console.log("After replace: ", value.substring(0, 100), "...");
+      // If the value is one of our placeholders, restore the original raw string
+      if (typeof value === 'string' && value.startsWith('__PLACEHOLDER_')) {
+        value = placeholders[value];
+      }
+      
+      // If parser still returned an object (fallback), flatten it
+      if (typeof value === 'object' && value !== null) {
+        // This is a safety net: if it's an object, it means extraction failed.
+        // We don't want nested JSON, so we just treat it as empty or handle it.
+        console.warn(`Warning: Tag <${key}> was still parsed as an object.`);
+      }
+
+      // Check if the tool is CreateFile or EditFile and if the value is a string
+      if ((toolName === 'CreateFile' || toolName === 'EditFile') && typeof value === 'string') {
+        // Replace html entities globally
+        console.log("Before replace: ", value.substring(0, 100), "...");
+        value = value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&#x2F;/g, '/').replace(/&#x60;/g, '`').replace(/&#x3D;/g, '=').replace(/&#10;/g, '\n').replace(/&#13;/g, '\r').replace(/&#9;/g, '\t').replace(/&#x0;/g, '').replace(/&nbsp;/g, ' ').replace(/&#xA0;/g, ' ');
+        console.log("After replace: ", value.substring(0, 100), "...");
+      }
+
+      toolData.arguments[key] = value;
     }
-
-    toolData.arguments[key] = value;
   }
 
   return toolData;
@@ -1165,17 +1241,43 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         console.log("Calling Ollama API...");
         console.log(process.env.API_OLLAMA!);
 
+        const regexM = /\{.*?\}\s*(.*)/;
+        let message
+        if (modeToUse == "code"){
+          message = buildMessages(  setting_prompt + 
+                                    "\n\nModel name : " + 
+                                    modelToUse.match(regexM)[1] + 
+                                    "\n\n", 
+                                    question_backup);
+        }
+        else{
+          message = buildMessages("You are assistance" + 
+                                  "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n` + 
+                                  "## **If user do not mation to user system information do not talk about that"+
+                                  "\n\nModel name : " + 
+                                  modelToUse.match(regexM)[1] + 
+                                  "\n\n",
+                                  question_backup 
+                                  // + `\n\n## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n`
+                                );
+        }
+
         const ollamaFetchResponse = await fetch(process.env.API_OLLAMA!, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: modelToUse.replace("{_Ollama_API_}",""),
-            prompt: question,
+            // prompt: question,
+            messages: message,
+            // options: {
+            //   "temperature": 0.7
+            // },
             stream: true
           }),
           signal: controller.signal, // 👈 important
         });
-        let out_res = '';
+        let full_thinking = '';
+        let full_content = '';
         let assistancePrefixRemoved = false;
 
         const stream = ollamaFetchResponse.body as Readable;
@@ -1183,30 +1285,45 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
         const result = await new Promise<string>((resolve, reject) => {
           stream.on('data', (chunk: Buffer) => {
             const text = chunk.toString('utf8');
+            // console.log('Received chunk:', text);
             const lines: string[] = text.split('\n').filter((line: string) => line.trim() !== '');
           
             for (const line of lines) {
               try {
-                const json = JSON.parse(line);
-                let chunkText = json.response;
-                out_res += chunkText;
-              
-                if (!assistancePrefixRemoved) {
-                  if (out_res.startsWith('assistance:')) {
-                    out_res = out_res.slice('assistance:'.length).trimStart();
-                    assistancePrefixRemoved = true;
+                  const json = JSON.parse(line);
+
+                  // 1. Handle "Thinking" (Reasoning)
+                  if (json.message?.thinking) {
+                      full_thinking += json.message.thinking;
+                      // Optional: You can emit thinking separately if your UI supports it
+                      // socket?.emit('StreamThinking', full_thinking);
                   }
-                }
-              
-                
-                socket?.emit('StreamText', out_res);
-              } catch (e) {
-                console.error('Invalid JSON:', line);
-              }
+
+                  // 2. Handle "Content" (The actual answer)
+                  if (json.message?.content) {
+                      let chunkText = json.message.content;
+                      full_content += chunkText;
+
+                      // Remove "assistance:" prefix if it exists at the very start
+                      if (!assistancePrefixRemoved && full_content.toLowerCase().startsWith('assistance:')) {
+                          full_content = full_content.slice('assistance:'.length).trimStart();
+                          assistancePrefixRemoved = true;
+                      }
+
+                      // Emit the updated content to the client
+                      socket?.emit('StreamText', full_content);
+                  }
+
+                  if (json.done) {
+                      console.log("Stream finished");
+                  }
+            } catch (e) {
+                console.error('Invalid JSON line:', line);
+            }
             }
           });
         
-          stream.on('end', () => resolve(out_res));
+          stream.on('end', () => resolve(full_content));
           stream.on('error', reject);
         });
 
@@ -1626,8 +1743,15 @@ ${hasKnowledgeData ? 'Generate a summary answer from the knowledge base:' : 'Ple
                 }
             }
             // =================================================================
-          
-            resultText = `Result:\n${response.content[0].text}\n user: current step using ${tool.toolName} is complete move to next step, If this task is completed, use tool <attempt_completion>`;
+            const attemptCompletionTool = "```xml \
+<use_tool> \
+  <attempt_completion> \
+    <result>Your final result description here</result> \
+    <command>Command to demonstrate result (optional)</command> \
+  </attempt_completion> \
+</use_tool> \
+```"
+            resultText = `Result:\n${response.content[0].text}\n user: current step using ${tool.toolName} is complete move to next step, If this task is completed, use tool : \n\n${attemptCompletionTool}`;
             all_response += `\n\n[Tool:${tool.toolName}]\n${resultText}`;
           }
         }
@@ -2018,17 +2142,43 @@ ${context}
         console.log("Calling Ollama API...");
         console.log(process.env.API_OLLAMA!);
 
+        const regexM = /\{.*?\}\s*(.*)/;
+        let message
+        if (modeToUse == "code"){
+          message = buildMessages(  setting_prompt + 
+                                    "\n\nModel name : " + 
+                                    modelToUse.match(regexM)[1] + 
+                                    "\n\n", 
+                                    question_backup);
+        }
+        else{
+          message = buildMessages("You are assistance" + 
+                                  "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n` + 
+                                  "## **If user do not mation to user system information do not talk about that"+
+                                  "\n\nModel name : " + 
+                                  modelToUse.match(regexM)[1] + 
+                                  "\n\n",
+                                  question_backup 
+                                  // + `\n\n## **Current Directory (current working dir)**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n`
+                                );
+        }
+
         const ollamaFetchResponse = await fetch(process.env.API_OLLAMA!, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: modelToUse.replace("{_Ollama_API_}",""),
-            prompt: question,
+            // prompt: question,
+            messages: message,
+            // options: {
+            //   "temperature": 0.7
+            // },
             stream: true
           }),
           signal: controller.signal, // 👈 important
         });
-        let out_res = '';
+        let full_thinking = '';
+        let full_content = '';
         let assistancePrefixRemoved = false;
 
         const stream = ollamaFetchResponse.body as Readable;
@@ -2036,30 +2186,45 @@ ${context}
         const result = await new Promise<string>((resolve, reject) => {
           stream.on('data', (chunk: Buffer) => {
             const text = chunk.toString('utf8');
+            // console.log('Received chunk:', text);
             const lines: string[] = text.split('\n').filter((line: string) => line.trim() !== '');
           
             for (const line of lines) {
               try {
-                const json = JSON.parse(line);
-                let chunkText = json.response;
-                out_res += chunkText;
-              
-                if (!assistancePrefixRemoved) {
-                  if (out_res.startsWith('assistance:')) {
-                    out_res = out_res.slice('assistance:'.length).trimStart();
-                    assistancePrefixRemoved = true;
+                  const json = JSON.parse(line);
+
+                  // 1. Handle "Thinking" (Reasoning)
+                  if (json.message?.thinking) {
+                      full_thinking += json.message.thinking;
+                      // Optional: You can emit thinking separately if your UI supports it
+                      // socket?.emit('StreamThinking', full_thinking);
                   }
-                }
-              
-                
-                socket?.emit('StreamText', out_res);
-              } catch (e) {
-                console.error('Invalid JSON:', line);
-              }
+
+                  // 2. Handle "Content" (The actual answer)
+                  if (json.message?.content) {
+                      let chunkText = json.message.content;
+                      full_content += chunkText;
+
+                      // Remove "assistance:" prefix if it exists at the very start
+                      if (!assistancePrefixRemoved && full_content.toLowerCase().startsWith('assistance:')) {
+                          full_content = full_content.slice('assistance:'.length).trimStart();
+                          assistancePrefixRemoved = true;
+                      }
+
+                      // Emit the updated content to the client
+                      socket?.emit('StreamText', full_content);
+                  }
+
+                  if (json.done) {
+                      console.log("Stream finished");
+                  }
+            } catch (e) {
+                console.error('Invalid JSON line:', line);
+            }
             }
           });
         
-          stream.on('end', () => resolve(out_res));
+          stream.on('end', () => resolve(full_content));
           stream.on('error', reject);
         });
 

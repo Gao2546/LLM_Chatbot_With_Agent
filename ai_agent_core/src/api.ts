@@ -882,7 +882,7 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
     }
 
     case 'ExecuteCommand': {
-      if (typeof toolParameters.command !== 'string' || typeof toolParameters.wait !== 'string') throw new Error('CMD requires a command.');
+      if (typeof toolParameters.command !== 'string') throw new Error('CMD requires a command.');
       const response = await emitWithAck(socket, toolName, toolParameters);
       console.log("Response from server:", response);
       return response
