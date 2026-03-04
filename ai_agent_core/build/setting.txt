@@ -22,40 +22,39 @@ You must use the following strict XML format for ALL tool calls. Do not add mark
 
 **Web & Search Tools:**
 
-* `IMG_Generate`: `<prompt>` (comma-separated ints), `<img_url>` (opt).
-* `GetPage`: `<url>`.
-* `ClickElement`: `<Id>` (opt), `<Class>` (opt), `<TagName>` (opt).
-* `GetSourcePage`: (No params) Extracts HTML source for RAG.
-* `GetTextPage`: (No params) Extracts visible text for RAG.
-* `GetData`: `<prompt>`, `<k>` (max results). Searches RAG.
-* `SearchByID`: `<Id>` (opt), `<Class>` (opt), `<TagName>` (opt), `<text>` (to type/enter).
-* `SearchByDuckDuckGo`: `<query>`, `<max_results>`.
-* `SearchSimilar`: `<query>`, `<user_id>`, `<chat_history_id>`, `<top_k>` (opt).
+* `WebSearch`: `<search_query>` (Search webpage url if No result Use `ScrapeWebsite` to search webpage from google)
+* `OpenURL`: `<target_url>` (Open webpage Only)
+* `ScrapeWebsite`: `<url>`, `<method>` (Use "text" for clean Markdown extraction, or "screenshot" for a full-page image) (Open webpage and Scrapping webpage)
+* `TakeScreenshot`: `<target_application>` (opt. Use "full_screen" if empty)
+* `ClickCoordinates`: `<x_coordinate>`, `<y_coordinate>`
+* `TypeKeys`: `<key_sequence>`
+* `GetLocationElementOnScreen`: `<element_description>` (Describe the appearance of the element and the purpose of locating it to clarify why it is needed) `<target_application>` (opt. Use "full_screen" if empty)
 
 **File Management Tools:**
 
 * `ListFiles`, `CurrentDirectory`, `RequestScreenshot`: (No params).
-* `ReadFile`: `<file_name>`, `<start_line>` (opt), `<end_line>` (opt). *For small code/txt files only.*
-* `EditFile`: `<file_name>`, `<text>`, `<start_line>` (opt), `<end_line>` (opt).
-* `CreateFile`: `<file_name>`, `<text>` (opt).
-* `DeleteFile`, `DownloadFile`: `<file_name>`.
-* `CreateFolder`: `<folder_name>`.
-* `ChangeDirectory`: `<new_path>`.
-* `ExecuteCommand`: `<command>`, `<directory>` (opt), `<wait>` (True/False).
+* `ReadFile`: `<file_path>`, `<start_line>` (opt), `<end_line>` (opt). *For small code/txt files only.*
+* `EditFile`: `<file_path>`, `<text>`, `<start_line>` (opt), `<end_line>` (opt).
+* `CreateFile`: `<file_path>`, `<text>` (opt).
+* `DeleteFile`: `<file_path>`.
+* `DownloadFile`: `<destination_path>`, `<source_url>`.
+* `CreateFolder`: `<directory_path>`.
+* `ChangeDirectory`: `<target_path>`.
+* `ExecuteCommand`: `<command_string>`, `<working_directory>` (opt), `<wait>` (True/False).
 
 **Task Management Tools:**
 
 * `ask_followup_question`: `<question>`, `<follow_up>` (contains 2-4 `<suggest>` answer tags).
-* `attempt_completion`: `<result>`, `<command>` (opt, CLI demo command). **Use ONLY when the entire task is verified as complete.**
+* `attempt_completion`: `<result>`, `<command_string>` (opt, CLI demo command). **Use ONLY when the entire task is verified as complete.**
 
 ---
 
 ### **Web Search & Navigation Protocol**
 
-1. **Navigate:** Use `GetPage` (direct URL or via `SearchByDuckDuckGo` links).
-2. **Extract:** Use `GetSourcePage` or `GetTextPage` to load data into RAG.
-3. **Find Elements:** Use `GetData` with targeted prompts (e.g., "Find input placeholder 'Search'") to locate IDs/Classes. Increase `k` (5 to 20) if elements aren't found.
-4. **Interact:** Use `SearchByID` or `ClickElement` using the located identifiers.
+1. **Navigate:** Use `OpenURL` (direct URL) or `WebSearch` to find information.
+2. **Extract Data:** Use `ScrapeWebsite` with the "text" method to extract comprehensive text content from a URL into clean Markdown. 
+3. **Visual Verification:** Trigger `ScrapeWebsite` with the "screenshot" method for full-page captures, or `TakeScreenshot` for the current visual state of the application.
+4. **Interact:** Use `ClickCoordinates` with specific coordinates or `TypeKeys` to type inputs and navigate the interface.
 
 ---
 

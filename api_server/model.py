@@ -10,6 +10,8 @@ import io # NEW IMPORT
 import concurrent.futures
 import multiprocessing
 import numpy as np
+from io import BytesIO
+from PIL import Image
 
 # Third-party libraries
 import bs4
@@ -40,6 +42,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Local imports (assuming 'utils' is a local package/directory)
 from utils.util import (
     # EditedFileSystem,
+    OpenRouterInference,
     encode_text_for_embedding,
     extract_docx_text,
     extract_excel_text,
@@ -585,6 +588,155 @@ def Search_By_DuckDuckGo():
     return jsonify({'result': results})
 
 
+# ========== NEW: Find Element Location (Bounding Box) ==========
+@app.route('/locate_element', methods=['POST'])
+def locate_element_api():
+    """
+    Finds the bounding box of a specified UI element or object in a screenshot.
+    
+    Request (JSON): { "image_base64": "...", "element_description": "Search bar" }
+    Request (Form): file=<image_file>, element_description="Search bar"
+    Response: { "location": [x_min, y_min, x_max, y_max], "status": "success" }
+    """
+    clear_gpu()
+    st = time.time()
+    
+    image_bytes = None
+    element_description = ""
+
+    # 1. Handle Input (JSON or Form-Data)
+    if request.content_type and 'application/json' in request.content_type:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "JSON body is required."}), 400
+        # print(f"Received JSON data: {data}")
+        with open('debug_locate_element.json', 'w') as f:
+            import json
+            json.dump(data, f, indent=4)
+        image_base64 = data.get('image_base64').strip().replace("\n", "").replace('\r', '').replace(' ', '').split(",")[-1]  # Handle data URI format
+        element_description = data.get('element_description')
+        
+        if image_base64:
+            import base64
+            try:
+                image_bytes = base64.b64decode(image_base64)
+            except Exception as e:
+                return jsonify({"error": f"Invalid base64 encoding: {e}"}), 400
+
+    elif request.files:
+        file = request.files.get('file')
+        element_description = request.form.get('element_description')
+        
+        if file and file.filename != '':
+            image_bytes = file.read()
+    else:
+        return jsonify({"error": "Unsupported Content-Type. Use JSON or Multipart Form."}), 400
+
+    # 2. Validate Inputs
+    if not image_bytes:
+        return jsonify({"error": "Image data (file or image_base64) is required."}), 400
+    if not element_description:
+        return jsonify({"error": "element_description is required."}), 400
+
+    # Get image dimensions
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        image_width, image_height = img.size
+        print(f"🔍 Image size: {image_width}x{image_height}")
+    except Exception as e:
+        print(f"Warning: Could not determine image size: {e}")
+        image_width, image_height = 1920, 1080  # Fallback to default
+
+    print(f"🔍 Locating '{element_description}' using VLM ({vlm_provider})...")
+
+    # 3. Prepare VLM Prompts
+    system_prompt = (
+        "You are an expert computer vision model trained to locate UI elements and objects on a screen. "
+        "Your task is to find the bounding box of the specified element in the image. "
+        "You must return EXACTLY AND ONLY a Python list of four normalized coordinates: [x_min, y_min, x_max, y_max]. "
+        "Each coordinate must be a float between 0.0 and 1.0 representing the relative position on the screen. "
+        f"The image dimensions are {image_width}x{image_height} pixels. "
+        "For example, if the object is in the top left, you might output: [0.05, 0.05, 0.15, 0.10]. "
+        "Do not include any explanation, markdown formatting, or additional text. Just the list."
+    )
+    prompt = f"Locate the element: '{element_description}'"
+    
+    response_text = ""
+
+    # 4. Invoke VLM based on LOCAL flag
+    try:
+        if LOCAL:
+            # Using local Ollama model (qwen3-vl:2b-instruct is highly recommended for grounding)
+            result = ollama_describe_image(
+                image_bytes=[image_bytes], 
+                model="qwen3-vl:2b-instruct", 
+                prompt=prompt,
+                system_prompt=system_prompt
+            )
+            # Handle if the helper returns a list or string
+            response_text = result[0] if isinstance(result, list) else result
+        else:
+            # Using DeepInfra/API
+            response_text = OpenRouterInference(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                image_bytes_list=[image_bytes],
+                model_name='moonshotai/kimi-k2.5'#'qwen/qwen3-vl-8b-instruct'
+            )
+    except Exception as e:
+        print(f"❌ Error calling VLM for element location: {e}")
+        return jsonify({"error": str(e)}), 500
+
+    print(f"Raw Model Output: {response_text.strip()}")
+
+    # 5. Parse the output coordinates
+    # 
+    # Regex extracts four floats formatted like [0.12, 0.34, 0.56, 0.78]
+    match = re.search(r'\[?\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\]?', response_text)
+    
+    coords = []
+    if match:
+        try:
+            coords = [
+                float(match.group(1)), 
+                float(match.group(2)), 
+                float(match.group(3)), 
+                float(match.group(4))
+            ]
+            
+            # Auto-correction: if the model mistakenly outputs pixel coordinates, normalize by image dimensions
+            if any(c > 1.0 for c in coords):
+                coords = [
+                    coords[0] / image_width,   # x_min
+                    coords[1] / image_height,  # y_min
+                    coords[2] / image_width,   # x_max
+                    coords[3] / image_height   # y_max
+                ]
+                
+        except ValueError:
+            pass
+
+    sto = time.time()
+    print(f"Location request complete. dT = {sto - st:.2f} Sec")
+    print(f"Real location: {coords[0]*image_width:.1f}, {coords[1]*image_height:.1f}, {coords[2]*image_width:.1f}, {coords[3]*image_height:.1f}" if coords else "No valid coordinates found.")
+
+    # 6. Return standard response
+    if coords:
+        return jsonify({
+            "status": "success",
+            "element": element_description,
+            "location": coords,
+            "raw_response": response_text.strip(),
+            "duration_sec": round(sto - st, 3)
+        }), 200
+    else:
+        return jsonify({
+            "status": "not_found",
+            "message": "Could not parse valid coordinates from the model's response.",
+            "raw_response": response_text.strip(),
+            "duration_sec": round(sto - st, 3)
+        }), 404
+
 # ==============================================================================
 #  UPDATED & NEW RAG ENDPOINTS
 # ==============================================================================
@@ -594,6 +746,8 @@ def convert_page_worker(args):
                     img_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi)
                     page_num_1_idx = page_num_0_idx + 1
                     return (page_num_1_idx, img_bytes)
+
+# process files and extract text or images, then embed and save to DB (each user and chat history has its own set of embeddings)
 
 @app.route('/process', methods=['POST'])
 def process():
@@ -626,6 +780,7 @@ def process():
     
     processed_files = []
     n_pages = 0
+    start_process = time.time()
     
     for file in files:
         filename = file.filename
@@ -811,6 +966,7 @@ def process():
         'processed_files': processed_files
     })
 
+# This endpoint is specifically designed for processing documents that are meant to be added to the Knowledge Base, where we want to force the `chat_history_id` to -1 to indicate a global context. It accepts both file uploads and raw text input, and allows the client to specify whether they want to process the input as 'text' or 'image' (for VLM embeddings). The endpoint handles the necessary logic to upload files, extract text, generate embeddings, and save everything to the database accordingly.
 
 @app.route('/processDocument', methods=['POST'])
 def process_document_api():
@@ -1137,6 +1293,7 @@ Output only the simulated excerpt.
             for text in [search_text, queryT]:
                 legacy_results = search_similar_documents_by_active_user(
                     query_text=text,
+                    search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
@@ -1148,6 +1305,7 @@ Output only the simulated excerpt.
             for text in [search_text, queryT]:
                 page_search_results = search_similar_pages_by_active_user(
                     query_text=text,
+                    search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
@@ -1167,6 +1325,7 @@ Output only the simulated excerpt.
             for text in [search_text, queryT]:
                 legacy_results = search_similar_documents_by_active_user_all(
                     query_text=text,
+                    search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
@@ -1178,6 +1337,7 @@ Output only the simulated excerpt.
             for text in [search_text, queryT]:
                 page_search_results = search_similar_pages_by_active_user_all(
                     query_text=text,
+                    search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
@@ -1211,6 +1371,7 @@ Output only the simulated excerpt.
                 for text in [search_text, queryT]:
                     legacy_results = search_similar_documents_by_chat(
                         query_text=text, 
+                        search_text=search_text,
                         user_id=user_id, 
                         chat_history_id=chat_history_id, 
                         top_k=top_k_text,
@@ -1223,6 +1384,7 @@ Output only the simulated excerpt.
                 for text in [search_text, queryT]:
                     page_search_results = search_similar_pages(
                         query_text=text, 
+                        search_text=search_text,
                         user_id=user_id, 
                         chat_history_id=chat_history_id, 
                         top_k=top_k_pages, 
@@ -1460,7 +1622,6 @@ def extract_text_api():
         elif 'excel' in mime_type or 'spreadsheet' in mime_type or file_ext in ['.xlsx', '.xls']:
             # Excel file
             try:
-                from io import BytesIO
                 extracted_text = extract_excel_text(BytesIO(file_bytes))
             except Exception as xls_err:
                 print(f"Excel extraction error: {xls_err}")
@@ -1821,48 +1982,7 @@ def encode_embedding():
         }), 500
 
 
-# === LLM INFERENCE ENDPOINT (for AI Judge) ===
-@app.route('/llm_inference', methods=['POST'])
-def llm_inference():
-    """เรียกใช้ LLM เพื่อ generate text
-    
-    Request body:
-    {
-        "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
-        "model": "llama3:latest",  # optional (default: llama3:latest)
-        "system_prompt": ""  # optional
-    }
-    
-    Used for: AI Judge to analyze AI vs Human answers
-    """
-    try:
-        data = request.json
-        prompt = data.get('prompt', '')
-        model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
-        system_prompt = data.get('system_prompt', '')
-        
-        if not prompt:
-            return jsonify({'error': 'No prompt provided'}), 400
-        
-        # Use ollama_generate_text from utils
-        response = ollama_generate_text(
-            prompt=prompt,
-            model=model,
-            system_prompt=system_prompt
-        )
-        
-        return jsonify({
-            'success': True,
-            'response': response,
-            'model': model
-        })
-    except Exception as e:
-        print(f"LLM inference error: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'response': ''
-        }), 500
+
 
 
 if __name__ == '__main__':
