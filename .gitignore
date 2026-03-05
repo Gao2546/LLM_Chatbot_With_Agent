@@ -29,7 +29,6 @@ tmp/
 *.backup
 .key
 *.keys
-*.crt
 __pycache__/
 data*/
 low_save/
