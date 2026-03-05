@@ -1391,7 +1391,8 @@ function displayMessage(text, className) {
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = () => verifyAnswer(text);
         
         buttonsDiv.appendChild(verifyBtn);
@@ -1400,7 +1401,8 @@ function displayMessage(text, className) {
             verifyBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
-            verifyBtn.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            verifyBtn.style.visibility = 'hidden';
         });
         
         messageElement.appendChild(buttonsDiv);
@@ -1740,8 +1742,10 @@ function displayMarkdownMessageStream(text, messageElement) {
             verifyBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
-            verifyBtn.style.display = 'none';
+            // copyButton.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            verifyBtn.style.visibility = 'hidden';
+            copyButton.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -2603,7 +2607,8 @@ function startEditMessage(messageElement, originalText) {
                 copyButton.style.display = 'inline-flex';
             });
             originalElement.addEventListener('mouseleave', () => {
-                copyButton.style.display = 'none';
+                // copyButton.style.display = 'none';
+                copyButton.style.visibility = 'hidden';
             });
         }
     }
