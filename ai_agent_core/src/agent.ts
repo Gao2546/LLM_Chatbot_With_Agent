@@ -1393,7 +1393,7 @@ router.post('/message', async (req : Request, res : Response) => {
     else{
       console.log("No document")
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = chatContent + "\n\n" + "document" + ": " + "No Document" + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
+      question_backup = chatContent  + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     const modelToUse = currentChatModel || initialModel;
