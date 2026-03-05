@@ -93,4 +93,4 @@ deploy_hicp:
     - echo "New version is $NEW_VERSION"
     - oc rollout restart deployment/$HICP_IMAGE_NAME2
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
