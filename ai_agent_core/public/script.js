@@ -1708,14 +1708,16 @@ function displayMarkdownMessageStream(text, messageElement) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = function() { 
             // Always use the GLOBAL lastAgentResponse first (has the FULL answer from API)
             // Then fallback to messageElement.dataset.fullText, then streaming text, then local text

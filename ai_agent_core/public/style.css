@@ -2018,6 +2018,7 @@ option::checkmark {
 @media (max-width: 1600px) {
     #messages{
         padding: 20px calc(50% - 400px) 20px calc(50% - 400px); 
+        padding-bottom: 100px;
     }
 
     .input-container{
@@ -2028,6 +2029,7 @@ option::checkmark {
 @media (max-width: 1400px) {
     #messages{
         padding: 20px calc(50% - 350px) 20px calc(50% - 350px); 
+        padding-bottom: 100px;
     }
 
     .input-container{
@@ -2037,7 +2039,8 @@ option::checkmark {
 
 @media (max-width: 1200px) {
     #messages{
-        padding: 20px calc(50% - 300px) 20px calc(50% - 300px); 
+        padding: 20px calc(50% - 300px) 20px calc(50% - 300px);
+        padding-bottom: 100px; 
     }
 
     .input-container{
@@ -2048,6 +2051,7 @@ option::checkmark {
 @media (max-width: 1000px) {
     #messages{
         padding: 20px calc(50% - 300px) 20px calc(50% - 300px); 
+        padding-bottom: 100px;
     }
 
     .input-container{
@@ -2057,7 +2061,8 @@ option::checkmark {
 
 @media (max-width: 950px) {
     #messages{
-        padding: 20px calc(50% - 250px) 20px calc(50% - 250px); 
+        padding: 20px calc(50% - 250px) 20px calc(50% - 250px);
+        padding-bottom: 100px; 
     }
 
     .input-container{
@@ -2211,6 +2216,7 @@ option::checkmark {
     #messages {
         width: 100%; 
         padding: 15px calc(50% - 250px) 15px calc(50% - 250px); 
+        padding-bottom: 100px;
     }
 
     .input-container {
