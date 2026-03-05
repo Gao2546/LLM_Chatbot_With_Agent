@@ -1267,20 +1267,22 @@ Prompt Type: Markdown
 
 Output only the simulated excerpt.
 """ #*****************
-    if not LOCAL:
-            search_text = DeepInfraInference(
-                prompt=create_search_prompt,
-                # system_prompt=system_prompt,
-                # image_bytes_list=image_bytes_list,
-                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-            )
 
-    else :
-        search_text = ollama_generate_text(
-            prompt=create_search_prompt,
-            model="gemma3:4b"
-        )
-    print(f"Search prompt: {search_text}")
+    if (document_search_method != 'none'):
+        if not LOCAL:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+
+        else:
+            search_text = ollama_generate_text(
+                prompt=create_search_prompt,
+                model="gemma3:4b"
+            )
+        print(f"Search prompt: {search_text}")
 
     # =========================================================
     # METHOD 1: searchDoc (Search by active_users permission)

@@ -1456,10 +1456,12 @@ function displayMessage(text, className) {
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            editButton.style.display = 'inline-flex';
+            // editButton.style.display = 'inline-flex';
+            editButton.style.display = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            editButton.style.display = 'none';
+            // editButton.style.display = 'none';
+            editButton.style.display = 'hidden';
         });
         
         // Edit button click handler
@@ -1790,14 +1792,16 @@ function displayMarkdownMessageStream(text, messageElement) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         verifyBtn.onclick = function() { 
             // Always use the GLOBAL lastAgentResponse first (has the FULL answer from API)
             // Then fallback to messageElement.dataset.fullText, then streaming text, then local text
@@ -1816,12 +1820,16 @@ function displayMarkdownMessageStream(text, messageElement) {
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
-            verifyBtn.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
-            verifyBtn.style.display = 'none';
+            // copyButton.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            copyButton.style.visibility = 'hidden';
+            verifyBtn.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -2662,10 +2670,12 @@ function startEditMessage(messageElement, originalText) {
                 startEditMessage(originalElement, originalText);
             });
             originalElement.addEventListener('mouseenter', () => {
-                editButton.style.display = 'inline-flex';
+                // editButton.style.display = 'inline-flex';
+                editButton.style.display = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
-                editButton.style.display = 'none';
+                // editButton.style.display = 'none';
+                editButton.style.display = 'hidden';
             });
         }
         if (copyButton) {
@@ -2680,10 +2690,12 @@ function startEditMessage(messageElement, originalText) {
                 });
             });
             originalElement.addEventListener('mouseenter', () => {
-                copyButton.style.display = 'inline-flex';
+                // copyButton.style.display = 'inline-flex';
+                copyButton.style.display = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
-                copyButton.style.display = 'none';
+                // copyButton.style.display = 'none';
+                copyButton.style.display = 'hidden';
             });
         }
     }
