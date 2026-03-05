@@ -9,7 +9,8 @@
     --border-color: #3a3a3a;
     --accent-color: #0a8276;
     --accent-hover: #086b61;
-    --user-msg-bg: #2c2c2c;
+    --user-msg-bg: transparent;
+    --user-msg-text-bg: #2c2c2c;
     --agent-msg-bg: rgba(255, 255, 255, 0.0);
     --agent-msg-hover: rgba(255, 255, 255, 0.03);
     --shadow: rgba(0, 0, 0, 0.2);
@@ -29,7 +30,8 @@
     --border-color: #dddddd;
     --accent-color: #0a8276; 
     --accent-hover: #00695c;
-    --user-msg-bg: #e0e0e0;
+    --user-msg-bg: transparent;
+    --user-msg-text-bg: #d0d0d0;
     --agent-msg-bg: rgba(0, 0, 0, 0.02);
     --agent-msg-hover: rgba(0, 0, 0, 0.05);
     --shadow: rgba(0, 0, 0, 0.1);
@@ -575,6 +577,21 @@ thinking {
 
 .user-message {
     background-color: var(--user-msg-bg);
+    color: var(--text-color);
+    margin-left: auto; 
+    border-bottom-right-radius: 5px; 
+    text-align: left;
+}
+
+.user-text {
+    margin-bottom: 15px; 
+    padding: 10px 15px; 
+    border-radius: 15px; 
+    max-width: fit-content; 
+    line-height: 1.5; 
+    word-wrap: break-word; 
+    
+    background-color: var(--user-msg-text-bg);
     color: var(--text-color);
     margin-left: auto; 
     border-bottom-right-radius: 5px; 

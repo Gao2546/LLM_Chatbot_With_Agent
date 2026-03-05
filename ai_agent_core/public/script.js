@@ -713,7 +713,8 @@ document.addEventListener('DOMContentLoaded', async (event) => {
                     }
 
                     if (data.chatIds) {
-                        await displayChatList(data.chatIds);
+                        const reverseChatIds = [...data.chatIds].reverse(); // Reverse to show most recent first
+                        await displayChatList(reverseChatIds);
                         const currChatId = data.currChatId;
 
                         // Highlight the active chat item
@@ -1315,7 +1316,8 @@ async function sendMessage() {
             const sessionData = await sessionResponse.json();
             if (sessionData.loggedIn) {
                 if (sessionData.chatIds) {
-                    await displayChatList(sessionData.chatIds); // Ensure displayChatList is awaited if it becomes async
+                    const reverseChatIds = [...data.chatIds].reverse(); // Reverse to show most recent first
+                    await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
                     const currChatId = sessionData.currChatId;
 
                     // Highlight the active chat item
@@ -1519,11 +1521,18 @@ function normalizeLatexDelimiters(s) {
 
 
 function displayMarkdownMessage(text, className, userQuestion = null) {
-    // const html = markdown.render(text);
-    const html = markdown.render(normalizeLatexDelimiters(text));
+    const html = markdown.render(text);
     const messageElement = document.createElement('div');
-    messageElement.innerHTML = html;
     messageElement.className = className;
+    if (className === 'user-message') {
+        const userTextElement = document.createElement('div');
+        userTextElement.innerHTML = html;
+        userTextElement.className = 'user-text';
+        messageElement.appendChild(userTextElement);
+    }
+    else {
+        messageElement.innerHTML = html;
+    }
     messageElement.dataset.fullText = text; // Store the full text for later use
     
     // Add copy button for agent messages
@@ -1539,24 +1548,30 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
-            verifyBtn.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
-            verifyBtn.style.display = 'none';
+            // copyButton.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            copyButton.style.visibility = 'hidden';
+            verifyBtn.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -1583,14 +1598,28 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         editButton.className = 'edit-button';
         editButton.classList.add('action-button');
         editButton.title = 'Edit message';
-        editButton.style.display = 'none'; // Hidden by default
+        // editButton.style.display = 'none'; // Hidden by default
+        editButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
+
+        if (text.length > 500) {
+            messageElement.classList.add('collapsible', 'collapsed');
+            
+            messageElement.addEventListener('click', (e) => {
+                // ถ้าคลิกโดนปุ่ม action (copy/edit) ไม่ต้องซ้อนข้อความ
+                if (e.target.closest('.action-button')) return;
+                
+                messageElement.classList.toggle('collapsed');
+            });
+        }
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            editButton.style.display = 'inline-flex';
+            // editButton.style.display = 'inline-flex';
+            editButton.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            editButton.style.display = 'none';
+            // editButton.style.display = 'none';
+            editButton.style.visibility = 'hidden';
         });
         
         // Edit button click handler
@@ -1605,14 +1634,17 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
+            // copyButton.style.display = 'none';
+            copyButton.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -1634,13 +1666,8 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // if (window.MathJax) {
-    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
-    // }
-
-    if (window.MathJax?.typesetPromise) {
-        MathJax.typesetClear([messageElement]);           // กันสมการซ้อน/หน่วง
-        MathJax.typesetPromise([messageElement]).catch(console.error);
+    if (window.MathJax) {
+        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
     }
 }
 
