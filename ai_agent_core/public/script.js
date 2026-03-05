@@ -1367,10 +1367,12 @@ function displayMessage(text, className) {
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            editButton.style.display = 'inline-flex';
+            // editButton.style.display = 'inline-flex';
+            editButton.style.display = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            editButton.style.display = 'none';
+            // editButton.style.display = 'none';
+            editButton.style.display = 'hidden';
         });
         
         // Edit button click handler
@@ -1398,7 +1400,8 @@ function displayMessage(text, className) {
         buttonsDiv.appendChild(verifyBtn);
         
         messageElement.addEventListener('mouseenter', () => {
-            verifyBtn.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
             // verifyBtn.style.display = 'none';
@@ -1738,8 +1741,10 @@ function displayMarkdownMessageStream(text, messageElement) {
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
-            verifyBtn.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
             // copyButton.style.display = 'none';
@@ -2586,10 +2591,12 @@ function startEditMessage(messageElement, originalText) {
                 startEditMessage(originalElement, originalText);
             });
             originalElement.addEventListener('mouseenter', () => {
-                editButton.style.display = 'inline-flex';
+                // editButton.style.display = 'inline-flex';
+                editButton.style.visibility = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
-                editButton.style.display = 'none';
+                // editButton.style.display = 'none';
+                editButton.style.visibility = 'hidden';
             });
         }
         if (copyButton) {
@@ -2604,7 +2611,8 @@ function startEditMessage(messageElement, originalText) {
                 });
             });
             originalElement.addEventListener('mouseenter', () => {
-                copyButton.style.display = 'inline-flex';
+                // copyButton.style.display = 'inline-flex';
+                copyButton.style.visibility = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
                 // copyButton.style.display = 'none';
