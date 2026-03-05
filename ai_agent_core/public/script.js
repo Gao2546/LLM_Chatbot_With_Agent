@@ -57,7 +57,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            target_path: toolParameters.target_path,
+            new_path: toolParameters.new_path,
           }),
           mode: "cors",
           credentials: "include"
@@ -73,7 +73,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            file_path: toolParameters.file_path,
+            file_name: toolParameters.file_name,
             start_line: toolParameters.start_line,
             end_line: toolParameters.end_line
           },),
@@ -91,7 +91,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            file_path: toolParameters.file_path,
+            file_name: toolParameters.file_name,
             text: toolParameters.text,
             start_line: toolParameters.start_line,
             end_line: toolParameters.end_line
@@ -111,7 +111,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            file_path: toolParameters.file_path,
+            file_name: toolParameters.file_name,
             text: toolParameters.text
           }),
           mode: "cors",
@@ -127,7 +127,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
         const response = await fetch(`${baseURL}/delete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_path: toolParameters.file_path }),
+          body: JSON.stringify({ file_name: toolParameters.file_name }),
           mode: "cors",
           credentials: "include"
         });
@@ -141,10 +141,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
         const response = await fetch(`${baseURL}/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            source_url: toolParameters.source_url,
-            destination_path: toolParameters.destination_path
-          }),
+          body: JSON.stringify({ file_name: toolParameters.file_name }),
           mode: "cors",
           credentials: "include"
         });
@@ -161,7 +158,7 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
         const response = await fetch(`${baseURL}/create_folder`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ directory_path: toolParameters.directory_path }),
+          body: JSON.stringify({ folder_name: toolParameters.folder_name }),
           mode: "cors",
           credentials: "include"
         });
@@ -177,8 +174,8 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-              command_string: toolParameters.command_string,
-              working_directory: toolParameters.working_directory, // optional
+              command: toolParameters.command,
+              directory: toolParameters.directory, // optional
               wait: toolParameters.wait ? toolParameters.wait : 'False'
             }),
             mode: "cors",
@@ -198,132 +195,46 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
         break;
         }
 
-        // ==========================================
-        // WEB & UI AUTOMATION TOOLS
-        // ==========================================
-
-      case 'WebSearch': {
-        const response = await fetch(`${baseSysURL}/search`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ search_query: toolParameters.search_query }),
-          mode: "cors", credentials: "include"
-        });
-        const data = await response.json();
-        callback(data);
-        break;
-      }
-
-      case 'OpenURL': {
-        const response = await fetch(`${baseSysURL}/open`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_url: toolParameters.target_url }),
-          mode: "cors", credentials: "include"
-        });
-        const data = await response.json();
-        callback(data);
-        break;
-      }
-
-      case 'ScrapeWebsite': {
-        console.log("Server requested web scraping via 'ScrapeWebsite' tool with parameters:", toolParameters);
-        const response = await fetch(`${baseSysURL}/scrape`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            url: toolParameters.url, 
-            method: toolParameters.method || 'text' 
-          }),
-          mode: "cors",
-          signal: AbortSignal.timeout(24*60*60*1000)
-        });
-        const data = await response.json();
-        callback(data);
-        break;
-      }
-
-      case 'ClickCoordinates': {
-        const response = await fetch(`${baseSysURL}/click`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            x_coordinate: toolParameters.x_coordinate, 
-            y_coordinate: toolParameters.y_coordinate 
-          }),
-          mode: "cors", credentials: "include"
-        });
-        const data = await response.json();
-        callback(data);
-        break;
-      }
-
-      case 'TypeKeys': {
-        const response = await fetch(`${baseSysURL}/type`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key_sequence: toolParameters.key_sequence }),
-          mode: "cors", credentials: "include"
-        });
-        const data = await response.json();
-        callback(data);
-        break;
-      }
-
-      case 'TakeScreenshot': {
-        console.log("Server requested screenshot via 'TakeScreenshot' tool.");
-        try {
-          const response = await fetch(`${baseSysURL}/screenshot`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_application: toolParameters.target_application }),
-            mode: "cors"
-          });
-          
-          if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-          
-          const imageBlob = await response.blob();
-          
-          // 1. แปลงเป็น Base64
-          const base64Image = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(imageBlob);
-          });
-
-          // 2. ดึงค่า Metadata (กว้าง, ยาว ในหน่วย Pixel)
-          const dimensions = await new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-              resolve({ width: img.width, height: img.height });
-            };
-            img.onerror = () => {
-              resolve({ width: null, height: null }); // Fallback กรณีโหลดภาพไม่สำเร็จ
-            };
-            img.src = base64Image;
-          });
-          
-          console.log(`Screenshot captured. Size: ${dimensions.width}x${dimensions.height}px, ${imageBlob.size} bytes`);
-          
-          // 3. ส่งข้อมูลกลับไปยัง Server พร้อม Metadata
-          callback({
-            imageData: base64Image,
-            metadata: {
-              width: dimensions.width,
-              height: dimensions.height,
-              sizeBytes: imageBlob.size,
-              mimeType: imageBlob.type
-            },
-            message: `Screenshot captured successfully. Resolution: ${dimensions.width}x${dimensions.height}px. This is current screen content, not a specific application.`
-          });
-        } catch (error) {
-          console.error("Screenshot capture failed:", error);
-          callback({ imageData: null, message: `Error: Could not capture screenshot. ${error.message}` });
+        case 'TakeScreenshot': {
+          console.log("Server requested screenshot via 'TakeScreenshot' tool.");
+        
+          try {
+            // 1. Fetch the image from your local API
+            const response = await fetch(`${baseSysURL}/screenshot`);
+        
+            // 2. Check if the network request was successful
+            if (!response.ok) {
+              throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+        
+            // 3. Get the raw image data as a Blob
+            const imageBlob = await response.blob();
+        
+            // 4. Convert the Blob to a Base64 string to send via the callback
+            const base64Image = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result); // The result is the base64 string
+              reader.onerror = reject;
+              reader.readAsDataURL(imageBlob); // This starts the conversion
+            });
+        
+            // 5. Now, send the base64 string back to the server
+            console.log(`Screenshot sent back to server. Size: ${base64Image.length}`);
+            callback({
+              imageData: base64Image, // This is now a proper base64 data URL
+              message: "Screenshot captured successfully."
+            });
+        
+          } catch (error) {
+            console.error("Screenshot capture failed:", error);
+            // Send an error back if any step failed
+            callback({
+              imageData: null,
+              message: `Error: Could not capture screenshot. ${error.message}`
+            });
+          }
+          break;
         }
-        break;
-      }
-
 
 
 
@@ -802,8 +713,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
                     }
 
                     if (data.chatIds) {
-                        const reverseChatIds = [...data.chatIds].reverse(); // Reverse to show most recent first
-                        await displayChatList(reverseChatIds);
+                        await displayChatList(data.chatIds);
                         const currChatId = data.currChatId;
 
                         // Highlight the active chat item
@@ -1405,8 +1315,7 @@ async function sendMessage() {
             const sessionData = await sessionResponse.json();
             if (sessionData.loggedIn) {
                 if (sessionData.chatIds) {
-                    const reverseChatIds = [...sessionData.chatIds].reverse(); // Reverse to show most recent first
-                    await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
+                    await displayChatList(sessionData.chatIds); // Ensure displayChatList is awaited if it becomes async
                     const currChatId = sessionData.currChatId;
 
                     // Highlight the active chat item
@@ -1613,16 +1522,8 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     // const html = markdown.render(text);
     const html = markdown.render(normalizeLatexDelimiters(text));
     const messageElement = document.createElement('div');
+    messageElement.innerHTML = html;
     messageElement.className = className;
-    if (className === 'user-message') {
-        const userTextElement = document.createElement('div');
-        userTextElement.innerHTML = html;
-        userTextElement.className = 'user-text';
-        messageElement.appendChild(userTextElement);
-    }
-    else {
-        messageElement.innerHTML = html;
-    }
     messageElement.dataset.fullText = text; // Store the full text for later use
     
     // Add copy button for agent messages
@@ -1638,30 +1539,24 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        // copyButton.style.display = 'none'; // Hidden by default
-        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
+        copyButton.style.display = 'none'; // Hidden by default
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        // verifyBtn.style.display = 'none';
-        verifyBtn.style.visibility = 'hidden';
+        verifyBtn.style.display = 'none';
         verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            // copyButton.style.display = 'inline-flex';
-            // verifyBtn.style.display = 'inline-flex';
-            copyButton.style.visibility = 'visible';
-            verifyBtn.style.visibility = 'visible';
+            copyButton.style.display = 'inline-flex';
+            verifyBtn.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
-            // copyButton.style.display = 'none';
-            // verifyBtn.style.display = 'none';
-            copyButton.style.visibility = 'hidden';
-            verifyBtn.style.visibility = 'hidden';
+            copyButton.style.display = 'none';
+            verifyBtn.style.display = 'none';
         });
         
         // Copy button click handler
@@ -1688,28 +1583,14 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         editButton.className = 'edit-button';
         editButton.classList.add('action-button');
         editButton.title = 'Edit message';
-        // editButton.style.display = 'none'; // Hidden by default
-        editButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
-
-        if (text.length > 500) {
-            messageElement.classList.add('collapsible', 'collapsed');
-            
-            messageElement.addEventListener('click', (e) => {
-                // ถ้าคลิกโดนปุ่ม action (copy/edit) ไม่ต้องซ้อนข้อความ
-                if (e.target.closest('.action-button')) return;
-                
-                messageElement.classList.toggle('collapsed');
-            });
-        }
+        editButton.style.display = 'none'; // Hidden by default
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            // editButton.style.display = 'inline-flex';
-            editButton.style.visibility = 'visible';
+            editButton.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
-            // editButton.style.display = 'none';
-            editButton.style.visibility = 'hidden';
+            editButton.style.display = 'none';
         });
         
         // Edit button click handler
@@ -1724,17 +1605,14 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        // copyButton.style.display = 'none'; // Hidden by default
-        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
+        copyButton.style.display = 'none'; // Hidden by default
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            // copyButton.style.display = 'inline-flex';
-            copyButton.style.visibility = 'visible';
+            copyButton.style.display = 'inline-flex';
         });
         messageElement.addEventListener('mouseleave', () => {
-            // copyButton.style.display = 'none';
-            copyButton.style.visibility = 'hidden';
+            copyButton.style.display = 'none';
         });
         
         // Copy button click handler
@@ -2109,15 +1987,8 @@ function populateModels(returnDefault = false) {
         // { id: '{_Ollama_API_}gemma3:12b', name: 'gemma3:12b' },
         // { id: '{_Ollama_API_}gemma3:27b', name: 'gemma3:27b' },
         { id: '{_Ollama_API_}qwen3:4b', name: 'OLqwen3:4b'},
-<<<<<<< HEAD
-        { id: '{_Ollama_API_}qwen3:8b', name: 'OLqwen3:8b'},
-        { id: '{_Ollama_API_}qwen3.5:0.8b', name: 'OLqwen3.5:0.8b'},
-        { id: '{_Ollama_API_}qwen3.5:4b', name: 'OLqwen3.5:4b'},
-        { id: '{_Ollama_API_}qwen3.5:9b', name: 'OLqwen3.5:9b'},
-=======
         { id: '{_Ollama_API_}functiongemma', name: 'OLfunctiongemma'},
         { id: '{_Ollama_API_}translategemma:4b', name: 'OLtranslategemma:4b'},
->>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         { id: '{_Google_API_}gemma-3-1b-it', name: 'GGgemma-3-1b-it'},
         { id: '{_Google_API_}gemma-3-4b-it', name: 'GGemma-3-4b-it'},
         { id: '{_Google_API_}gemma-3-12b-it', name: 'GGgemma-3-12b-it'},
@@ -2188,17 +2059,12 @@ function populateModels(returnDefault = false) {
         { id: '{_OpenRouter_API_}qwen/qwen3-coder', name: 'ORqwen3-coder'},
         { id: '{_OpenRouter_API_}qwen/qwen3-coder-30b-a3b-instruct', name: 'ORqwen3-coder-30b-a3b-instruct'},
         { id: '{_OpenRouter_API_}qwen/qwen3-coder-30b-a3b-instruct:free', name: 'ORqwen3-coder-30b-a3b-instruct:free'},
-        { id: '{_OpenRouter_API_}qwen/qwen3-8b', name: 'ORqwen3-8b'},
-        { id: '{_OpenRouter_API_}qwen/qwen3.5-flash-02-23', name: 'ORqwen3.5-flash-02-23'},
         { id: '{_OpenRouter_API_}meta-llama/llama-3.1-8b-instruct', name: 'ORllama-3.1-8b-instruct'},
         { id: '{_OpenRouter_API_}meta-llama/llama-3.2-1b-instruct', name: 'ORllama-3.1-1b-instruct'},
         { id: '{_OpenRouter_API_}minimax/minimax-m2', name: 'ORminimax-m2'},
         { id: '{_OpenRouter_API_}minimax/minimax-m2:free', name: 'ORminimax-m2:free'},
-        { id: '{_OpenRouter_API_}minimax/minimax-m2.5', name: 'ORminimax-m2.5'},
-        { id: '{_OpenRouter_API_}minimax/minimax-m2.5:free', name: 'ORminimax-m2.5:free'},
         { id: '{_OpenRouter_API_}kwaipilot/kat-coder-pro', name: 'ORkat-coder-pro'},
         { id: '{_OpenRouter_API_}openrouter/sonoma-sky-alpha', name: 'ORsonoma-sky-alpha'},
-        { id: '{_OpenRouter_API_}arcee-ai/trinity-large-preview:free', name: 'ORtrinity-large-preview:free'},
         // { id: '{_Ollama_API_}hhao/qwen2.5-coder-tools:7b', name: 'hhao/qwen2.5-coder-tools:7b' },
         // { id: '{_Ollama_API_}hhao/qwen2.5-coder-tools:14b', name: 'hhao/qwen2.5-coder-tools:14b' },
         // { id: '{_Ollama_API_}llama3.2:latest', name: 'llama3.2:latest' },
@@ -2877,3 +2743,705 @@ window.navigateToHomeDirectoryForChange = navigateToHomeDirectoryForChange;
 window.confirmDirectoryChange = confirmDirectoryChange;
 window.filterItemsForChange = filterItemsForChange;
 window.selectDirectoryForChange = selectDirectoryForChange;
+
+// === Verified Answers Functions ===
+async function verifyAnswer(answerText, verifyBtn) {
+    // Try to get user question from the message element's stored data, fallback to window.lastUserMessage
+    let lastUserMessage = 'Unknown question';
+    let messageElement = null;
+    
+    if (verifyBtn && verifyBtn.closest) {
+        messageElement = verifyBtn.closest('[class*="message"]');
+        if (messageElement && messageElement.dataset.userQuestion) {
+            lastUserMessage = messageElement.dataset.userQuestion;
+        }
+    }
+    
+    if (lastUserMessage === 'Unknown question') {
+        lastUserMessage = window.lastUserMessage || 'Unknown question';
+    }
+    
+    // ===== USE GLOBAL RESPONSE (most reliable source) =====
+    let finalAnswer = lastAgentResponse || answerText;
+    
+    if (!finalAnswer || finalAnswer.length === 0) {
+        console.error('Error: finalAnswer is empty!');
+        alert('Error: Response is empty. Please try again.');
+        return;
+    }
+    
+    // PROTECTION: Check if stream is complete
+    if (messageElement && messageElement.dataset.isStreamComplete === 'false') {
+        alert('⏳ โปรดรอให้ response มาสมบูรณ์ก่อน verify...');
+        return;
+    }
+    
+    // Show the verify modal
+    showVerifyModal(lastUserMessage, finalAnswer, verifyBtn);
+}
+
+// Show Verify Modal (Community-style)
+async function showVerifyModal(question, answer, verifyBtn) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('verifyModal');
+    if (existingModal) existingModal.remove();
+    
+    // Clean answer: remove AI source reference footer (📚 อ้างอิงจาก... | 🤖 สร้างโดย...)
+    let cleanAnswer = answer;
+    // Remove the AI reference line at the end
+    cleanAnswer = cleanAnswer.replace(/\n*---\n*📚.*อ้างอิงจาก.*คำตอบที่ยืนยันแล้ว.*\|.*สร้างโดย.*$/s, '');
+    cleanAnswer = cleanAnswer.replace(/\n*---\n*⚠️.*ไม่พบข้อมูลในฐานความรู้.*\|.*$/s, '');
+    cleanAnswer = cleanAnswer.trim();
+    
+    // Fetch hot tags from API
+    let availableTags = ['PRVX 4', 'D1', 'Handler', 'V9300']; // fallback
+    try {
+        const tagsResponse = await fetch('/api/hot-tags?limit=4');
+        const tagsData = await tagsResponse.json();
+        if (tagsData.success && tagsData.tags.length > 0) {
+            availableTags = tagsData.tags.map(t => t.tag);
+        }
+    } catch (e) {
+        console.error('Error fetching hot tags:', e);
+    }
+    
+    // Available departments
+    const departments = ['WT', 'FT', 'P', 'LOG', 'OE', 'IT', 'Other'];
+    
+    // Fetch template from external file
+    let templateHTML = '';
+    try {
+        const response = await fetch('/verifyAnswer1_page.html');
+        templateHTML = await response.text();
+    } catch (error) {
+        console.error('Error loading verify modal template:', error);
+        return;
+    }
+    
+    // Build dynamic content
+    const tagsHTML = availableTags.map(tag => `<div class="verify-tag-item" data-tag="${tag}">${tag}</div>`).join('');
+    const departmentsHTML = departments.map(dept => `
+        <label class="verify-dept-dropdown-item">
+            <input type="checkbox" name="requestDept" value="${dept}">
+            <span class="verify-dept-checkbox-box"></span>
+            <span class="verify-dept-checkbox-text">${dept}</span>
+        </label>
+    `).join('');
+    
+    // Replace placeholders in template
+    let cleanAnswerForDisplay = formatMarkdownToHtml(cleanAnswer.substring(0, 800) + (cleanAnswer.length > 800 ? '...' : ''));
+    let modalHTML = templateHTML
+        .replace('{{QUESTION}}', escapeHtml(question))
+        .replace('{{ANSWER}}', cleanAnswerForDisplay)
+        .replace('{{TAGS}}', tagsHTML)
+        .replace('{{DEPARTMENTS}}', departmentsHTML);
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Get modal elements
+    const modal = document.getElementById('verifyModal');
+    const closeBtn = document.getElementById('verifyModalClose');
+    const cancelBtn = document.getElementById('verifyBtnCancel');
+    const submitBtn = document.getElementById('verifyBtnSubmit');
+    const myDeptSelectWrapper = document.getElementById('myDeptSelectWrapper');
+    const requestDeptSelectWrapper = document.getElementById('requestDeptSelectWrapper');
+    const myDeptDropdownHeader = document.getElementById('myDeptDropdownHeader');
+    const myDeptDropdownMenu = document.getElementById('myDeptDropdownMenu');
+    const myDeptDropdownText = document.getElementById('myDeptDropdownText');
+    const requestDeptDropdownHeader = document.getElementById('requestDeptDropdownHeader');
+    const requestDeptDropdownMenu = document.getElementById('requestDeptDropdownMenu');
+    const requestDeptDropdownText = document.getElementById('requestDeptDropdownText');
+    
+    // Radio button toggle handler - show/hide dropdown based on verification type
+    const radioButtons = document.querySelectorAll('input[name="verificationType"]');
+    const notifySection = document.getElementById('notifyCheckbox')?.closest('.verify-checkbox-section');
+    const verifyTypeSection = document.querySelector('.verify-type-section');
+    
+    // Hide notify checkbox and border by default (only show when request verification is selected)
+    if (notifySection) {
+        notifySection.style.display = 'none';
+    }
+    if (verifyTypeSection) {
+        verifyTypeSection.style.borderBottom = 'none';
+    }
+    
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'self') {
+                myDeptSelectWrapper.style.display = 'block';
+                requestDeptSelectWrapper.style.display = 'none';
+                // Hide notify checkbox and border for self verification
+                if (notifySection) {
+                    notifySection.style.display = 'none';
+                }
+                if (verifyTypeSection) {
+                    verifyTypeSection.style.borderBottom = 'none';
+                }
+            } else {
+                myDeptSelectWrapper.style.display = 'none';
+                requestDeptSelectWrapper.style.display = 'block';
+                // Show notify checkbox and border for request verification
+                if (notifySection) {
+                    notifySection.style.display = 'block';
+                }
+                if (verifyTypeSection) {
+                    verifyTypeSection.style.borderBottom = '1px solid var(--border-color)';
+                }
+            }
+        });
+    });
+    
+    // My Department Dropdown toggle handler
+    myDeptDropdownHeader.addEventListener('click', () => {
+        myDeptDropdownMenu.classList.toggle('show');
+        myDeptDropdownHeader.classList.toggle('open');
+    });
+    
+    // Request Department Dropdown toggle handler
+    requestDeptDropdownHeader.addEventListener('click', () => {
+        requestDeptDropdownMenu.classList.toggle('show');
+        requestDeptDropdownHeader.classList.toggle('open');
+    });
+    
+    // Update my department dropdown text when checkboxes change
+    myDeptDropdownMenu.addEventListener('change', () => {
+        const checked = Array.from(document.querySelectorAll('input[name="myDept"]:checked'));
+        if (checked.length > 0) {
+            myDeptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
+            myDeptDropdownText.classList.add('has-selection');
+        } else {
+            myDeptDropdownText.textContent = 'Select department...';
+            myDeptDropdownText.classList.remove('has-selection');
+        }
+    });
+    
+    // Update request department dropdown text when checkboxes change
+    requestDeptDropdownMenu.addEventListener('change', () => {
+        const checked = Array.from(document.querySelectorAll('input[name="requestDept"]:checked'));
+        if (checked.length > 0) {
+            requestDeptDropdownText.textContent = checked.map(cb => cb.value).join(', ');
+            requestDeptDropdownText.classList.add('has-selection');
+        } else {
+            requestDeptDropdownText.textContent = 'Select department...';
+            requestDeptDropdownText.classList.remove('has-selection');
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.verify-dept-dropdown')) {
+            myDeptDropdownMenu.classList.remove('show');
+            myDeptDropdownHeader.classList.remove('open');
+            requestDeptDropdownMenu.classList.remove('show');
+            requestDeptDropdownHeader.classList.remove('open');
+        }
+    });
+    
+    // Selected tags array
+    let selectedTags = [];
+    let customTags = [];
+    
+    // Tag selection handler (only if tagsGrid exists)
+    const tagsGrid = document.getElementById('verifyTagsGrid');
+    if (tagsGrid) {
+        tagsGrid.addEventListener('click', (e) => {
+            const tagItem = e.target.closest('.verify-tag-item');
+            if (tagItem) {
+                const tag = tagItem.dataset.tag;
+                if (tagItem.classList.contains('selected')) {
+                    tagItem.classList.remove('selected');
+                    selectedTags = selectedTags.filter(t => t !== tag);
+                } else {
+                    tagItem.classList.add('selected');
+                    selectedTags.push(tag);
+                }
+            }
+        });
+    }
+    
+    // Custom tag input handler
+    const customTagInput = document.getElementById('customTagInput');
+    const customTagsContainer = document.getElementById('customTagsContainer');
+    const addCustomTagBtn = document.getElementById('addCustomTagBtn');
+    
+    if (!customTagInput || !customTagsContainer || !addCustomTagBtn) {
+        console.error('Custom tag elements not found', {
+            input: !!customTagInput,
+            container: !!customTagsContainer,
+            btn: !!addCustomTagBtn
+        });
+    } else {
+        console.log('✅ Custom tag elements found successfully');
+        
+        function addCustomTag() {
+            console.log('addCustomTag called, value:', customTagInput.value);
+            const tagValue = customTagInput.value.trim();
+            console.log('Trimmed value:', tagValue, 'Length:', tagValue.length);
+            
+            if (tagValue && !customTags.includes(tagValue) && tagValue.length <= 20) {
+                console.log('Adding tag:', tagValue);
+                customTags.push(tagValue);
+                
+                // Create tag badge with remove button
+                const tagBadge = document.createElement('span');
+                tagBadge.className = 'custom-tag-badge';
+                tagBadge.innerHTML = `
+                    <span style="margin-right: 6px;">${tagValue}</span>
+                    <i class="fas fa-times-circle" style="cursor: pointer; opacity: 0.7; transition: opacity 0.2s;"></i>
+                `;
+                tagBadge.style.cssText = 'display: inline-flex; align-items: center; padding: 8px 12px; background: linear-gradient(135deg, #0a8276 0%, #0a6b61 100%); color: white; border-radius: 20px; font-size: 12px; font-weight: 500; box-shadow: 0 2px 4px rgba(10, 130, 118, 0.3); transition: transform 0.2s;';
+                
+                // Hover effect
+                tagBadge.addEventListener('mouseenter', () => {
+                    tagBadge.style.transform = 'scale(1.05)';
+                    tagBadge.querySelector('i').style.opacity = '1';
+                });
+                tagBadge.addEventListener('mouseleave', () => {
+                    tagBadge.style.transform = 'scale(1)';
+                    tagBadge.querySelector('i').style.opacity = '0.7';
+                });
+                
+                // Remove tag on click X
+                tagBadge.querySelector('i').addEventListener('click', () => {
+                    customTags = customTags.filter(t => t !== tagValue);
+                    tagBadge.style.transform = 'scale(0)';
+                    setTimeout(() => tagBadge.remove(), 200);
+                });
+                
+                customTagsContainer.appendChild(tagBadge);
+                customTagInput.value = '';
+                customTagInput.focus();
+            } else if (tagValue.length > 20) {
+                alert('Tag name must be 20 characters or less');
+            }
+        }
+        
+        customTagInput.addEventListener('keypress', (e) => {
+            console.log('Keypress event:', e.key);
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                console.log('Enter pressed, calling addCustomTag');
+                addCustomTag();
+            }
+        });
+        
+        addCustomTagBtn.addEventListener('click', (e) => {
+            console.log('Add button clicked');
+            e.preventDefault();
+            e.stopPropagation();
+            addCustomTag();
+        });
+        
+        // Input focus effect
+        customTagInput.addEventListener('focus', () => {
+            customTagInput.style.borderColor = '#0a8276';
+            customTagInput.style.background = 'rgba(10, 130, 118, 0.12)';
+            customTagInput.style.boxShadow = '0 0 0 3px rgba(10, 130, 118, 0.1)';
+        });
+        customTagInput.addEventListener('blur', () => {
+            customTagInput.style.borderColor = '#3a3a3a';
+            customTagInput.style.background = 'rgba(10, 130, 118, 0.08)';
+            customTagInput.style.boxShadow = 'none';
+        });
+        
+        // Button hover effect
+        addCustomTagBtn.addEventListener('mouseenter', () => {
+            addCustomTagBtn.style.background = '#0d9d8e';
+        });
+        addCustomTagBtn.addEventListener('mouseleave', () => {
+            addCustomTagBtn.style.background = '#0a8276';
+        });
+    }
+    
+    // Department checkboxes are now handled via querySelectorAll on submit
+    
+    // Close modal function
+    function closeModal() {
+        modal.classList.remove('show');
+        setTimeout(() => modal.remove(), 300);
+    }
+    
+    // Close handlers
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Escape key close
+    document.addEventListener('keydown', function escHandler(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    });
+    
+    // Submit handler
+    submitBtn.addEventListener('click', async () => {
+        const comment = document.getElementById('verifyComment').value.trim();
+        const verificationType = document.querySelector('input[name="verificationType"]:checked').value;
+        // Collect departments based on selected verification type
+        const selectedDepts = verificationType === 'self' 
+            ? Array.from(document.querySelectorAll('input[name="myDept"]:checked')).map(cb => cb.value)
+            : Array.from(document.querySelectorAll('input[name="requestDept"]:checked')).map(cb => cb.value);
+        const notifyMe = document.getElementById('notifyCheckbox').checked;
+        
+        // Disable button while processing
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        
+        try {
+            // Fetch current session data
+            const sessionResponse = await fetch('/auth/session');
+            if (!sessionResponse.ok) {
+                alert('ข้อผิดพลาด: ไม่สามารถดึงข้อมูลการเข้าสู่ระบบได้');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+                return;
+            }
+            const sessionData = await sessionResponse.json();
+            const userName = sessionData?.username || 'Anonymous';
+            
+            // Use JSON for submission (no files)
+            const response = await fetch('/api/verify-answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question: question,
+                    answer: cleanAnswer,
+                    comment: comment || '',
+                    userName: userName,
+                    tags: [...selectedTags, ...customTags],
+                    verificationType: verificationType,
+                    requestedDepartments: selectedDepts,
+                    notify_me: notifyMe
+                })
+            });
+            
+            console.log('📥 Response status:', response.status);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                alert('เกิดข้อผิดพลาด: ' + (errorData.error || `Server error (${response.status})`));
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+                return;
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                // Show success state
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submitted!';
+                submitBtn.style.background = '#28a745';
+                
+                // Show checkmark feedback on verify button
+                if (verifyBtn) {
+                    const originalText = verifyBtn.innerHTML;
+                    verifyBtn.innerHTML = '✓';
+                    verifyBtn.style.opacity = '0.7';
+                    setTimeout(() => {
+                        verifyBtn.innerHTML = originalText;
+                        verifyBtn.style.opacity = '1';
+                    }, 2000);
+                }
+                
+                // Close modal after delay
+                setTimeout(() => {
+                    closeModal();
+                }, 1000);
+            } else {
+                alert('เกิดข้อผิดพลาด: ' + (data.error || 'Unknown error'));
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+            }
+        } catch (error) {
+            console.error('Error verifying answer:', error);
+            alert('ข้อผิดพลาดในการส่ง: ' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-check"></i> Submit Review';
+        }
+    });
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Helper function to strip markdown syntax from text
+function stripMarkdown(text) {
+    if (!text) return '';
+    return text
+        .replace(/\*\*\*(.+?)\*\*\*/g, '$1')  // Bold italic ***text***
+        .replace(/\*\*(.+?)\*\*/g, '$1')      // Bold **text**
+        .replace(/__(.+?)__/g, '$1')          // Bold __text__
+        .replace(/\*([^*]+?)\*/g, '$1')       // Italic *text*
+        .replace(/_([^_]+?)_/g, '$1')         // Italic _text_
+        .replace(/~~(.+?)~~/g, '$1')          // Strikethrough ~~text~~
+        .replace(/`(.+?)`/g, '$1')            // Code `text`
+        .replace(/^#{1,6}\s+/gm, '')          // Headers # text
+        .replace(/^\s*[-*+]\s+/gm, '• ')      // Bullet points - item → • item
+        .replace(/^\s*\d+\.\s+/gm, '')        // Numbered lists 1. item
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')  // Links [text](url)
+        .trim();
+}
+
+// Helper function to convert markdown to HTML (preserve formatting)
+function formatMarkdownToHtml(text) {
+    if (!text) return '';
+    
+    let formatted = text
+        .replace(/\r\n/g, '\n')  // Normalize line endings
+        .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
+        .trim();
+    
+    // Convert markdown headers
+    formatted = formatted
+        .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+        .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^# (.+)$/gm, '<h2>$1</h2>');
+    
+    // Convert bold text with colon as section title (e.g., **หัวข้อ:**)
+    formatted = formatted.replace(/\*\*([^*]+?):\*\*/g, '<strong>$1:</strong>');
+    
+    // Convert remaining bold
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert italic
+    formatted = formatted.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+    
+    // Convert bullet points
+    formatted = formatted.replace(/^\s*[-*+]\s+(.+)$/gm, '<li>$1</li>');
+    
+    // Wrap consecutive <li> items in <ul>
+    formatted = formatted.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    
+    // Convert line breaks to <br> for non-list content
+    formatted = formatted.replace(/\n(?!<)/g, '<br>');
+    
+    return formatted;
+}
+
+function goToCommunity(answerText) {
+    window.lastUserMessage = window.lastUserMessage || 'Unknown question';
+    window.open('/community.html?search=' + encodeURIComponent(window.lastUserMessage), '_blank');
+}
+
+// ===== CREATE QUESTION FUNCTIONS =====
+
+// List of available departments
+const AVAILABLE_DEPARTMENTS = ['WT', 'FT', 'PE', 'QA', 'IT'];
+
+// Initialize departments list when page loads
+function initializeDepartmentsList() {
+    const departmentsList = document.getElementById('departmentsList');
+    if (departmentsList) {
+        departmentsList.innerHTML = AVAILABLE_DEPARTMENTS.map(dept => `
+            <label class="dept-checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" class="dept-checkbox" value="${dept}" style="cursor: pointer;">
+                <span>${dept}</span>
+            </label>
+        `).join('');
+    }
+}
+
+// Call on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeDepartmentsList);
+} else {
+    initializeDepartmentsList();
+}
+
+// Submit to Staging Ground
+async function submitToStaging() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+    const tags = document.getElementById('questionTags').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: title,
+                answer: body,
+                tags: tags,
+                verificationType: 'staging'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Question submitted to staging ground!');
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit question'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting question: ' + error.message);
+    }
+}
+
+// Request verification from other departments
+function requestVerification() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    // Store current data for submission
+    window.currentQuestion = {
+        title: title,
+        body: body,
+        tags: document.getElementById('questionTags').value.trim()
+    };
+
+    // Open modal
+    document.getElementById('requestModal').style.display = 'flex';
+}
+
+// Close request modal
+function closeRequestModal() {
+    document.getElementById('requestModal').style.display = 'none';
+}
+
+// Submit request verification
+async function submitRequest() {
+    const checkboxes = document.querySelectorAll('.dept-checkbox:checked');
+    const selectedDepts = Array.from(checkboxes).map(cb => cb.value);
+    const dueDate = document.getElementById('requestDueDate').value;
+
+    if (selectedDepts.length === 0) {
+        alert('Please select at least one department!');
+        return;
+    }
+
+    if (!window.currentQuestion) {
+        alert('Error: Question data not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: window.currentQuestion.title,
+                answer: window.currentQuestion.body,
+                tags: window.currentQuestion.tags,
+                verificationType: 'request',
+                requestedDepartments: selectedDepts,
+                dueDate: dueDate || null
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Verification request sent to ' + selectedDepts.join(', ') + '!');
+            closeRequestModal();
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            // Reset checkboxes
+            document.querySelectorAll('.dept-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('requestDueDate').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit request'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting request: ' + error.message);
+    }
+}
+
+// Self verify
+function selfVerify() {
+    const title = document.getElementById('questionTitle').value.trim();
+    const body = document.getElementById('questionBody').value.trim();
+
+    if (!title || !body) {
+        alert('Title and Body are required!');
+        return;
+    }
+
+    // Store current data for submission
+    window.currentQuestion = {
+        title: title,
+        body: body,
+        tags: document.getElementById('questionTags').value.trim()
+    };
+
+    // Open modal
+    document.getElementById('selfVerifyModal').style.display = 'flex';
+}
+
+// Close self verify modal
+function closeSelfVerifyModal() {
+    document.getElementById('selfVerifyModal').style.display = 'none';
+}
+
+// Submit self verify
+async function submitSelfVerify() {
+    const answer = document.getElementById('selfVerifyAnswer').value.trim();
+
+    if (!answer) {
+        alert('Please provide an answer!');
+        return;
+    }
+
+    if (!window.currentQuestion) {
+        alert('Error: Question data not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/submit-verified-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: window.currentQuestion.title,
+                answer: answer,
+                tags: window.currentQuestion.tags,
+                verificationType: 'self'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert('✓ Answer verified and submitted by your department!');
+            closeSelfVerifyModal();
+            // Clear form
+            document.getElementById('questionTitle').value = '';
+            document.getElementById('questionBody').value = '';
+            document.getElementById('questionTags').value = '';
+            document.getElementById('selfVerifyAnswer').value = '';
+            // Redirect to community
+            setTimeout(() => window.location.href = '/community.html', 1000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to submit verification'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting verification: ' + error.message);
+    }
+}

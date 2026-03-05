@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import { Readable } from 'stream';
 import FormData from 'form-data';
 import * as fs from 'fs';
-// import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications } from './db.js';
 
 
 dotenv.config();
@@ -32,8 +32,7 @@ import { text } from 'stream/consumers';
 type resultsT = {
   content: { // This means an object with 'type' and 'text' properties
     type: string;
-    text?: string;
-    metadata?: Object;
+    text: string;
   }[]; // This means an array of the above objects (can have 0, 1, or many)
 };
 
@@ -426,8 +425,6 @@ async function prepareFileSummaryForModel(filePaths: string[]): Promise<string> 
   return summary;
 }
 
-
-// upload files and process with simple method (can be used for both chat dialog and process file dialog, just need to pass the file paths and other parameters)
 async function processFiles(text: string, filePaths: string[], userId: string, chatHistoryId: string) {
   try {
     // Step 1: Organize files by type
@@ -526,7 +523,7 @@ function emitWithAck<T = any>(socket: Socket, toolName: string, toolParameters: 
     }
     else
     {
-      socket.timeout(1000000).emit("CallTool" ,toolName, toolParameters, (err: Error, response: T) => {
+      socket.timeout(10000).emit("CallTool" ,toolName, toolParameters, (err: Error, response: T) => {
         if (err) {
           return reject(err);
         }
@@ -538,139 +535,57 @@ function emitWithAck<T = any>(socket: Socket, toolName: string, toolParameters: 
 
 // New Type Definition for the screenshot result (must match client's callback data structure)
 // The client will return an object with a base64 'imageData' string.
-export type ResultTakeScreenshot = { 
-    imageData: string; 
-    message: string;   
-    metadata?: {
-        width: number;
-        height: number;
-        sizeBytes: number;
-        mimeType: string;
-    };
+export type ResultRequestScreenshot = { 
+    imageData: string; // Base64 encoded image string
+    message: string;   // Optional success/status message
 };
 
-async function TakeScreenshotSocket(socket: Socket, target_application?: string): Promise<resultsT> {
+/**
+ * Sends a request to the client to capture a screenshot and waits for the base64 image data.
+ * @param socket The client's Socket.IO socket object.
+ * @returns A promise that resolves with the base64 image data.
+ */
+async function RequestScreenshot(socket: Socket): Promise<resultsT> {
     try {
         console.log(`Requesting screenshot from client ${socket.id}...`);
-        const responseData = await emitWithAck<ResultTakeScreenshot>(socket, 'TakeScreenshot', { target_application }); 
-        console.log("Screenshot received from client, size:", responseData.imageData?.length || 0, "bytes");
+        
+        // 1. Use the existing emitWithAck mechanism to call a client-side function named 'TakeScreenshot'
+        // The server waits for the client to call the callback function passed to its 'CallTool' listener.
+        const responseData = await emitWithAck<ResultRequestScreenshot>(socket, 'TakeScreenshot', {}); 
 
+        console.log("Screenshot received from client, size:", responseData.imageData.length, "bytes");
+
+        // 2. Process the received data (e.g., save it, or pass the base64 string to the LLM)
+        // For demonstration, we'll return the base64 string and a message.
+        // NOTE: If you need to save the file on the server, you would do the base64 decoding and fs.writeFileSync here.
+        
+        // Return a structured response (resultsT)
         const output: resultsT = {
             "content": [
                 {
                     "type": "string",
-                    "text": responseData.message || "Screenshot captured successfully."
+                    "text": `Screenshot captured successfully. Data length: ${responseData.imageData.length}.`
                 },
                 {
-                    "type": "resource_data", 
+                    "type": "resource_data", // A new type to indicate base64 image data
                     "text": responseData.imageData 
-                },
-                {
-                    "type": "object",
-                    "metadata": {
-                        "width": responseData.metadata?.width || 0,
-                        "height": responseData.metadata?.height || 0,
-                        "sizeBytes": responseData.metadata?.sizeBytes || 0,
-                        "mimeType": responseData.metadata?.mimeType || "image/png"
-                    }
                 }
-
             ]
         };
         return output;
+
     } catch (error) {
-        console.error('Error in TakeScreenshot:', error);
-        return {
-            "content": [{
-                "type": "string",
-                "text": `Error capturing screenshot: ${error instanceof Error ? error.message : String(error)}`
-            }]
-        };
-    }
-}
-
-// Assuming resultsT looks something like this based on your TakeScreenshotSocket function:
-type resultsCoordinateT = {
-    content: Array<{
-        type: string;
-        text?: string;
-        metadata?: any;
-    }>;
-};
-
-async function LocateElement(Image: string, prompt: string, Metadata: any): Promise<resultsCoordinateT> {
-  try { 
-    console.log(`Requesting location for element: '${prompt}'...`);
-    
-    // Note: Payload keys must match the Flask endpoint exactly
-    const payload = {
-        image_base64: Image,
-        element_description: prompt
-    };
-
-    const response = await fetch(`${process.env.API_SERVER_URL}/locate_element`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) { 
-        const errData = await response.json().catch(() => ({})) as { error?: string };
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errData.error || response.statusText}`); 
-    }
-
-    const data = await response.json() as { status: string; location?: [number, number, number, number]; raw_response?: string; message?: string };
-
-    if (data.status === "success" && data.location) {
-        // AI returns normalized coordinates [x_min, y_min, x_max, y_max] between 0 and 1
-        const [nx1, ny1, nx2, ny2] = data.location;
-        
-        // Convert to absolute pixel coordinates using the screenshot metadata
-        const x1 = Math.round(nx1 * Metadata.width);
-        const y1 = Math.round(ny1 * Metadata.height);
-        const x2 = Math.round(nx2 * Metadata.width);
-        const y2 = Math.round(ny2 * Metadata.height);
-
-        // Calculate the center point (useful for clicking!)
-        const centerX = Math.round((x1 + x2) / 2);
-        const centerY = Math.round((y1 + y2) / 2);
-
-        return {
-            content: [
+        console.error('Error in RequestScreenshot:', error);
+        const output: resultsT = {
+            "content": [
                 {
-                    type: "string",
-                    text: `Successfully located '${prompt}'. Absolute pixels: [${x1}, ${y1}, ${x2}, ${y2}]. Center: (${centerX}, ${centerY})`
-                },
-                {
-                    type: "object",
-                    metadata: {
-                        normalized_location: [nx1, ny1, nx2, ny2],
-                        absolute_location: [x1, y1, x2, y2],
-                        center_point: [centerX, centerY],
-                        width: x2 - x1,
-                        height: y2 - y1
-                    }
+                    "type": "string",
+                    "text": `Error capturing screenshot: ${error instanceof Error ? error.message : String(error)}`
                 }
             ]
         };
-    } else {
-        return {
-            content: [{
-                type: "string",
-                text: `Failed to locate element: ${data.message || "Unknown error"}`
-            }]
-        };
+        return output;
     }
-
-  } catch (error) {
-    console.error('Error in VLM endpoint:', error);
-    return {
-        content: [{
-            type: "string",
-            text: `Error locating element: ${error instanceof Error ? error.message : String(error)}`
-        }]
-    };
-  }
 }
 
 // async function ListFiles() {
@@ -818,23 +733,23 @@ async function AskFollowupQuestion(question: string, follow_up: any) {
     return output;
 }
 
-// async function CreateFolder(folderName: string) {
-//     try {
-//         const response = await fetch(`${process.env.API_SERVER_URL}/files/create_folder`, {
-//             method: 'POST',
-//             headers: { 'Content-Type': 'application/json' },
-//             body: JSON.stringify({ folder_name: folderName }),
-//         });
-//         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-//         const data = await response.json() as ResultCreateFolder; // Assuming you'll define ResultCreateFolder
-//         const output: resultsT = { "content": [{ "type": "string", "text": data.message }] };
-//         console.log('CreateFolder Response:', data);
-//         return output;
-//     } catch (error) {
-//         console.error('Error creating folder:', error);
-//         throw error;
-//     }
-// }
+async function CreateFolder(folderName: string) {
+    try {
+        const response = await fetch(`${process.env.API_SERVER_URL}/files/create_folder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_name: folderName }),
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json() as ResultCreateFolder; // Assuming you'll define ResultCreateFolder
+        const output: resultsT = { "content": [{ "type": "string", "text": data.message }] };
+        console.log('CreateFolder Response:', data);
+        return output;
+    } catch (error) {
+        console.error('Error creating folder:', error);
+        throw error;
+    }
+}
 
 /**
  * Dynamically calls a tool function based on its name and parameters.
@@ -865,7 +780,7 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
         return await searchById(toolParameters.Id || '', toolParameters.Class || '', toolParameters.TagName || '', toolParameters.text || '');
     case 'SearchByDuckDuckGo':
         return await searchByDuckDuckGo(toolParameters.query, toolParameters.max_results);
-    case 'ProcessFiles': // upload files and process with simple method (can be used for both chat dialog and process file dialog, just need to pass the file paths and other parameters)
+    case 'ProcessFiles':
         return await processFiles(toolParameters.text, toolParameters.filePaths, toolParameters.userId, toolParameters.chatHistoryId);
     case 'SearchSimilar':
         const topK = typeof toolParameters.topK === 'number' ? toolParameters.topK : 5;
@@ -890,23 +805,23 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
         // return await ListFiles();
     
     case 'ReadFile':{
-        if (typeof toolParameters.file_path !== 'string') throw new Error('ReadFile requires a file_path.');
+        if (typeof toolParameters.file_name !== 'string') throw new Error('ReadFile requires a file_name.');
           const response = await emitWithAck(socket, toolName, toolParameters);
           console.log("Response from server:", response);
           return response
         }
-        // return await ReadFile(toolParameters.file_path, toolParameters.start_line, toolParameters.end_line);
+        // return await ReadFile(toolParameters.file_name, toolParameters.start_line, toolParameters.end_line);
 
     case 'EditFile':{
-        if (typeof toolParameters.file_path !== 'string') throw new Error('EditFile requires file_path and text.');
+        if (typeof toolParameters.file_name !== 'string') throw new Error('EditFile requires file_name and text.');
           const response = await emitWithAck(socket, toolName, toolParameters);
           console.log("Response from server:", response);
           return response
         }
-        // return await EditFile(toolParameters.file_path, toolParameters.text, toolParameters.start_line, toolParameters.end_line);
+        // return await EditFile(toolParameters.file_name, toolParameters.text, toolParameters.start_line, toolParameters.end_line);
         
     case 'CreateFile':
-        if (typeof toolParameters.file_path !== 'string') throw new Error('CreateFile requires a file_path.')
+        if (typeof toolParameters.file_name !== 'string') throw new Error('CreateFile requires a file_name.')
         
         let fileContent = '';
         if (toolParameters.text !== undefined) {
@@ -928,46 +843,46 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
                 // }
             }
             // If it's some other type, you might want to throw an error or handle it differently.
-            let New_toolParameters = {file_path:toolParameters.file_path, text:fileContent};
+            let New_toolParameters = {file_name:toolParameters.file_name, text:fileContent};
             const response = await emitWithAck(socket, toolName, New_toolParameters);
             console.log("Response from server:", response);
             return response
         }
-        // return await CreateFile(toolParameters.file_path, fileContent);
+        // return await CreateFile(toolParameters.file_name, fileContent);
 
     case 'DeleteFile':{
-        if (typeof toolParameters.file_path !== 'string') throw new Error('DeleteFile requires a file_path.');
+        if (typeof toolParameters.file_name !== 'string') throw new Error('DeleteFile requires a file_name.');
         const response = await emitWithAck(socket, toolName, toolParameters);
         console.log("Response from server:", response);
         return response
       }
-        // return await DeleteFile(toolParameters.file_path);
+        // return await DeleteFile(toolParameters.file_name);
 
     case 'DownloadFile':{
-        if (typeof toolParameters.destination_path !== 'string' || typeof toolParameters.source_url !== 'string') throw new Error('DownloadFile requires destination_path and a source_url.');
+        if (typeof toolParameters.file_name !== 'string' || typeof toolParameters.destination_path !== 'string') throw new Error('DownloadFile requires file_name and a destination_path.');
         const response = await emitWithAck(socket, toolName, toolParameters);
         console.log("Response from server:", response);
         return response
       }
-        // return await DownloadFile(toolParameters.destination_path, toolParameters.source_url);
+        // return await DownloadFile(toolParameters.file_name, toolParameters.destination_path);
 
     case 'CreateFolder': {// Add this new case!
-        if (typeof toolParameters.directory_path !== 'string') throw new Error('CreateFolder requires a directory_path.');
+        if (typeof toolParameters.folder_name !== 'string') throw new Error('CreateFolder requires a folder_name.');
         const response = await emitWithAck(socket, toolName, toolParameters);
         console.log("Response from server:", response);
         return response
       }
-        // return await CreateFolder(toolParameters.directory_path);
+        // return await CreateFolder(toolParameters.folder_name);
 
     case 'ChangeDirectory': {
-      if (typeof toolParameters.target_path !== 'string') throw new Error('ChangeDirectory requires a target_path.');
+      if (typeof toolParameters.new_path !== 'string') throw new Error('ChangeDirectory requires a new_path.');
       const response = await emitWithAck(socket, toolName, toolParameters);
       console.log("Response from server:", response);
       return response
     }
 
     case 'ExecuteCommand': {
-      if (typeof toolParameters.command_string !== 'string') throw new Error('CMD requires a command_string.');
+      if (typeof toolParameters.command !== 'string' || typeof toolParameters.wait !== 'string') throw new Error('CMD requires a command.');
       const response = await emitWithAck(socket, toolName, toolParameters);
       console.log("Response from server:", response);
       return response
@@ -979,98 +894,44 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
       return response
     }
 
-    // ==========================================
-    // WEB & UI AUTOMATION TOOLS (NEW)
-    // ==========================================
-    
-    case 'WebSearch': {
-      if (typeof toolParameters.search_query !== 'string') throw new Error('WebSearch requires a search_query.');
+    // --- END NEW FILE TOOL CASES ---
+
+    // --- NEW SCREENSHOT TOOL CASE ---
+
+    case 'RequestScreenshot': // New case
+        if (!socket) throw new Error('Socket not found for RequestScreenshot.');
+        return await RequestScreenshot(socket);
+
+    case 'findObjectOnScreen': {
+      if (typeof toolParameters.object_prompt !== 'string') throw new Error('findObjectOnScreen requires an object_prompt.');
+      // Use request screenshot first
+      const screenshotResponse = await RequestScreenshot(socket);
+      // Now call findObjectOnScreen with the screenshot data
+      // const response = await findObjectOnScreen(toolParameters.object_prompt, screenshotResponse);
+      return response
+    }
+
+    case 'clickObjectOnScreen': {
+      if (typeof toolParameters.object_location !== 'string') throw new Error('clickObjectOnScreen requires an object_location.');
       const response = await emitWithAck(socket, toolName, toolParameters);
-      return response;
+      console.log("Response from server:", response);
+      return response
     }
 
-    case 'OpenURL': {
-      if (typeof toolParameters.target_url !== 'string') throw new Error('OpenURL requires a target_url.');
-      const response = await emitWithAck(socket, toolName, toolParameters);
-      return response;
-    }
-
-    case 'ScrapeWebsite': {
-      if (typeof toolParameters.url !== 'string') {
-        throw new Error('ScrapeWebsite requires a url.');
-      }
-      if (toolParameters.method !== 'screenshot' && toolParameters.method !== 'text') {
-        toolParameters.method = 'text'; // Default fallback
-      }
-      
-      console.log('Received ScrapeWebsite tool call with parameters:', toolParameters);
-      const response = await emitWithAck(socket, toolName, toolParameters);
-      console.log("Response from server (ScrapeWebsite):", response);
-      return response;
-    }
-
-    case 'TakeScreenshot': {
-      if (!socket) throw new Error('Socket not found for TakeScreenshot.');
-      return await TakeScreenshotSocket(socket, toolParameters.target_application);
-    }
-
-    case 'GetLocationElementOnScreen': {
-      if (!socket) throw new Error('Socket not found for GetLocationElementOnScreen.');
-      const response = await TakeScreenshotSocket(socket, toolParameters.target_application);
-      if (response.content && response.content.length > 0) {
-        const screenshotData = response.content.find(c => c.type === 'resource_data');
-        const metadata = response.content.find(c => c.type === 'object')?.metadata;
-        if (screenshotData && typeof screenshotData.text === 'string' && metadata) {
-          return await LocateElement(screenshotData.text, toolParameters.element_description, metadata);
-        } else {
-          throw new Error('Invalid screenshot data or metadata received from client.');
-        }
-      } else {
-        throw new Error('No content received from TakeScreenshot for GetLocationElementOnScreen.');
-      }
-
-    }
-
-    case 'ClickCoordinates': {
-    console.log('Received ClickCoordinates tool call with parameters:', toolParameters);
-    if (toolParameters.x_coordinate == null || toolParameters.y_coordinate == null) {
-      throw new Error('ClickCoordinates requires x_coordinate and y_coordinate.');
-    }
-  
-    try {
-      const response = await emitWithAck(socket, toolName, toolParameters);
-
-      // If the client returns a raw string or an improperly formatted object, wrap it safely
-      if (typeof response === 'string' || !response?.content) {
-        return {
-          content: [{ 
-            type: "string", 
-            text: typeof response === 'string' ? response : JSON.stringify(response) 
-          }]
-        } as resultsT;
-      }
-
-      return response; // Return as-is if it already matches resultsT format
-    } catch (error) {
-      // Return socket errors as a valid resultsT string to prevent agent.js from crashing
-      return {
-        content: [{ 
-          type: "string", 
-          text: `Socket Error in ClickCoordinates: ${error instanceof Error ? error.message : String(error)}` 
-        }]
-      } as resultsT;
-    }
-  }
-
-    case 'TypeKeys': {
-      if (typeof toolParameters.key_sequence !== 'string') throw new Error('TypeKeys requires a key_sequence.');
-      const response = await emitWithAck(socket, toolName, toolParameters);
-      return response;
+    case 'findObjectOnScreenAndClick': {
+      if (typeof toolParameters.object_prompt !== 'string') throw new Error('findObjectOnScreenAndClick requires an object_prompt.');
+      // Use request screenshot first
+      const screenshotResponse = await RequestScreenshot(socket);
+      // Now call findObjectOnScreen with the screenshot data
+      // const findResponse = await findObjectOnScreen(toolParameters.object_prompt, screenshotResponse);
+      // Then click at the found location
+      // const clickResponse = await clickObjectOnScreen(findResponse.location);
+      return response
     }
 
     // --- END NEW SCREENSHOT_TOOL CASE ---
     case 'attempt_completion':
-      if (typeof toolParameters.command_string == 'string'){
+      if (typeof toolParameters.command == 'string'){
         const response = await emitWithAck(socket, 'ExecuteCommand', toolParameters);
         console.log("Response from server:", response);
         return response
@@ -1083,22 +944,22 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
         return await AskFollowupQuestion(toolParameters.question, toolParameters.follow_up);
 
     // --- Verified Answers Tool Cases ---
-    // case 'SearchVerifiedAnswers':
-    //   if (!Array.isArray(toolParameters.question_embedding)) throw new Error('SearchVerifiedAnswers requires question_embedding array.');
-    //   return await SearchVerifiedAnswers(toolParameters.question_embedding, toolParameters.threshold || 0.7, toolParameters.limit || 5);
+    case 'SearchVerifiedAnswers':
+      if (!Array.isArray(toolParameters.question_embedding)) throw new Error('SearchVerifiedAnswers requires question_embedding array.');
+      return await SearchVerifiedAnswers(toolParameters.question_embedding, toolParameters.threshold || 0.7, toolParameters.limit || 5);
 
-    // case 'SaveVerifiedAnswer':
-    //   if (typeof toolParameters.question !== 'string' || typeof toolParameters.answer !== 'string') {
-    //     throw new Error('SaveVerifiedAnswer requires question and answer.');
-    //   }
-    //   return await SaveVerifiedAnswer(
-    //     toolParameters.question,
-    //     toolParameters.answer,
-    //     toolParameters.question_embedding,
-    //     toolParameters.answer_embedding,
-    //     toolParameters.user_id,
-    //     toolParameters.commenter_name
-    //   );
+    case 'SaveVerifiedAnswer':
+      if (typeof toolParameters.question !== 'string' || typeof toolParameters.answer !== 'string') {
+        throw new Error('SaveVerifiedAnswer requires question and answer.');
+      }
+      return await SaveVerifiedAnswer(
+        toolParameters.question,
+        toolParameters.answer,
+        toolParameters.question_embedding,
+        toolParameters.answer_embedding,
+        toolParameters.user_id,
+        toolParameters.commenter_name
+      );
 
     default:
       throw new Error(`Tool function '${toolName}' not found.`);
@@ -1107,35 +968,35 @@ export async function callToolFunction(toolName: string, toolParameters: { [key:
 
 // === Verified Answers Functions ===
 
-// async function SearchVerifiedAnswers(questionEmbedding: number[], threshold: number = 0.7, limit: number = 5) {
-//   try {
-//     const results = await searchVerifiedAnswers(questionEmbedding, threshold, limit);
-//     return {
-//       success: true,
-//       results: results.map(r => ({
-//         id: r.id,
-//         question: r.question,
-//         answer: r.answer,
-//         similarity: r.similarity
-//       }))
-//     };
-//   } catch (error) {
-//     return { success: false, error: String(error) };
-//   }
-// }
+async function SearchVerifiedAnswers(questionEmbedding: number[], threshold: number = 0.7, limit: number = 5) {
+  try {
+    const results = await searchVerifiedAnswers(questionEmbedding, threshold, limit);
+    return {
+      success: true,
+      results: results.map(r => ({
+        id: r.id,
+        question: r.question,
+        answer: r.answer,
+        similarity: r.similarity
+      }))
+    };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
 
-// async function SaveVerifiedAnswer(
-//   question: string,
-//   answer: string,
-//   questionEmbedding: number[],
-//   answerEmbedding?: number[],
-//   userId?: number,
-//   commenterName: string = 'Anonymous'
-// ) {
-//   try {
-//     const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, commenterName);
-//     return { success: true, answerId: result.answerId };
-//   } catch (error) {
-//     return { success: false, error: String(error) };
-//   }
-// }
+async function SaveVerifiedAnswer(
+  question: string,
+  answer: string,
+  questionEmbedding: number[],
+  answerEmbedding?: number[],
+  userId?: number,
+  commenterName: string = 'Anonymous'
+) {
+  try {
+    const result = await saveVerifiedAnswer(question, answer, questionEmbedding, answerEmbedding, userId, commenterName);
+    return { success: true, answerId: result.answerId };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
