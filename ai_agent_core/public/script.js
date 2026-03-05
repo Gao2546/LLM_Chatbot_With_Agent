@@ -1316,7 +1316,7 @@ async function sendMessage() {
             const sessionData = await sessionResponse.json();
             if (sessionData.loggedIn) {
                 if (sessionData.chatIds) {
-                    const reverseChatIds = [...data.chatIds].reverse(); // Reverse to show most recent first
+                    const reverseChatIds = [...sessionData.chatIds].reverse(); // Reverse to show most recent first
                     await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
                     const currChatId = sessionData.currChatId;
 
