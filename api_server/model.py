@@ -1267,7 +1267,7 @@ Output only the simulated excerpt.
         print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
         query_embeddingT = encode_text_for_embedding(queryT)
     
-    if not LOCAL:
+    if (not LOCAL) and (document_search_method != 'none'):
         if IFXGPT:
             try:
                 search_text = IFXGPTInference(
@@ -1295,7 +1295,7 @@ Output only the simulated excerpt.
                 search_text = queryT
                 query_embeddingS = query_embeddingT
 
-    else :
+    elif (document_search_method != 'none'):
         search_text = ollama_generate_text(
             prompt=create_search_prompt,
             model="gemma3:4b"
