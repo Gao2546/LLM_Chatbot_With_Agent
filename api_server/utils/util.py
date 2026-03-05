@@ -1719,7 +1719,8 @@ Requirements:
     payload = {
         "model": model_name,
         "task": task_type, # Use "text-matching" as shown in the API example for similarity
-        "input": input_data
+        "input": input_data,
+        "dimensions": 2048
     }
 
     try:
@@ -2038,22 +2039,22 @@ def get_image_embedding_local_api_colpali_engine(
                     image_embeddings = model(**batch_images)
                     print(image_embeddings.shape)
                     time.sleep(10)
-                    # Pad embeddings from 128 to 2048 dimensions if needed
-                    if image_embeddings.shape[1] < 2048:
-                        pad_width = 2048 - image_embeddings.shape[1]
+                    # Pad embeddings from 128 to 1024 dimensions (FIXED from 2048 to match other embeddings)
+                    if image_embeddings.shape[1] < 1024:
+                        pad_width = 1024 - image_embeddings.shape[1]
                         image_embeddings = torch.nn.functional.pad(image_embeddings, (0, pad_width), mode='constant', value=0)
-                    elif image_embeddings.shape[1] > 2048:
-                        image_embeddings = image_embeddings[:, :2048]
+                    elif image_embeddings.shape[1] > 1024:
+                        image_embeddings = image_embeddings[:, :1024]
                     batch_embeddings.extend(image_embeddings.cpu().numpy().tolist())
             embeddings = batch_embeddings
             # with torch.no_grad():
             #     image_embeddings = model(**batch_images)
-            #     # Pad embeddings from 128 to 2048 dimensions if needed
-            #     if image_embeddings.shape[1] < 2048:
-            #         pad_width = 2048 - image_embeddings.shape[1]
+            #     # Pad embeddings from 128 to 1024 dimensions (FIXED from 2048)
+            #     if image_embeddings.shape[1] < 1024:
+            #         pad_width = 1024 - image_embeddings.shape[1]
             #         image_embeddings = torch.nn.functional.pad(image_embeddings, (0, pad_width), mode='constant', value=0)
-            #     elif image_embeddings.shape[1] > 2048:
-            #         image_embeddings = image_embeddings[:, :2048]
+            #     elif image_embeddings.shape[1] > 1024:
+            #         image_embeddings = image_embeddings[:, :1024]
             # Convert to list of lists
             # embeddings = image_embeddings.cpu().numpy().tolist()
             if embeddings:
@@ -2670,35 +2671,66 @@ Output only the descriptive paragraph.
 #  LEGACY & NEW: DATABASE SAVE/SEARCH
 # ==============================================================================
     
-def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[float]:
+def encode_text_for_embedding(text: str = None,search_text: str = None, target_dimensions: int = 2048, is_query: bool = False) -> list[float]:
     """
     Convert text into an embedding vector using pre-loaded model (FAST).
     Falls back to Ollama if pre-loaded model unavailable.
     
     Args:
         text: ข้อความที่ต้องการ embedding
-        target_dimensions: จำนวน dimensions ที่ต้องการ (default: 1024 สำหรับ verified_answers)
+        target_dimensions: จำนวน dimensions ที่ต้องการ (default: 2048 สำหรับ verified_answers)
+        is_query: True = ค้นหา (retrieval.query), False = บันทึกเอกสาร (retrieval.passage)
+                  การใช้ task ที่ถูกต้องช่วยให้ cross-lingual search ทำงานได้ดี
     
     Returns:
-        list[float]: embedding vector (1024 dims)
+        list[float]: embedding vector (2048 dims)
     """
     global model  # Use the pre-loaded model
     
     # ตรวจสอบว่า text ว่างหรือไม่
-    if not text or not text.strip():
+    if (not text or not text.strip()) and (not search_text or not search_text.strip()):
         print(f"❌ ERROR: Empty text provided!")
         raise ValueError("Cannot create embedding from empty text")
+    
+    # เลือก task - Jina v4 ใช้ 'retrieval' สำหรับทั้ง query และ document
+    # Note: is_query ยังคงใช้ประโยชน์สำหรับ logging และ API fallback
+    task = 'retrieval'  # Jina v4 ใช้ task เดียวกันสำหรับทั้ง query และ passage
     
     try:
         # Use the pre-loaded Jina embedding model (FAST - no reload)
         if model is not None:
-            print(f"⚡ Using PRE-LOADED Jina model (LOCAL) for embedding (instant)...")
-            embedding = model.encode(text, task='retrieval')
-            return embedding.tolist()
+            mode_str = 'QUERY' if is_query else 'DOCUMENT'
+            print(f"⚡ Using PRE-LOADED Jina model (task={task}, mode={mode_str}) for embedding...")
+            embedding = model.encode(text, task=task)
+            embedding_list = embedding.tolist()
+            
+            # Adjust dimensions to target_dimensions (2048)
+            current_dim = len(embedding_list)
+            if current_dim < target_dimensions:
+                # Pad with zeros
+                padding = [0.0] * (target_dimensions - current_dim)
+                embedding_list.extend(padding)
+                print(f"✅ Padded embedding from {current_dim} to {target_dimensions} dimensions")
+            elif current_dim > target_dimensions:
+                # Truncate
+                embedding_list = embedding_list[:target_dimensions]
+                print(f"✅ Truncated embedding from {current_dim} to {target_dimensions} dimensions")
+            
+            return embedding_list
         else:
             print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
-            embedding_list = get_image_embedding_jinna_api(search_text=text)
+            if search_text:
+                embedding_list = get_image_embedding_jinna_api(search_text=search_text)  # retrieval.query
+            else:
+                embedding_list = get_image_embedding_jinna_api(text=text)  # retrieval.passage
             if embedding_list and len(embedding_list) > 0:
+                # Adjust dimensions for API fallback too
+                current_dim = len(embedding_list)
+                if current_dim < target_dimensions:
+                    padding = [0.0] * (target_dimensions - current_dim)
+                    embedding_list.extend(padding)
+                elif current_dim > target_dimensions:
+                    embedding_list = embedding_list[:target_dimensions]
                 return embedding_list
             else:
                 raise ValueError("Ollama returned empty embedding")
@@ -2708,7 +2740,17 @@ def encode_text_for_embedding(text: str, target_dimensions: int = 1024) -> list[
         try:
             embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
             if embedding_list and len(embedding_list) > 0:
-                return embedding_list[0]
+                embedding_result = embedding_list[0]
+                # Adjust dimensions for Ollama fallback
+                current_dim = len(embedding_result)
+                if current_dim < target_dimensions:
+                    padding = [0.0] * (target_dimensions - current_dim)
+                    embedding_result.extend(padding)
+                    print(f"✅ Padded Ollama embedding from {current_dim} to {target_dimensions} dimensions")
+                elif current_dim > target_dimensions:
+                    embedding_result = embedding_result[:target_dimensions]
+                    print(f"✅ Truncated Ollama embedding from {current_dim} to {target_dimensions} dimensions")
+                return embedding_result
             else:
                 raise ValueError("Ollama returned empty embedding")
         except Exception as ollama_error:
@@ -2822,7 +2864,7 @@ def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_numb
             conn.close()
 
 # Search Text (Legacy)
-def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_chat(query_text: str,search_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Search (Legacy) from 'document_embeddings' table.
     
@@ -2830,7 +2872,7 @@ def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history
     - Joins with 'uploaded_files' to filter by 'chat_history_id'.
     """
     # Step 1: Encode the query text to a vector
-    query_embedding = encode_text_for_embedding(query_text)
+    query_embedding = encode_text_for_embedding(query_text, search_text=search_text, is_query=True)
     # if not LOCAL:
     #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
@@ -2895,7 +2937,7 @@ from typing import List, Dict, Any
 # Assuming get_image_embedding_jinna_api and get_db_connection are defined elsewhere
 # import { get_image_embedding_jinna_api, get_db_connection } from ...
 
-def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages(query_text: str,search_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
     """
     Search (New) from 'document_page_embeddings' table.
     
@@ -2912,9 +2954,9 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
     """
     # Step 1: Encode the query text using the *CLIP* model
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else :
-        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text, search_text=search_text)
     if not query_embedding:
         print("❌ Failed to get CLIP embedding for query.")
         return []
@@ -3017,14 +3059,14 @@ def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, to
 #  SEARCH BY ACTIVE USER FUNCTIONS (METHOD: searchDoc)
 # ==============================================================================
 
-def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_active_user(query_text: str,search_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Legacy Text Search: Finds text chunks in files where the user is an 'active_user'.
     """
     # Encode query
 
     # Encoding using Qwen3-0.6b-embedding
-    query_embedding = encode_text_for_embedding(text=query_text)
+    query_embedding = encode_text_for_embedding(text=query_text,search_text=search_text, is_query=True)
 
     # Encode using jinna Text-Image-Embedding
     # if not LOCAL:
@@ -3075,15 +3117,15 @@ def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k
         if conn: conn.close()
 
 
-def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages_by_active_user(query_text: str,search_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
     """
     New Page Search: Finds document pages (images) in files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else:
-        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text, search_text=search_text)
 
     if not query_embedding: return []
 
@@ -3157,12 +3199,12 @@ def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: in
         if conn: conn.close()
 
 
-def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+def search_similar_documents_by_active_user_all(query_text: str, search_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
     """
     Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
     """
     # Encode query
-    query_embedding = encode_text_for_embedding(query_text)
+    query_embedding = encode_text_for_embedding(query_text, search_text=search_text, is_query=True)
     # if not LOCAL:
     #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
@@ -3211,15 +3253,15 @@ def search_similar_documents_by_active_user_all(query_text: str, user_id: int, t
         if conn: conn.close()
 
 
-def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+def search_similar_pages_by_active_user_all(query_text: str, search_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
     """
     New Page Search: Finds document pages (images) in all files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
     if not LOCAL:
-        query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else:
-        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+        query_embedding = get_image_embedding_jinna_api_local(text=query_text, search_text=search_text)
 
     if not query_embedding: return []
 
@@ -3964,10 +4006,10 @@ def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str
     Returns:
         List of embeddings (list[list[float]]).
     """
-     # System prompt for OpenRouter VLM
+     # System prompt for Ollama VLM
     system_prompt = ("You're an image expert."
                      "If the image contains text, extract and summarize it...")
-    # Prompt for OpenRouter VLM
+    # Prompt for Ollama VLM
     prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
     descriptions = ollama_describe_image(image_bytes, vision_model, prompt)
     if isinstance(descriptions, str):
