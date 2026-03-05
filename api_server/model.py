@@ -1256,17 +1256,18 @@ def search_similar_api_unified():
     page_search_results = []
 
     create_search_prompt = f"""
-Act as a document search engine (PDF document search by vector similarity). 
-Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
-Include likely keywords and factual phrasing.
-
-User Query: {queryT}
-Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
-Prompt Language: English
-Prompt Type: Markdown
-
-Output only the simulated excerpt.
-""" #*****************
+    Act as a document search engine (PDF document search by vector similarity). 
+    Write a single, concise sentence that simulates a direct excerpt from a document page answering the query below. 
+    Include likely keywords and factual phrasing.
+    
+    User Query: {queryT}
+    Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
+    Prompt Language: English
+    Prompt Type: Markdown
+    User Chat History Context: {chat_history_messages}
+    
+    Output only the simulated excerpt.
+    """ #*****************
 
     if (document_search_method != 'none'):
         if not LOCAL:
