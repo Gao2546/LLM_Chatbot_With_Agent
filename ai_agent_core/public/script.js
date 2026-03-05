@@ -16,7 +16,7 @@ socket.on('ping', () => {
 });
 
 socket.on('StreamText', (text) => {
-    console.log('📨 Received StreamText chunk (PARTIAL):', text.substring(0, 50) + '...', 'length:', text.length);
+    // console.log('📨 Received StreamText chunk (PARTIAL):', text.substring(0, 50) + '...', 'length:', text.length);
     isCurrentlyStreaming = true;
     if (window.messageElementStream) {
         // Store accumulated text - don't mark as complete yet
