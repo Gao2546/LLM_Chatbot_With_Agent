@@ -1232,6 +1232,37 @@ async function sendMessage() {
         clearSelectedFiles();
     }
 
+    try {
+        const sessionResponse = await fetch('/auth/session');
+        const sessionData = await sessionResponse.json();
+        if (sessionData.loggedIn) {
+            if (sessionData.chatIds) {
+                const reverseChatIds = [...sessionData.chatIds].reverse(); // Reverse to show most recent first
+                await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
+                const currChatId = sessionData.currChatId;
+
+                // Highlight the active chat item
+                if (currChatId) {
+                    const chatListDiv = document.getElementById('chatListEle');
+                    const allChatItems = chatListDiv.querySelectorAll('.chat-item');
+                    allChatItems.forEach(item => item.classList.remove('active'));
+                    const targetText = `Chat ${currChatId}`;
+                    const targetItem = Array.from(allChatItems).find(item => item.getElementsByClassName('chat-title')[0].textContent?.trim() === targetText);
+                    if (targetItem) {
+                        targetItem.classList.add('active');
+                    } else {
+                        console.warn('Chat item not found for currentChatId:', targetText);
+                    }
+                }
+            }
+            if (sessionData.userId) {
+                socket.emit('register', { userId: sessionData.userId });
+            }
+        }
+    } catch (sessionError) {
+        console.error('Error checking session status after loop:', sessionError);
+    }
+
     try { // Wrap the loop in a try-catch
         do {
             loopCount++;
