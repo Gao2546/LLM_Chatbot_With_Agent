@@ -1267,41 +1267,42 @@ Output only the simulated excerpt.
         print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
         query_embeddingT = encode_text_for_embedding(queryT)
     
-    if (not LOCAL) and (document_search_method != 'none'):
-        if IFXGPT:
-            try:
-                search_text = IFXGPTInference(
-                    prompt=create_search_prompt,
-                    # system_prompt=system_prompt,
-                    # image_bytes_list=image_bytes_list,
-                    model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-                )
-                query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
-            except Exception as e:
-                print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
-                search_text = queryT
-                query_embeddingS = query_embeddingT
-        else:
-            try:
-                search_text = DeepInfraInference(
-                    prompt=create_search_prompt,
-                    # system_prompt=system_prompt,
-                    # image_bytes_list=image_bytes_list,
-                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-                )
-                query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
-            except Exception as e:
-                print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
-                search_text = queryT
-                query_embeddingS = query_embeddingT
+    if (document_search_method != 'none'):
+        if not LOCAL:
+            if IFXGPT:
+                try:
+                    search_text = IFXGPTInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                    )
+                    query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
+                except Exception as e:
+                    print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
+                    search_text = queryT
+                    query_embeddingS = query_embeddingT
+            else:
+                try:
+                    search_text = DeepInfraInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                    )
+                    query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
+                except Exception as e:
+                    print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
+                    search_text = queryT
+                    query_embeddingS = query_embeddingT
 
-    elif (document_search_method != 'none'):
-        search_text = ollama_generate_text(
-            prompt=create_search_prompt,
-            model="gemma3:4b"
-        )
-        query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
-    print(f"Search prompt: {search_text}")
+        else:
+            search_text = ollama_generate_text(
+                prompt=create_search_prompt,
+                model="gemma3:4b"
+            )
+            query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
+        print(f"Search prompt: {search_text}")
 
     # =========================================================
     # METHOD 1: searchDoc (Search by active_users permission)
