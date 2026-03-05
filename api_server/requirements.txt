@@ -32,45 +32,61 @@
 # # mlx-vlm
 # minio
 
+
+#------------------------------------------------------------------------------------------------------------
+
+
+# Tool
+python-dotenv
+wheel
+
 # Web Framework & Server
 Flask
 requests
 python-dotenv
+httpx
+gunicorn
 
 # Database & Storage
 psycopg2-binary
 minio
 
 # AI/ML - Core & Transformers
-torch
-torchvision
-torchaudio
-transformers
-sentence-transformers
-bitsandbytes
-accelerate
-einops
-modelscope
+# torch
+# torchvision
+# torchaudio
+# transformers
+# sentence-transformers
+# bitsandbytes
+# accelerate
+# einops
+# modelscope
 
 # LangChain Ecosystem
-langchain-core
-langchain-huggingface
-langchain-openai
+# langchain-core
+# langchain-huggingface
+# langchain-openai
 langchain-text-splitters
 
 # Document Processing & OCR
-pymupdf
-Pillow
-docling
-docling-core
-unstructured[pdf]
+PyMuPDF==1.26.6
+pillow==11.3.0
+# docling
+# docling-core
+# unstructured[pdf]
 beautifulsoup4
+python-docx
+python-pptx
+openpyxl
+xlrd
+striprtf
+odfpy
 
 # Search & Web Scraping
-duckduckgo-search
-googlesearch-python
-selenium
-webdriver-manager
+# duckduckgo-search
+# googlesearch-python
+# selenium
+# webdriver-manager
 
 # Data Science & Utilities
 numpy

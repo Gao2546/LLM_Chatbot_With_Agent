@@ -1,7 +1,12 @@
 # Stage 1: Build ai_agent_core
-FROM node:22-bookworm AS builder_app
-
+# Use RedHat UBI for OpenShift compatibility
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder_app
 WORKDIR /app
+
+RUN whoami
+RUN ls -la
+RUN mkdir node_modules
+RUN ls -la
 
 COPY package*.json ./
 RUN npm install
@@ -30,13 +35,13 @@ RUN npm run build
 
 
 # Stage 3: Production image
-FROM node:22-bookworm
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y bash
+# Copy CA certificate first (UBI already has ca-certificates installed)
+COPY ca-bundle.crt ./
+RUN cp ca-bundle.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust extract || true
 
 # Setup ai_agent_core
 COPY package.json ./
@@ -62,7 +67,13 @@ ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
     PORT=3000 \
-    LOCAL=True
+    LOCAL=False \
+    IFXGPT=True \
+    IFXGPT_BASIC_AUTH=True \
+    IFXGPT_CERT_PATH=/app/ca-bundle.crt \
+    NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt \
+    IFXGPT_USER=yuthaworawit \
+    IFXGPT_PASSWORD="Gao Gao2546"
 
 # Setup mcp_BrowserBase build output (e.g., dist or build folder)
 # Change `/dist` to your actual build output if needed

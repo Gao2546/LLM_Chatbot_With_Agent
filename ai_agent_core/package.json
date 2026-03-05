@@ -28,6 +28,7 @@
     "multer": "^2.0.1",
     "node-fetch": "^3.3.2",
     "ollama": "^0.5.14",
+    "openai": "^6.16.0",
     "pg": "^8.14.1",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",

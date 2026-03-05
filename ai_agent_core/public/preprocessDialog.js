@@ -604,7 +604,7 @@ async function showPreprocessDialog() {
     option2.value = 'text';
     option2.textContent = 'Extract Text & Encode';
     
-    dropdown.appendChild(option1);
+    // dropdown.appendChild(option1);
     dropdown.appendChild(option2);
     
     configSection.appendChild(configLabel);
@@ -748,12 +748,29 @@ async function showPreprocessDialog() {
             processBtn.disabled = false;
             dropdown.disabled = false;
             
-            const res = await fetch("/api/processDocument", {
-                method: "POST",
-                body: formData
-            });
+            // const res = await fetch("/api/processDocument", {
+            //     method: "POST",
+            //     body: formData
+            // });
 
-            if (!res.ok) throw new Error("Server failed to process document");
+            async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(id);
+            }
+            }
+
+            // usage
+            const res = await fetchWithTimeout("/api/processDocument", {
+            method: "POST",
+            body: formData,
+            }, 86400000);
+
+            // if (!res.ok) throw new Error("Server failed to process document");
 
             const result = await res.json();
             

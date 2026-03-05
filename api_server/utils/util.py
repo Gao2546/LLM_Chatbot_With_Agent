@@ -13,40 +13,53 @@ import mimetypes # For guessing mime types
 import numpy as np
 
 from PIL import Image
-from sentence_transformers import SentenceTransformer
-from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
-import torch
+# from sentence_transformers import SentenceTransformer
+# from transformers import BitsAndBytesConfig, AutoModel, AutoProcessor
+# import torch
 # from colpali_engine.models import ColIdefics3, ColIdefics3Processor
 
 # New imports for Docling and concurrent processing
-from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
-from docling.datamodel.base_models import InputFormat
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.base_models import DocumentStream
-from docling_core.types.doc import DocItemLabel
-import concurrent.futures
-from docling.pipeline.vlm_pipeline import VlmPipeline
-from docling.datamodel.pipeline_options import (
-    VlmPipelineOptions,
-    PdfPipelineOptions,
-    TesseractCliOcrOptions,
-    TesseractOcrOptions,
-    RapidOcrOptions,
-)
-from modelscope import snapshot_download
-from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-from docling.datamodel import vlm_model_specs
-from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
-from docling.pipeline.vlm_pipeline import VlmPipeline
+# from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
+# from docling.datamodel.base_models import InputFormat
+# from docling.document_converter import DocumentConverter, PdfFormatOption
+# from docling.datamodel.base_models import DocumentStream
+# from docling_core.types.doc import DocItemLabel
+# import concurrent.futures
+# from docling.pipeline.vlm_pipeline import VlmPipeline
+# from docling.datamodel.pipeline_options import (
+#     VlmPipelineOptions,
+#     PdfPipelineOptions,
+#     TesseractCliOcrOptions,
+#     TesseractOcrOptions,
+#     RapidOcrOptions,
+# )
+# from modelscope import snapshot_download
+# from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+# from docling.datamodel import vlm_model_specs
+# from docling.datamodel.pipeline_options_vlm_model import ApiVlmOptions, ResponseFormat
+# from docling.pipeline.vlm_pipeline import VlmPipeline
 
 import base64
 import io
-from unstructured.partition.auto import partition
-from unstructured.documents.elements import Image as UnstructuredImage
+# from unstructured.partition.auto import partition
+# from unstructured.documents.elements import Image as UnstructuredImage
 
 from minio import Minio
 from minio.error import S3Error
 from typing import List, Optional, Dict, Any, Union
+
+import openai
+import httpx
+
+import os
+from io import BytesIO
+from docx import Document
+from pptx import Presentation
+import openpyxl
+import xlrd
+from striprtf.striprtf import rtf_to_text
+from odf.opendocument import load
+from odf import text
 
 
 # from vllm import LLM, SamplingParams
@@ -56,9 +69,51 @@ from typing import List, Optional, Dict, Any, Union
 dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
+IFXGPT = os.getenv("IFXGPT", True)
 API_OLLAMA = os.getenv("API_OLLAMA", "http://127.0.0.1:11434/api/generate")
 
+# IFX GPT API
+cert_path = os.getenv('IFXGPT_CERT_PATH')    
+window_user = os.getenv('WINDOWS_USER','yuthaworawit')
+window_password = os.getenv('WINDOWS_PASSWORD','Gao Gao2546') 
+token = os.getenv("TOKEN")
+print(token)
+print(cert_path)
+print(window_user)
+print(window_password)
+basic_auth = True 
+
 LOCAL = True if LOCAL == "True" else False
+IFXGPT = True if IFXGPT == "True" else False
+
+def generate_base64_string(username, password):   
+    """   
+    To Encode username & password strings into base64   
+    """   
+   
+    sample_string = username + ":" + password   
+    sample_string_bytes = sample_string.encode("ascii")   
+   
+    base64_bytes = base64.b64encode(sample_string_bytes)   
+    base64_string = base64_bytes.decode("ascii")   
+    return base64_string   
+   
+if basic_auth:   
+    token = generate_base64_string(window_user, window_password)     
+    headers = {      
+    'Authorization': f"Basic {token}"      
+    }   
+else:    
+    token = token    
+    headers = {     
+        'Authorization': f"Bearer {token}",      }      
+   
+client = openai.OpenAI(     
+            api_key=token,     
+            base_url='https://gpt4ifx.icp.infineon.com',      
+            default_headers=headers,     
+            http_client = httpx.Client(verify=cert_path)   
+            )    
 
 # Function to calculate parameter memory
 def get_model_memory(model):
@@ -83,8 +138,8 @@ def clear_gpu():
 # ==============================================================================
 #  DATABASE & MINIO CLIENT SETUP
 # ==============================================================================
-clear_gpu()
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# clear_gpu()
+# device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Initialize model variable (will be set below if LOCAL=True)
 model = None
@@ -119,7 +174,7 @@ if LOCAL:
         print(f"❌ Failed to load Jina model: {e}")
         model = None
 else:
-    print("📡 Running in REMOTE mode (will use Ollama/API for embeddings)")
+    print("📡 Running in REMOTE mode (will use IFXGPT/API for embeddings)")
 
 # --- NEW: MinIO Client Initialization ---
 minio_client = Minio(
@@ -408,7 +463,7 @@ def extract_images_from_doc_with_unstructured(doc_bytes: bytes, filename: str) -
 #  LEGACY: VLM & CONTENT EXTRACTION (No changes from your code)
 # ==============================================================================
 
-def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str) -> ApiVlmOptions:
+def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str):
     """
     Helper function to create ApiVlmOptions specifically for DeepInfra's OpenAI-compatible endpoint.
     """
@@ -436,7 +491,7 @@ def _create_deepinfra_vlm_options(model: str, prompt: str, api_key: str) -> ApiV
     )
     return options
 
-def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str) -> ApiVlmOptions:
+def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str):
     """
     Helper function to create ApiVlmOptions specifically for OpenRouter's API.
     """
@@ -465,7 +520,7 @@ def _create_openrouter_vlm_options(model: str, prompt: str, api_key: str) -> Api
     return options
 
 
-def generate_vlm_pipeline_options(mode: str = 'local', **kwargs) -> VlmPipelineOptions:
+def generate_vlm_pipeline_options(mode: str = 'local', **kwargs):
     """
     Generates pipeline_options for the Docling VLM pipeline based on the specified mode.
     """
@@ -802,6 +857,74 @@ def open_utf8_file(file) -> str:
 #  LEGACY: EXTRACTOR FUNCTIONS (Unchanged, they call extract_and_process_content)
 # ==============================================================================
 
+def read_stream(file_stream: BytesIO, filename: str):
+    """
+    Reads text from a BytesIO stream based on the filename extension.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    content = ""
+
+    # Ensure stream is at the beginning
+    file_stream.seek(0)
+
+    try:
+        # --- Word Processing ---
+        if ext == '.docx':
+            # python-docx accepts file-like objects directly
+            doc = Document(file_stream)
+            content = "\n".join([p.text for p in doc.paragraphs])
+        
+        elif ext == '.odt':
+            # odfpy accepts file-like objects directly
+            doc = load(file_stream)
+            elements = doc.getElementsByType(text.P)
+            content = "\n".join([str(e) for e in elements])
+
+        elif ext == '.rtf':
+            # RTF is text; decode bytes to string first
+            text_content = file_stream.read().decode('utf-8', errors='ignore')
+            content = rtf_to_text(text_content)
+
+        # --- Presentations ---
+        elif ext == '.pptx':
+            # python-pptx accepts file-like objects directly
+            prs = Presentation(file_stream)
+            text_runs = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        text_runs.append(shape.text)
+            content = "\n".join(text_runs)
+
+        # --- Spreadsheets ---
+        elif ext in ['.xlsx', '.xlsm']:
+            # openpyxl accepts file-like objects directly
+            wb = openpyxl.load_workbook(file_stream, data_only=True)
+            for sheet in wb.sheetnames:
+                ws = wb[sheet]
+                for row in ws.iter_rows(values_only=True):
+                    content += " ".join([str(cell) for cell in row if cell]) + "\n"
+
+        elif ext == '.xls':
+            # xlrd needs the raw bytes passed to 'file_contents'
+            wb = xlrd.open_workbook(file_contents=file_stream.getvalue())
+            for sheet in wb.sheets():
+                for row_idx in range(sheet.nrows):
+                    row_vals = sheet.row_values(row_idx)
+                    content += " ".join([str(v) for v in row_vals if v]) + "\n"
+
+        # --- Unsupported Legacy Formats ---
+        elif ext in ['.doc', '.ppt']:
+            return f"[ERROR] .doc and .ppt (Binary) require heavy tools (LibreOffice/Antiword) and cannot be read by lightweight Python scripts."
+
+        else:
+            return f"[ERROR] Unsupported extension: {ext}"
+
+    except Exception as e:
+        return f"Error reading {filename}: {str(e)}"
+
+    return content
+
 def extract_pdf_text(file_storage, option: str = 'describe', mode: str = 'vlm_remote') -> str:
     """Extracts content from a PDF. Can describe (default) or summarize."""
     return extract_and_process_content(file_storage, option, pipeline_mode=mode, with_images=False)
@@ -843,7 +966,10 @@ def summarize_text_with_llm(text: str) -> str:
     
     # Using a fast and cost-effective model for summarization tasks
     if not LOCAL:
-        summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
+        if IFXGPT:
+            summary = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name="gpt-5-mini")
+        else:
+            summary = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name="x-ai/grok-4-fast")
     else:
         summary = ollama_generate_text(prompt=prompt, system_prompt=system_prompt, model="gemma3:4b")[0]
     return summary
@@ -853,11 +979,11 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     Extract object descriptions from an image in base64 format.
     """
     # save image bytes to a PIL Image
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    # image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     # You might want to manage temporary files more carefully in production
-    temp_image_path = f"./temp_images/temp_image_for_description_{uuid.uuid4()}.jpg"
-    os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
-    image.save(temp_image_path)
+    # temp_image_path = f"./temp_images/temp_image_for_description_{uuid.uuid4()}.jpg"
+    # os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
+    # image.save(temp_image_path)
     
     # System prompt for OpenRouter VLM
     system_prompt = ("You're an image expert."
@@ -866,7 +992,10 @@ def image_to_describe_from_base64(image_bytes: bytes) -> str:
     prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
     # Call the object detection API with the image bytes
     if not LOCAL:
-        response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
+        if IFXGPT:
+            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="gpt-5-mini")
+        else:
+            response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, image_bytes_list=[image_bytes], model_name="qwen/qwen2.5-vl-32b-instruct") #qwen/qwen2.5-vl-32b-instruct // qwen/qwen3-vl-8b-instruct
     else:
         response = ollama_describe_image(image_bytes=image_bytes, model="qwen3-vl:2b-instruct", prompt=prompt, system_prompt=system_prompt)
     return response
@@ -959,260 +1088,374 @@ def OpenRouterInference(prompt: str, system_prompt: str = "", image_bytes_list: 
 
 
 
+# def extract_and_process_content(file_storage, option: str = 'describe', pipeline_mode: str = 'ocr', with_images: bool = True) -> str:
+#     """
+#     UPDATED: This function now processes files by converting them to images 
+#     and sending them to a VLM for analysis.
+    
+#     - For PDFs: Converts each page to an image and sends all page images.
+#     - For Images: Sends the single image.
+#     - Other types (DOCX, TXT, etc.) fall back to the legacy OCR text extraction.
+#     """
+    
+#     # --- Step 1: Get file bytes ---
+#     if isinstance(file_storage, bytes):
+#         file_bytes = file_storage
+#         file_storage = io.BytesIO(file_bytes)
+#         file_storage.filename = "temp_file.pdf" # Mock filename
+#     else:
+#         file_storage.seek(0)
+#         file_bytes = file_storage.read()
+#         file_storage.seek(0) # Reset pointer
+        
+#     if not file_storage.filename:
+#         # Try to guess type if no filename
+#         file_storage.filename = "temp_file.bin"
+
+#     file_ext = os.path.splitext(file_storage.filename)[1].lower()
+#     image_bytes_list = []
+    
+#     # --- Step 2: Convert file to list of images ---
+    
+#     if file_ext == '.pdf':
+#         print(f"Processing PDF '{file_storage.filename}': Converting pages to images...")
+#         try:
+#             pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+#             page_count = len(pdf_document)
+#             print(f"PDF has {page_count} pages.")
+            
+#             for page_num_0_idx in range(page_count):
+#                 page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
+#                 if page_image_bytes:
+#                     image_bytes_list.append(page_image_bytes)
+#                 else:
+#                     print(f"⚠️ Warning: Could not convert page {page_num_0_idx + 1}")
+            
+#             pdf_document.close()
+#             print(f"✅ Successfully converted {len(image_bytes_list)} pages to images.")
+            
+#         except Exception as e:
+#             return f"Error opening or converting PDF: {e}"
+            
+
+#     elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
+#         print(f"Processing single image: '{file_storage.filename}'")
+#         image_bytes_list.append(file_bytes)
+        
+#     else:
+#         # Fallback for unsupported types: Try the old OCR logic
+#         # This preserves functionality for DOCX, TXT, etc.
+#         print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
+#         # --- ORIGINAL OCR/TEXT EXTRACTION LOGIC (Simplified) ---
+#         try:
+#             doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
+#             # print("Downloading RapidOCR models")
+#             # download_path = snapshot_download(repo_id="RapidAI/RapidOCR")
+#             # det_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "det", "ch_PP-OCRv5_server_det.onnx")
+#             # rec_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "rec", "ch_PP-OCRv5_rec_server_infer.onnx")
+#             # cls_model_path = os.path.join(download_path, "onnx", "PP-OCRv4", "cls", "ch_ppocr_mobile_v2.0_cls_infer.onnx")
+            
+#             # ocr_options = RapidOcrOptions(
+#             #     det_model_path=det_model_path, rec_model_path=rec_model_path, cls_model_path=cls_model_path
+#             # )
+#             # pipeline_options = PdfPipelineOptions()
+#             # pipeline_options.do_ocr = True
+#             # pipeline_options.do_table_structure = True
+#             # pipeline_options.table_structure_options.do_cell_matching = True
+#             # pipeline_options.ocr_options = ocr_options
+
+#             # pipeline_options_word = WordPipelineOptions()
+#             # pipeline_options_powerpoint = PowerPointPipelineOptions()
+#             # pipeline_options_excel = ExcelPipelineOptions()
+            
+#             # Use a generic converter for fallback
+#             converter = DocumentConverter(
+#                 # format_options={
+#                 #     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+#                 #     InputFormat.DOCX: PdfFormatOption(pipeline_options=pipeline_options_word), 
+#                 #     InputFormat.PPTX: PdfFormatOption(pipeline_options=pipeline_options_powerpoint),
+#                 #     InputFormat.XLSX: PdfFormatOption(pipeline_options=pipeline_options_excel),
+#                 #     # InputFormat.XLS: PdfFormatOption(pipeline_options=pipeline_options),
+#                 #     # InputFormat.TXT: PdfFormatOption(pipeline_options=pipeline_options),
+#                 # }
+#             )
+            
+#             result = converter.convert(doc_stream)
+#             doc = result.document
+#             full_content = doc.export_to_markdown()
+            
+#             if option == 'summarize':
+#                 return summarize_text_with_llm(full_content)
+#             else:
+#                 return full_content
+                
+#         except Exception as e:
+#             return f"Error during legacy OCR fallback: {e}"
+#         # --- END OF FALLBACK ---
+
+#     if not image_bytes_list:
+#         return "Error: No images were successfully extracted or converted from the file."
+
+#     # --- Step 3: Define VLM Prompt ---
+#     # (This is the detailed instruction prompt from your original code)
+#     vlm_system_prompt = (
+# """You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
+
+# **Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
+
+# Your response must be a single, complete Markdown document representing the source file.
+
+# ### Your Guiding Principles
+
+# 1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
+
+# 2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
+
+#       * Headings (e.g., `# Title`, `## Subtitle`)
+#       * Paragraphs (plain text)
+#       * Lists (bulleted `*` or numbered `1.`)
+#       * Code blocks (using \`\`\` fences)
+#       * Bold (`**text**`) and Italic (`*text*`) styling.
+#       * Any and all text labels, captions, or annotations, in the exact place they appear.
+
+# 3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
+
+#       * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
+#       * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
+#       * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
+#           * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
+#           * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
+#       * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
+#       * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
+
+# 4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
+
+#       * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
+#         ```markdown
+#         <table>
+#         | Header 1 | Header 2 |
+#         |---|---|
+#         | Data 1 | Data 2 |
+#         </table>
+#         ```
+#       * **Charts:**
+#         ```markdown
+#         <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
+#         ```
+#       * **Images/Photos:**
+#         ```markdown
+#         <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
+#         ```
+#       * **Diagrams/Schematics (Your Most Important Tag):**
+#         ```markdown
+#         <diagram>
+#         A hyper-detailed, connection-by-connection transcription of the schematic.
+#         **Component 1 (e.g., Arduino):**
+#         * Pin 1 connects to...
+#         * Pin 2 connects to Resistor R1...
+#         **Component 2 (e.g., 7-Segment Display):**
+#         * Pin 'A' connects to the other end of Resistor R1...
+#         * Pin 'Common' connects to GND...
+#         (This transcription must trace all connections literally from the image.)
+#         </diagram>
+#         ```
+#       * **Logos:**
+#         ```markdown
+#         <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
+#         ```
+#       * **Signatures:**
+#         ```markdown
+#         <signature>A handwritten, illegible signature in blue ink.</signature>
+#         ```
+#       * **Stamps:**
+#         ```markdown
+#         <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
+#         ```
+
+# -----
+
+# ### *** Note ***
+# You must extract all content from the document.
+
+# ### Gold-Standard Example (Your Target Quality)
+
+# The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
+
+# **Your required output must be exactly in this format and at this level of detail:**
+
+# ```markdown
+# <diagram>
+# A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
+
+# **Connections from Arduino Board:**
+
+# * **To 7-Segment Display (via 300-ohm resistors):**
+#     * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
+#     * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
+#     * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
+#     * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
+#     * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
+#     * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
+#     * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
+# * **To Dip Switch 1 (Pull-Up Configuration):**
+#     * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
+#     * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
+#     * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
+#     * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
+#     * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
+#     * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
+
+# **Component Connections:**
+
+# * **7-Segment Display:**
+#     * Segments A, B, C, D, E, F, and G are connected as described above.
+#     * The common cathode pin (at the bottom) is connected to GND.
+# * **Dip Switch 1 ("ดิปสวิตช์1"):**
+#     * This is an 8-position switch block.
+#     * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
+#     * The other side of all 8 switches is connected to a common GND line.
+# * **Pull-Up Resistors (10K-ohm x 8):**
+#     * There are 8 10K-ohm resistors.
+#     * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
+#     * The other end of all 8 resistors is connected to a common +5V line.
+
+# **Power Pins:**
+# * The Arduino board shows a "USB JACK".
+# * A power pin block shows 3.3V, 5V, GND, GND, VIN.
+# * Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
+# </diagram>
+
+# รูปที่ 1
+
+# Lab 1
+# Dip Switch and 7-Segment
+
+# อุปกรณ์
+# 1. Arduino Board
+# 2. Digital Experiment Board
+# 3. 7-Segment Board
+
+# Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
+# 1.1 ต่อวงจร ตามรูปที่ 1
+# 1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
+# ```""")
+    
+#     vlm_system_prompt = (
+# """You are an expert Document Analyst AI converting images to structured Markdown.
+
+# **CORE DIRECTIVE: Extract content sequentially and verbatim. NO summarization, interpretation, or omission.**
+
+# ### Operational Rules
+# 1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
+# 2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
+# 3.  **Visual Deconstruction (CRITICAL):**
+#     *   Convert visuals into literal text descriptions inside specific tags.
+#     *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
+
+# ### Required Tags
+# *   `<diagram>`: Detailed schematic connection tracing.
+# *   `<table>`: Markdown tables.
+# *   `<chart>`: Type, axes, legend, and data points.
+# *   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+
+# ### Relevance Filter
+# If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
+# """)
+#     # Add context about the images
+#     page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
+#     reference_text = "\n".join(page_references)
+
+#     # This prompt is sent as the 'user' message
+#     final_user_prompt = f"""
+
+#     I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
+
+#     Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
+
+#     # --- Step 4: Call OpenRouterInference ---
+#     print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
+
+#     vlm_response = ""
+#     batch_size = 10
+#     for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
+#         print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
+#         if (i)*batch_size >= len(image_bytes_list):
+#             break
+
+#         if not LOCAL:
+#             if IFXGPT:
+#                 vlm_response += IFXGPTInference(
+#                     prompt=final_user_prompt,
+#                     system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+#                     image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+#                     model_name= "gpt-5-mini" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+#                 ) + "\n\n"
+#             else:
+#                 vlm_response += DeepInfraInference(
+#                     prompt=final_user_prompt,
+#                     system_prompt=vlm_system_prompt, # The user's detailed instructions go here
+#                     image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
+#                     model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
+#                 ) + "\n\n"
+#             print(vlm_response)
+#         else :
+#              # System prompt for OpenRouter VLM
+#             vlm_system_prompt = ("You're an image expert."
+#                              "If the image contains text, extract and summarize it...")
+#             # Prompt for OpenRouter VLM
+#             final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+#             vlm_response_L = ollama_describe_image(
+#                 image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
+#                 model="qwen3-vl:2b-instruct",
+#                 prompt=final_user_prompt,
+#                 system_prompt=vlm_system_prompt
+#                 )
+#             vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
+
+#     print(vlm_response)
+#     print("✅ VLM processing complete.")
+
+#     # --- Step 5: Handle "summarize" option ---
+#     if option == 'summarize':
+#         print("Summarizing VLM output...")
+#         return summarize_text_with_llm(vlm_response)
+#     else: # 'describe'
+#         return vlm_response
+
+
 def extract_and_process_content(file_storage, option: str = 'describe', pipeline_mode: str = 'ocr', with_images: bool = True) -> str:
     """
-    UPDATED: This function now processes files by converting them to images 
+    UPDATED (Memory Optimized): Processes files by converting them to images 
     and sending them to a VLM for analysis.
     
-    - For PDFs: Converts each page to an image and sends all page images.
+    - For PDFs: Processes in BATCHES to save memory (does not load all pages at once).
     - For Images: Sends the single image.
-    - Other types (DOCX, TXT, etc.) fall back to the legacy OCR text extraction.
+    - Other types: Fallback to legacy OCR.
     """
-    
+    import gc  # Garbage collector for explicit memory management
+
     # --- Step 1: Get file bytes ---
     if isinstance(file_storage, bytes):
         file_bytes = file_storage
         file_storage = io.BytesIO(file_bytes)
-        file_storage.filename = "temp_file.pdf" # Mock filename
+        file_storage.filename = "temp_file.pdf"
     else:
         file_storage.seek(0)
         file_bytes = file_storage.read()
-        file_storage.seek(0) # Reset pointer
-        
+        file_storage.seek(0)
+
     if not file_storage.filename:
-        # Try to guess type if no filename
         file_storage.filename = "temp_file.bin"
 
     file_ext = os.path.splitext(file_storage.filename)[1].lower()
-    image_bytes_list = []
     
-    # --- Step 2: Convert file to list of images ---
-    
-    if file_ext == '.pdf':
-        print(f"Processing PDF '{file_storage.filename}': Converting pages to images...")
-        try:
-            pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
-            page_count = len(pdf_document)
-            print(f"PDF has {page_count} pages.")
-            
-            for page_num_0_idx in range(page_count):
-                page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num_0_idx, dpi=200)
-                if page_image_bytes:
-                    image_bytes_list.append(page_image_bytes)
-                else:
-                    print(f"⚠️ Warning: Could not convert page {page_num_0_idx + 1}")
-            
-            pdf_document.close()
-            print(f"✅ Successfully converted {len(image_bytes_list)} pages to images.")
-            
-        except Exception as e:
-            return f"Error opening or converting PDF: {e}"
-            
+    # Define batch size (tune this based on your VRAM/RAM limits)
+    BATCH_SIZE = 10 
+    vlm_response = ""
 
-    elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
-        print(f"Processing single image: '{file_storage.filename}'")
-        image_bytes_list.append(file_bytes)
-        
-    else:
-        # Fallback for unsupported types: Try the old OCR logic
-        # This preserves functionality for DOCX, TXT, etc.
-        print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
-        # --- ORIGINAL OCR/TEXT EXTRACTION LOGIC (Simplified) ---
-        try:
-            doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
-            # print("Downloading RapidOCR models")
-            # download_path = snapshot_download(repo_id="RapidAI/RapidOCR")
-            # det_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "det", "ch_PP-OCRv5_server_det.onnx")
-            # rec_model_path = os.path.join(download_path, "onnx", "PP-OCRv5", "rec", "ch_PP-OCRv5_rec_server_infer.onnx")
-            # cls_model_path = os.path.join(download_path, "onnx", "PP-OCRv4", "cls", "ch_ppocr_mobile_v2.0_cls_infer.onnx")
-            
-            # ocr_options = RapidOcrOptions(
-            #     det_model_path=det_model_path, rec_model_path=rec_model_path, cls_model_path=cls_model_path
-            # )
-            # pipeline_options = PdfPipelineOptions()
-            # pipeline_options.do_ocr = True
-            # pipeline_options.do_table_structure = True
-            # pipeline_options.table_structure_options.do_cell_matching = True
-            # pipeline_options.ocr_options = ocr_options
-
-            # pipeline_options_word = WordPipelineOptions()
-            # pipeline_options_powerpoint = PowerPointPipelineOptions()
-            # pipeline_options_excel = ExcelPipelineOptions()
-            
-            # Use a generic converter for fallback
-            converter = DocumentConverter(
-                # format_options={
-                #     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-                #     InputFormat.DOCX: PdfFormatOption(pipeline_options=pipeline_options_word), 
-                #     InputFormat.PPTX: PdfFormatOption(pipeline_options=pipeline_options_powerpoint),
-                #     InputFormat.XLSX: PdfFormatOption(pipeline_options=pipeline_options_excel),
-                #     # InputFormat.XLS: PdfFormatOption(pipeline_options=pipeline_options),
-                #     # InputFormat.TXT: PdfFormatOption(pipeline_options=pipeline_options),
-                # }
-            )
-            
-            result = converter.convert(doc_stream)
-            doc = result.document
-            full_content = doc.export_to_markdown()
-            
-            if option == 'summarize':
-                return summarize_text_with_llm(full_content)
-            else:
-                return full_content
-                
-        except Exception as e:
-            return f"Error during legacy OCR fallback: {e}"
-        # --- END OF FALLBACK ---
-
-    if not image_bytes_list:
-        return "Error: No images were successfully extracted or converted from the file."
-
-    # --- Step 3: Define VLM Prompt ---
-    # (This is the detailed instruction prompt from your original code)
-    vlm_system_prompt = (
-"""You are an expert Document Analyst AI. Your mission is to meticulously analyze an image of a document and convert its **entire content** into a structured Markdown format. You must process the document sequentially from top to bottom, preserving the original order of all elements.
-
-**Your primary directive is to perform a literal, verbatim extraction. You must not summarize, interpret, rephrase, or omit any content.**
-
-Your response must be a single, complete Markdown document representing the source file.
-
-### Your Guiding Principles
-
-1.  **Absolute Sequential Order:** Process the document from its absolute top to its absolute bottom, transcribing elements in the exact order they appear. If content is arranged visually (e.g., side-by-side columns), you must transcribe the content in a logical reading order (e.g., top-to-bottom of the left column, then top-to-bottom of the right column). The order of elements in your output **must** perfectly match the original.
-
-2.  **Verbatim Text Transcription:** All text elements must be transcribed **verbatim (exactly as written)** and converted into the appropriate Markdown format. This includes:
-
-      * Headings (e.g., `# Title`, `## Subtitle`)
-      * Paragraphs (plain text)
-      * Lists (bulleted `*` or numbered `1.`)
-      * Code blocks (using \`\`\` fences)
-      * Bold (`**text**`) and Italic (`*text*`) styling.
-      * Any and all text labels, captions, or annotations, in the exact place they appear.
-
-3.  **Literal Deconstruction of Non-Textual Elements (CRITICAL):** This is **not a summary**. This is a **textual conversion** of visual information. For any visual element that cannot be represented as text (such as images, photographs, charts, **circuit diagrams, schematics,** signatures, stamps, or logos), you must:
-
-      * Provide a **hyper-detailed, component-by-component, literal transcription** of the element's content.
-      * **Zero Summarization:** Your transcription must be exhaustive and deconstruct the element for someone who cannot see it. You must transcribe all labels, all data points, and all connections.
-      * **For Diagrams/Schematics:** This is the most critical task. You must *trace* and *transcribe* **every single connection** between all labeled components. This is a textual representation of the visual data, not a summary of its purpose.
-          * List each component by its label (e.g., "Arduino Pin A0/14/PC0", "Resistor R1", "Dip Switch 1").
-          * Explicitly trace what each pin connects to, including any intermediate components. (e.g., "Arduino Pin 0/PD0 connects to one side of the first switch in 'Dip Switch 1' AND to one end of a '10K-ohm' resistor. The other end of this resistor connects to '+5V'. The other side of the first switch connects to 'GND'.").
-      * **For Charts/Graphs:** State the chart type (bar, line, pie). Transcribe all axes labels, the title, and the legend. Then, list the data points or relationships shown, one by one.
-      * Enclose this entire literal deconstruction within the specific tags defined in Principle 4.
-
-4.  **Tagging Format:** You must use the following tags to enclose your non-textual deconstructions. **The text *inside* the tags is the literal transcription of the visual, not a summary.**
-
-      * **Tables:** Enclose the entire Markdown table within `<table>` and `</table>`.
-        ```markdown
-        <table>
-        | Header 1 | Header 2 |
-        |---|---|
-        | Data 1 | Data 2 |
-        </table>
-        ```
-      * **Charts:**
-        ```markdown
-        <chart>A vertical bar chart titled 'Sales'. The X-axis is 'Month' (Jan, Feb, Mar). The Y-axis is 'Revenue'. The bar for Feb is taller than Jan.</chart>
-        ```
-      * **Images/Photos:**
-        ```markdown
-        <image>A photograph of a white coffee mug with a blue logo, sitting on a wooden desk next to a laptop.</image>
-        ```
-      * **Diagrams/Schematics (Your Most Important Tag):**
-        ```markdown
-        <diagram>
-        A hyper-detailed, connection-by-connection transcription of the schematic.
-        **Component 1 (e.g., Arduino):**
-        * Pin 1 connects to...
-        * Pin 2 connects to Resistor R1...
-        **Component 2 (e.g., 7-Segment Display):**
-        * Pin 'A' connects to the other end of Resistor R1...
-        * Pin 'Common' connects to GND...
-        (This transcription must trace all connections literally from the image.)
-        </diagram>
-        ```
-      * **Logos:**
-        ```markdown
-        <logo>A circular company logo with the text 'Innovate Corp' and a gear icon in the center.</logo>
-        ```
-      * **Signatures:**
-        ```markdown
-        <signature>A handwritten, illegible signature in blue ink.</signature>
-        ```
-      * **Stamps:**
-        ```markdown
-        <stamp>A red circular stamp with the text 'APPROVED' in the center.</stamp>
-        ```
-
------
-
-### *** Note ***
-You must extract all content from the document.
-
-### Gold-Standard Example (Your Target Quality)
-
-The example you provided is the **perfect** model of this non-summary approach. It correctly provides a literal, connection-by-connection transcription of the visual diagram *first*, and *then* provides a verbatim transcription of all the text that follows it, in the correct order.
-
-**Your required output must be exactly in this format and at this level of detail:**
-
-```markdown
-<diagram>
-A detailed circuit schematic showing connections between an Arduino-style board, a common cathode 7-Segment display, and an 8-position Dip Switch block labeled "ดิปสวิตช์1".
-
-**Connections from Arduino Board:**
-
-* **To 7-Segment Display (via 300-ohm resistors):**
-    * Pin A0/14/PC0 connects to a 300-ohm resistor, which connects to the 'A' segment pin.
-    * Pin A1/15/PC1 connects to a 300-ohm resistor, which connects to the 'B' segment pin.
-    * Pin A2/16/PC2 connects to a 300-ohm resistor, which connects to the 'C' segment pin.
-    * Pin A3/17/PC3 connects to a 300-ohm resistor, which connects to the 'D' segment pin.
-    * Pin A4/18/PC4 connects to a 300-ohm resistor, which connects to the 'E' segment pin.
-    * Pin A5/19/PC5 connects to a 300-ohm resistor, which connects to the 'F' segment pin.
-    * Pin 8/PB0 connects to a 300-ohm resistor, which connects to the 'G' segment pin.
-* **To Dip Switch 1 (Pull-Up Configuration):**
-    * Pin 0/PD0 connects to a node. This node is connected to one side of the first switch (leftmost) and also to one end of a 10K-ohm resistor.
-    * Pin 1/PD1 connects to a node. This node is connected to one side of the second switch and also to one end of a 10K-ohm resistor.
-    * Pin 2/PD2 connects to a node. This node is connected to one side of the third switch and also to one end of a 10K-ohm resistor.
-    * Pin 3/PD3 connects to a node. This node is connected to one side of the fourth switch and also to one end of a 10K-ohm resistor.
-    * Pin 4/PD4 connects to a node. This node is connected to one side of the fifth switch and also to one end of a 10K-ohm resistor.
-    * Pin 5/PD5 connects to a node. This node is connected to one side of the sixth switch and also to one end of a 10K-ohm resistor.
-    * Pin 6/PD6 connects to a node. This node is connected to one side of the seventh switch and also to one end of a 10K-ohm resistor.
-    * Pin 7/PD7 connects to a node. This node is connected to one side of the eighth switch (rightmost) and also to one end of a 10K-ohm resistor.
-
-**Component Connections:**
-
-* **7-Segment Display:**
-    * Segments A, B, C, D, E, F, and G are connected as described above.
-    * The common cathode pin (at the bottom) is connected to GND.
-* **Dip Switch 1 ("ดิปสวิตช์1"):**
-    * This is an 8-position switch block.
-    * One side of each of the 8 switches is connected to its respective Arduino pin (PD0-PD7) as described above.
-    * The other side of all 8 switches is connected to a common GND line.
-* **Pull-Up Resistors (10K-ohm x 8):**
-    * There are 8 10K-ohm resistors.
-    * One end of each resistor is connected to an Arduino pin node (PD0-PD7).
-    * The other end of all 8 resistors is connected to a common +5V line.
-
-**Power Pins:**
-* The Arduino board shows a "USB JACK".
-* A power pin block shows 3.3V, 5V, GND, GND, VIN.
-* Unconnected pins on the Arduino board include: SCL, SDA, AREF, GND, 13/PB5, 12/PB4, 11/PB3, 10/PB2, 9/PB1.
-</diagram>
-
-รูปที่ 1
-
-Lab 1
-Dip Switch and 7-Segment
-
-อุปกรณ์
-1. Arduino Board
-2. Digital Experiment Board
-3. 7-Segment Board
-
-Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพื่อแสดงค่าออกที่ 7-Segment
-1.1 ต่อวงจร ตามรูปที่ 1
-1.2 ใช้โปรแกรม Arduino IDE เพื่อป้อน Code ด้านล่าง และแก้ไข เพิ่มเติมให้เหมาะสม เพื่อให้ Code สามารถอ่านค่าสถานะตรรกะจาก Dip-Switch ทั้ง 8 แล้วทำการนับจำนวน Switch ที่มี ตรรกะ “HIGH” แล้วแสดงค่าจำนวนนั้นออกสู่ 7-Segment ได้อย่างถูกต้อง
-```""")
-    
+    # --- Step 2: Define VLM Prompt (Static Part) ---
     vlm_system_prompt = (
 """You are an expert Document Analyst AI converting images to structured Markdown.
 
@@ -1220,72 +1463,125 @@ Checkpoint# 1: อ่านค่าสถานะจาก Dip-switch เพ�
 
 ### Operational Rules
 1.  **Sequential Order:** Transcribe elements top-to-bottom, left-to-right.
-2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting (Headers, Lists, Code blocks, **Bold**, *Italic*).
-3.  **Visual Deconstruction (CRITICAL):**
-    *   Convert visuals into literal text descriptions inside specific tags.
-    *   **For Schematics/Diagrams:** You must provide a **hyper-detailed, pin-by-pin connection trace**. Explicitly state every wire connection (e.g., "Pin A connects to Resistor R1, which connects to GND"). Describe the structure, not the function.
-
-### Required Tags
-*   `<diagram>`: Detailed schematic connection tracing.
-*   `<table>`: Markdown tables.
-*   `<chart>`: Type, axes, legend, and data points.
-*   `<image>` / `<logo>` / `<signature>` / `<stamp>`: Literal visual description.
+2.  **Text Transcription:** Extract text exactly as written, preserving Markdown formatting.
+3.  **Visual Deconstruction:** Convert visuals into literal text descriptions inside specific tags (<diagram>, <table>, <chart>, <image>).
+4.  **Schematics:** Provide hyper-detailed, pin-by-pin connection traces.
 
 ### Relevance Filter
-If a specific user question is provided and this page contains no relevant information to answer it, do not extract content of that section.
+If a specific user question is provided and this page contains no relevant information, do not extract content of that section.
 """)
-    # Add context about the images
-    page_references = [f"- Document Page {i+1}" for i in range(len(image_bytes_list))]
-    reference_text = "\n".join(page_references)
 
-    # This prompt is sent as the 'user' message
-    final_user_prompt = f"""
+    # --- Step 3: Process based on file type ---
 
-    I am providing you with {len(image_bytes_list)} images from the file '{file_storage.filename}'. These images represent the pages of the document in sequential order: {reference_text}
+    if file_ext == '.pdf':
+        print(f"Processing PDF '{file_storage.filename}' in batches of {BATCH_SIZE}...")
+        try:
+            pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+            page_count = len(pdf_document)
+            print(f"PDF has {page_count} pages.")
+            
+            # Loop through the PDF in chunks
+            for start_idx in range(0, page_count, BATCH_SIZE):
+                end_idx = min(start_idx + BATCH_SIZE, page_count)
+                print(f"Processing Batch: Pages {start_idx + 1} to {end_idx}...")
+                
+                batch_images = []
+                page_references = []
 
-    Please analyze all these pages as a single, continuous document and generate the full Markdown extraction as requested in the system prompt. Begin processing from Page 1 and continue sequentially to the end. """
+                # Convert only the current batch of pages to images
+                for page_num in range(start_idx, end_idx):
+                    # convert_pdf_page_to_image must return bytes
+                    page_image_bytes = convert_pdf_page_to_image(file_bytes, page_num, dpi=200)
+                    if page_image_bytes:
+                        batch_images.append(page_image_bytes)
+                        page_references.append(f"- Document Page {page_num + 1}")
+                    else:
+                        print(f"⚠️ Warning: Could not convert page {page_num + 1}")
 
-    # --- Step 4: Call OpenRouterInference ---
-    print(f"Sending {len(image_bytes_list)} images to DeepInfraInference VLM...")
+                if not batch_images:
+                    continue
 
-    vlm_response = ""
-    batch_size = 10
-    for i in range(len(image_bytes_list)//batch_size + 2): # Process in batches of 15
-        print(f"Processing images {(i)*batch_size + 1} to {min((i+1)*batch_size, len(image_bytes_list))}...")
-        if (i)*batch_size >= len(image_bytes_list):
-            break
+                # Prepare dynamic prompt for this batch
+                reference_text = "\n".join(page_references)
+                batch_user_prompt = f"""
+                I am providing you with {len(batch_images)} images representing a section of the document: 
+                {reference_text}
+                
+                Please analyze these pages and extract the content as requested. 
+                """
 
+                # Call VLM for this batch
+                if not LOCAL:
+                    if IFXGPT:
+                        batch_res = IFXGPTInference(
+                            prompt=batch_user_prompt,
+                            system_prompt=vlm_system_prompt,
+                            image_bytes_list=batch_images,
+                            model_name="gpt-5-mini" 
+                        )
+                    else:
+                        batch_res = DeepInfraInference(
+                            prompt=batch_user_prompt,
+                            system_prompt=vlm_system_prompt,
+                            image_bytes_list=batch_images,
+                            model_name="meta-llama/Llama-4-Scout-17B-16E-Instruct"
+                        )
+                    vlm_response += batch_res + "\n\n"
+                else:
+                    # Local Ollama fallback
+                    desc_list = ollama_describe_image(
+                        image_bytes=batch_images,
+                        model="qwen3-vl:2b-instruct",
+                        prompt="Please describe the image in detail.",
+                        system_prompt="You are an image expert."
+                    )
+                    vlm_response += "\n\n".join(desc_list) + "\n\n"
+
+                # CRITICAL: Clear memory for this batch
+                del batch_images
+                gc.collect() 
+
+            pdf_document.close()
+            print("✅ PDF processing complete.")
+
+        except Exception as e:
+            return f"Error opening or converting PDF: {e}"
+
+    elif file_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']:
+        # Single image path (same as before but simplified)
+        print(f"Processing single image: '{file_storage.filename}'")
+        image_bytes_list = [file_bytes]
+        
+        user_prompt = "Analyze this image and extract content."
+        
         if not LOCAL:
-            vlm_response += DeepInfraInference(
-                prompt=final_user_prompt,
-                system_prompt=vlm_system_prompt, # The user's detailed instructions go here
-                image_bytes_list=image_bytes_list[(i)*batch_size:(i+1)*batch_size], # Send in batches of 15 images
-                model_name= "meta-llama/Llama-4-Scout-17B-16E-Instruct" #"Qwen/Qwen3-VL-8B-Instruct" #"deepseek-ai/DeepSeek-OCR" #"Qwen/Qwen2.5-VL-32B-Instruct" # Using a strong VLM Qwen/Qwen3-VL-8B-Instruct Qwen/Qwen3-VL-30B-A3B-Instruct Qwen/Qwen2.5-VL-32B-Instruct
-            ) + "\n\n"
-            print(vlm_response)
-        else :
-             # System prompt for OpenRouter VLM
-            vlm_system_prompt = ("You're an image expert."
-                             "If the image contains text, extract and summarize it...")
-            # Prompt for OpenRouter VLM
-            final_user_prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-            vlm_response_L = ollama_describe_image(
-                image_bytes=image_bytes_list[(i)*batch_size:(i+1)*batch_size],
-                model="qwen3-vl:2b-instruct",
-                prompt=final_user_prompt,
-                system_prompt=vlm_system_prompt
-                )
-            vlm_response += "\n\n".join(vlm_response_L) + "\n\n"
+             # Call your inference function (simplified for brevity)
+             if IFXGPT:
+                vlm_response = IFXGPTInference(prompt=user_prompt, system_prompt=vlm_system_prompt, image_bytes_list=image_bytes_list, model_name="gpt-5-mini")
+             else:
+                vlm_response = DeepInfraInference(prompt=user_prompt, system_prompt=vlm_system_prompt, image_bytes_list=image_bytes_list, model_name="meta-llama/Llama-4-Scout-17B-16E-Instruct")
+        else:
+             res_list = ollama_describe_image(image_bytes=image_bytes_list, model="qwen3-vl:2b-instruct", prompt="Describe", system_prompt="Expert")
+             vlm_response = res_list[0]
 
-    print(vlm_response)
-    print("✅ VLM processing complete.")
+    else:
+        # Fallback for DOCX/TXT/etc using Legacy OCR
+        print(f"Unsupported file type '{file_ext}' for VLM-image flow. Falling back to legacy OCR...")
+        try:
+            doc_stream = DocumentStream(name=file_storage.filename, stream=io.BytesIO(file_bytes))
+            converter = DocumentConverter() # Your legacy converter setup
+            result = converter.convert(doc_stream)
+            vlm_response = result.document.export_to_markdown()
+        except Exception as e:
+            return f"Error during legacy OCR fallback: {e}"
 
-    # --- Step 5: Handle "summarize" option ---
+    # --- Step 4: Final Output ---
     if option == 'summarize':
         print("Summarizing VLM output...")
         return summarize_text_with_llm(vlm_response)
-    else: # 'describe'
+    else:
         return vlm_response
+    
     
 # ==============================================================================
 #  OLLAMA FUNCTION (NEW)
@@ -1689,12 +1985,20 @@ Requirements:
         print("Requesting Jina v4 embedding (Type: Text)...")
         if search_text == None:
             if not LOCAL:
-                search_text = DeepInfraInference(
-                    prompt=create_search_prompt,
-                    # system_prompt=system_prompt,
-                    # image_bytes_list=image_bytes_list,
-                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
-                )
+                if IFXGPT:
+                    search_text = IFXGPTInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name="gpt-5-mini" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
+                    )
+                else:
+                    search_text = DeepInfraInference(
+                        prompt=create_search_prompt,
+                        # system_prompt=system_prompt,
+                        # image_bytes_list=image_bytes_list,
+                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct"#"Qwen/Qwen3-235B-A22B-Instruct-2507" # Use a strong VLM
+                    )
 
             else :
                 search_text = ollama_generate_text(
@@ -1909,10 +2213,16 @@ Output only the descriptive paragraph. No introductory text.
             if search_text == None:
                 # Ensure LOCAL and helper functions are defined in your outer scope
                 if not LOCAL:
-                    search_text = DeepInfraInference(
-                        prompt=create_search_prompt,
-                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
-                    )
+                    if IFXGPT:
+                        search_text = IFXGPTInference(
+                            prompt=create_search_prompt,
+                            model_name="gpt-5-mini" 
+                        )
+                    else:
+                        search_text = DeepInfraInference(
+                            prompt=create_search_prompt,
+                            model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" 
+                        )
                 else:
                     search_text = ollama_generate_text(
                         prompt=create_search_prompt,
@@ -2673,51 +2983,76 @@ Output only the descriptive paragraph.
     
 def encode_text_for_embedding(text: str = None,search_text: str = None, target_dimensions: int = 2048, is_query: bool = False) -> list[float]:
     """
-    Convert text into an embedding vector using pre-loaded model (FAST).
-    Falls back to Ollama if pre-loaded model unavailable.
+    Convert text into an embedding vector.
+    
+    Priority Order:
+    1. OpenAI text-embedding-3-small (via IFX GPT) ← PRIMARY
+    2. Jina v4 local model
+    3. Jina API (Provider)
+    4. Ollama (qwen3-embedding:0.6b)
     
     Args:
         text: ข้อความที่ต้องการ embedding
         target_dimensions: จำนวน dimensions ที่ต้องการ (default: 2048 สำหรับ verified_answers)
         is_query: True = ค้นหา (retrieval.query), False = บันทึกเอกสาร (retrieval.passage)
-                  การใช้ task ที่ถูกต้องช่วยให้ cross-lingual search ทำงานได้ดี
     
     Returns:
-        list[float]: embedding vector (2048 dims)
+        list[float]: embedding vector (2048 dims, padded/truncated as needed)
     """
-    global model  # Use the pre-loaded model
+    global model  # Use the pre-loaded Jina model
     
     # ตรวจสอบว่า text ว่างหรือไม่
     if (not text or not text.strip()) and (not search_text or not search_text.strip()):
         print(f"❌ ERROR: Empty text provided!")
         raise ValueError("Cannot create embedding from empty text")
     
-    # เลือก task - Jina v4 ใช้ 'retrieval' สำหรับทั้ง query และ document
-    # Note: is_query ยังคงใช้ประโยชน์สำหรับ logging และ API fallback
-    task = 'retrieval'  # Jina v4 ใช้ task เดียวกันสำหรับทั้ง query และ passage
+    # Store errors for final logging
+    openai_error = None
+    jina_error = None
+    jina_api_error = None
+    
+    # ========== PRIMARY: OpenAI text-embedding-3-small via IFX GPT ==========
+    print(f"🤖 [1/4] Attempting OpenAI text-embedding-3-small...")
+    try:
+        embedding_list = IFXGPTEmbedding(inputs=[text])[0]
+        
+        # OpenAI returns 1536 dims, adjust to target_dimensions (2048)
+        current_dim = len(embedding_list)
+        if current_dim < target_dimensions:
+            padding = [0.0] * (target_dimensions - current_dim)
+            embedding_list.extend(padding)
+        elif current_dim > target_dimensions:
+            embedding_list = embedding_list[:target_dimensions]
+        
+        print(f"✅ OpenAI embedding succeeded ({current_dim} → {target_dimensions} dims)")
+        return embedding_list
+    
+    except Exception as e:
+        openai_error = e
+        print(f"⚠️  [1/4] OpenAI failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 1: Pre-loaded Jina v4 model ==========
+    print(f"🤖 [2/4] Attempting Jina v4 local model...")
+    task = 'retrieval'
     
     try:
-        # Use the pre-loaded Jina embedding model (FAST - no reload)
         if model is not None:
             mode_str = 'QUERY' if is_query else 'DOCUMENT'
-            print(f"⚡ Using PRE-LOADED Jina model (task={task}, mode={mode_str}) for embedding...")
+            print(f"⚡ Using PRE-LOADED Jina model (task={task}, mode={mode_str})...")
             embedding = model.encode(text, task=task)
             embedding_list = embedding.tolist()
             
-            # Adjust dimensions to target_dimensions (2048)
             current_dim = len(embedding_list)
             if current_dim < target_dimensions:
-                # Pad with zeros
                 padding = [0.0] * (target_dimensions - current_dim)
                 embedding_list.extend(padding)
-                print(f"✅ Padded embedding from {current_dim} to {target_dimensions} dimensions")
             elif current_dim > target_dimensions:
-                # Truncate
                 embedding_list = embedding_list[:target_dimensions]
-                print(f"✅ Truncated embedding from {current_dim} to {target_dimensions} dimensions")
             
+            print(f"✅ Jina v4 local succeeded ({current_dim} → {target_dimensions} dims)")
             return embedding_list
         else:
+<<<<<<< HEAD
             print("⚠️ Model not initialized (model=None). Using Jinna API (Provider API) fallback ...")
             if search_text:
                 embedding_list = get_image_embedding_jinna_api(search_text=search_text)  # retrieval.query
@@ -2735,38 +3070,82 @@ def encode_text_for_embedding(text: str = None,search_text: str = None, target_d
             else:
                 raise ValueError("Ollama returned empty embedding")
             
+=======
+            raise Exception("Jina model not initialized (model=None)")
+    
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     except Exception as e:
-        print(f"❌ Jina embedding error: {e}. Trying Ollama fallback...")
-        try:
-            embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
-            if embedding_list and len(embedding_list) > 0:
-                embedding_result = embedding_list[0]
-                # Adjust dimensions for Ollama fallback
-                current_dim = len(embedding_result)
-                if current_dim < target_dimensions:
-                    padding = [0.0] * (target_dimensions - current_dim)
-                    embedding_result.extend(padding)
-                    print(f"✅ Padded Ollama embedding from {current_dim} to {target_dimensions} dimensions")
-                elif current_dim > target_dimensions:
-                    embedding_result = embedding_result[:target_dimensions]
-                    print(f"✅ Truncated Ollama embedding from {current_dim} to {target_dimensions} dimensions")
-                return embedding_result
-            else:
-                raise ValueError("Ollama returned empty embedding")
-        except Exception as ollama_error:
-            print(f"❌ ALL embedding methods failed: {ollama_error}")
-            raise ValueError(f"Embedding failed: {ollama_error}")
+        jina_error = e
+        print(f"⚠️  [2/4] Jina v4 local failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 2: Jina API (Provider) ==========
+    print(f"🤖 [3/4] Attempting Jina API (Provider)...")
+    try:
+        if is_query:
+            embedding_list = get_image_embedding_jinna_api(search_text=text)
+        else:
+            embedding_list = get_image_embedding_jinna_api(text=text)
+        
+        if embedding_list and len(embedding_list) > 0:
+            current_dim = len(embedding_list)
+            if current_dim < target_dimensions:
+                padding = [0.0] * (target_dimensions - current_dim)
+                embedding_list.extend(padding)
+            elif current_dim > target_dimensions:
+                embedding_list = embedding_list[:target_dimensions]
+            
+            print(f"✅ Jina API succeeded ({current_dim} → {target_dimensions} dims)")
+            return embedding_list
+        else:
+            raise ValueError("Jina API returned empty embedding")
+    
+    except Exception as e:
+        jina_api_error = e
+        print(f"⚠️  [3/4] Jina API failed: {str(e)[:80]}...")
+    
+    # ========== FALLBACK 3: Ollama ==========
+    print(f"🤖 [4/4] Attempting Ollama (qwen3-embedding:0.6b)...")
+    try:
+        embedding_list = ollama_embed_text(text=text, model="qwen3-embedding:0.6b")
+        
+        if embedding_list and len(embedding_list) > 0:
+            embedding_result = embedding_list[0]
+            current_dim = len(embedding_result)
+            if current_dim < target_dimensions:
+                padding = [0.0] * (target_dimensions - current_dim)
+                embedding_result.extend(padding)
+            elif current_dim > target_dimensions:
+                embedding_result = embedding_result[:target_dimensions]
+            
+            print(f"✅ Ollama succeeded ({current_dim} → {target_dimensions} dims)")
+            return embedding_result
+        else:
+            raise ValueError("Ollama returned empty embedding")
+    
+    except Exception as ollama_error:
+        print(f"❌ [4/4] Ollama failed: {str(ollama_error)[:80]}...")
+    
+    # ========== ALL METHODS FAILED ==========
+    print(f"❌ ALL embedding methods FAILED!")
+    print(f"   1. OpenAI: {str(openai_error)[:50] if openai_error else 'N/A'}")
+    print(f"   2. Jina v4: {str(jina_error)[:50] if jina_error else 'N/A'}")
+    print(f"   3. Jina API: {str(jina_api_error)[:50] if jina_api_error else 'N/A'}")
+    print(f"   4. Ollama: {str(ollama_error)[:50] if ollama_error else 'N/A'}")
+    raise ValueError("All embedding methods failed - check API connections and model availability")
 
 def clean_text(input_text: str) -> str:
-    """
-    (Original function, unchanged)
-    """
     if input_text is None:
         return ""
-    # Remove NUL characters
+    # Keep the NUL character removal (Postgres hates \x00)
     cleaned = input_text.replace("\x00", "")
-    # Optionally, remove all non-printable control chars except common whitespace (\n, \r, \t)
-    cleaned = re.sub(r"[^\x20-\x7E\n\r\t]", "", cleaned)
+    
+    # REMOVE OR CHANGE THE REGEX LINE:
+    # Do NOT use re.sub(r"[^\x20-\x7E...]", ...) because it kills Thai.
+    
+    # If you want to remove "Control Characters" safely without killing Thai, use this:
+    import unicodedata
+    cleaned = "".join(ch for ch in cleaned if unicodedata.category(ch)[0] != "C" or ch in "\n\r\t")
+    
     return cleaned
 
 def save_vector_to_db(user_id, chat_history_id, uploaded_file_id, file_name, text, embedding, page_number: int = -1):
@@ -2864,7 +3243,11 @@ def save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, page_numb
             conn.close()
 
 # Search Text (Legacy)
+<<<<<<< HEAD
 def search_similar_documents_by_chat(query_text: str,search_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5):
+=======
+def search_similar_documents_by_chat(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     Search (Legacy) from 'document_embeddings' table.
     
@@ -2872,11 +3255,25 @@ def search_similar_documents_by_chat(query_text: str,search_text: str, user_id: 
     - Joins with 'uploaded_files' to filter by 'chat_history_id'.
     """
     # Step 1: Encode the query text to a vector
+<<<<<<< HEAD
     query_embedding = encode_text_for_embedding(query_text, search_text=search_text, is_query=True)
     # if not LOCAL:
     #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
     #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+=======
+    # query_embedding = encode_text_for_embedding(query_text)
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    
+    if not query_embedding: return []
+    
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
     conn = None
@@ -2937,7 +3334,11 @@ from typing import List, Dict, Any
 # Assuming get_image_embedding_jinna_api and get_db_connection are defined elsewhere
 # import { get_image_embedding_jinna_api, get_db_connection } from ...
 
+<<<<<<< HEAD
 def search_similar_pages(query_text: str,search_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+=======
+def search_similar_pages(query_text: str, user_id: int, chat_history_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     Search (New) from 'document_page_embeddings' table.
     
@@ -2953,6 +3354,7 @@ def search_similar_pages(query_text: str,search_text: str, user_id: int, chat_hi
         [{'page_id': 12, 'file_name': 'report.pdf', ..., 'distance': 0.25, 'normalized_distance': 0.1}, ...]
     """
     # Step 1: Encode the query text using the *CLIP* model
+<<<<<<< HEAD
     if not LOCAL:
         query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else :
@@ -2960,6 +3362,17 @@ def search_similar_pages(query_text: str,search_text: str, user_id: int, chat_hi
     if not query_embedding:
         print("❌ Failed to get CLIP embedding for query.")
         return []
+=======
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+
+    if not query_embedding: return []
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
     
@@ -3059,20 +3472,34 @@ def search_similar_pages(query_text: str,search_text: str, user_id: int, chat_hi
 #  SEARCH BY ACTIVE USER FUNCTIONS (METHOD: searchDoc)
 # ==============================================================================
 
+<<<<<<< HEAD
 def search_similar_documents_by_active_user(query_text: str,search_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+=======
+def search_similar_documents_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     Legacy Text Search: Finds text chunks in files where the user is an 'active_user'.
     """
     # Encode query
 
     # Encoding using Qwen3-0.6b-embedding
+<<<<<<< HEAD
     query_embedding = encode_text_for_embedding(text=query_text,search_text=search_text, is_query=True)
+=======
+    # query_embedding = encode_text_for_embedding(text=query_text)
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
     # Encode using jinna Text-Image-Embedding
-    # if not LOCAL:
-    #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
-    # else :
-    #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+    
+    if not query_embedding: return []
+
     query_vector = f"[{', '.join(map(str, query_embedding))}]"  
 
     conn = None
@@ -3117,15 +3544,29 @@ def search_similar_documents_by_active_user(query_text: str,search_text: str, us
         if conn: conn.close()
 
 
+<<<<<<< HEAD
 def search_similar_pages_by_active_user(query_text: str,search_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+=======
+def search_similar_pages_by_active_user(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     New Page Search: Finds document pages (images) in files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
+<<<<<<< HEAD
     if not LOCAL:
         query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else:
         query_embedding = get_image_embedding_jinna_api_local(text=query_text, search_text=search_text)
+=======
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
     if not query_embedding: return []
 
@@ -3199,16 +3640,34 @@ def search_similar_pages_by_active_user(query_text: str,search_text: str, user_i
         if conn: conn.close()
 
 
+<<<<<<< HEAD
 def search_similar_documents_by_active_user_all(query_text: str, search_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5):
+=======
+def search_similar_documents_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold_text: float = 0.5, query_embedding: List[float] = None):
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     Legacy Text Search: Finds text chunks in all files where the user is an 'active_user'.
     """
     # Encode query
+<<<<<<< HEAD
     query_embedding = encode_text_for_embedding(query_text, search_text=search_text, is_query=True)
     # if not LOCAL:
     #     query_embedding = get_image_embedding_jinna_api(search_text=query_text)
     # else :
     #     query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+=======
+    # query_embedding = encode_text_for_embedding(query_text)
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+
+    if not query_embedding: return []
+
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     query_vector = f"[{', '.join(map(str, query_embedding))}]"
 
     conn = None
@@ -3228,7 +3687,7 @@ def search_similar_documents_by_active_user_all(query_text: str, search_text: st
                 t1.embedding <-> %s AS distance
             FROM document_embeddings AS t1
             INNER JOIN uploaded_files AS t2 ON t1.uploaded_file_id = t2.id
-            WHERE %s = ANY(t2.active_users)
+            WHERE %s = t2.chat_history_id
               AND (t1.embedding <-> %s) <= %s
             ORDER BY distance
             LIMIT %s
@@ -3253,15 +3712,29 @@ def search_similar_documents_by_active_user_all(query_text: str, search_text: st
         if conn: conn.close()
 
 
+<<<<<<< HEAD
 def search_similar_pages_by_active_user_all(query_text: str, search_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0) -> List[Dict[str, Any]]:
+=======
+def search_similar_pages_by_active_user_all(query_text: str, user_id: int, top_k: int = 5, threshold: float = 1.0, query_embedding: List[float] = None) -> List[Dict[str, Any]]:
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     """
     New Page Search: Finds document pages (images) in all files where the user is an 'active_user'.
     """
     # 1. Generate Query Embedding (CLIP/Jina)
+<<<<<<< HEAD
     if not LOCAL:
         query_embedding = get_image_embedding_jinna_api(text=query_text, search_text=search_text)
     else:
         query_embedding = get_image_embedding_jinna_api_local(text=query_text, search_text=search_text)
+=======
+    if (not LOCAL) and (query_embedding is not None):
+        if IFXGPT:
+            query_embedding = IFXGPTEmbedding(inputs=[query_text])[0]
+        else:
+            query_embedding = get_image_embedding_jinna_api(search_text=query_text)
+    else :
+        query_embedding = get_image_embedding_jinna_api_local(search_text=query_text)
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
     if not query_embedding: return []
 
@@ -3813,18 +4286,28 @@ Provide your response in Markdown format, following the tagging guidelines provi
 
     # Use OpenRouterInference, which now accepts a list of images
     if not LOCAL:
-        # system_prompt = ("You're an image expert."
-        #                  "If the image contains text, extract and summarize it...")
-        # # Prompt for OpenRouter VLM
-        # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
-        vlm_response = OpenRouterInference(
-        # vlm_response = DeepInfraInference(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            image_bytes_list=image_bytes_list,
-            model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-        )
-        print("DeepInfra VLM response received.")
+        if IFXGPT:
+            vlm_response = IFXGPTInference(
+            # vlm_response = DeepInfraInference(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                image_bytes_list=image_bytes_list,
+                model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+            print("IFXGPT VLM response received.")
+        else:
+            # system_prompt = ("You're an image expert."
+            #                  "If the image contains text, extract and summarize it...")
+            # # Prompt for OpenRouter VLM
+            # prompt = ("Please describe the image in detail in a text format that allows you to understand its details.")
+            vlm_response = OpenRouterInference(
+            # vlm_response = DeepInfraInference(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                image_bytes_list=image_bytes_list,
+                model_name= 'google/gemini-2.5-flash-lite'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+            )
+            print("DeepInfra VLM response received.")
         print(vlm_response)
     else:
         #  # System prompt for OpenRouter VLM
@@ -4032,6 +4515,95 @@ def ollama_embed_image(image_bytes: Union[bytes, List[bytes]], vision_model: str
             result.append(embeddings[idx])
             idx += 1
     return result
+
+
+
+def IFXGPTInference(prompt: str, system_prompt: str = "", image_bytes_list: List[bytes] = None, model_name: str = "gpt-4o") -> str:
+    """
+    Perform inference using the Infineon IFX GPT (OpenAI Client).
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    user_content = [{"type": "text", "text": prompt}]
+
+    if image_bytes_list:
+        for image_bytes in image_bytes_list:
+            try:
+                # Guess mime type
+                mime_type, _ = mimetypes.guess_type("image.png") # Default
+                img = Image.open(io.BytesIO(image_bytes))
+                if img.format:
+                    mime_type = f"image/{img.format.lower()}"
+                
+                base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                data_url = f"data:{mime_type};base64,{base64_image}"
+                
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                })
+            except Exception as e:
+                print(f"Error encoding image for IFXGPT: {e}")
+
+    messages.append({"role": "user", "content": user_content})
+
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=1.0
+        )
+        print("Text Extract: ", response.choices[0].message.content)
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling IFX GPT: {e}"
+
+
+def IFXGPTEmbedding(
+    inputs: List[str],
+    model_name: str = "text-embedding-3-small",
+) -> List[List[float]]:
+    print("string input: ", inputs)
+    # 1) validate inputs
+    if not inputs:
+        raise ValueError("IFXGPTEmbedding: 'inputs' is empty")
+
+    # 2) sanitize (common cause: empty/whitespace chunks)
+    clean_inputs = [s.strip() for s in inputs if isinstance(s, str) and s.strip()]
+    if not clean_inputs:
+        raise ValueError("IFXGPTEmbedding: all inputs are empty/whitespace")
+    print("clean input: ", clean_inputs)
+    try:
+        response = client.embeddings.create(
+            model=model_name,
+            input=clean_inputs
+        )
+
+        # 3) validate response
+        data = getattr(response, "data", None)
+        if not data:
+            # try to show helpful debug info
+            raise RuntimeError(f"No embedding data received. Raw response: {response}")
+
+        embeddings = []
+        for i, item in enumerate(data):
+            emb = getattr(item, "embedding", None)
+            if emb is None:
+                raise RuntimeError(f"Missing embedding at index {i}. Item: {item}")
+            embeddings.append(emb)
+
+        # 4) ensure count matches
+        if len(embeddings) != len(clean_inputs):
+            raise RuntimeError(
+                f"Embedding count mismatch: got {len(embeddings)} for {len(clean_inputs)} inputs"
+            )
+        return embeddings
+
+    except Exception as e:
+        # re-raise so caller can handle it; printing hides failures and causes downstream index errors
+        raise RuntimeError(f"IFX GPT Embeddings failed: {e}") from e
 
 
 # ==============================================================================

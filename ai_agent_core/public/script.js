@@ -29,8 +29,8 @@ socket.on('StreamText', (text) => {
 socket.on('CallTool', async (toolName, toolParameters, callback) => {
   console.log(`Call Tool \nTool Name: ${toolName}`);
 
-  const baseURL = 'http://localhost:3333/files';
-  const baseSysURL = 'http://localhost:3333/system'
+  const baseURL = 'http://localhost:5000/files';
+  const baseSysURL = 'http://localhost:5000/system'
 
   try {
     switch (toolName) {
@@ -1602,9 +1602,16 @@ const markdown = window.markdownit({
     }
 });
 
+function normalizeLatexDelimiters(s) {
+  return s
+    .replace(/\\\[/g, '$$').replace(/\\\]/g, '$$')
+    .replace(/\\\(/g, '$').replace(/\\\)/g, '$');
+}
+
 
 function displayMarkdownMessage(text, className, userQuestion = null) {
-    const html = markdown.render(text);
+    // const html = markdown.render(text);
+    const html = markdown.render(normalizeLatexDelimiters(text));
     const messageElement = document.createElement('div');
     messageElement.className = className;
     if (className === 'user-message') {
@@ -1749,8 +1756,13 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    if (window.MathJax) {
-        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // if (window.MathJax) {
+    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // }
+
+    if (window.MathJax?.typesetPromise) {
+        MathJax.typesetClear([messageElement]);           // กันสมการซ้อน/หน่วง
+        MathJax.typesetPromise([messageElement]).catch(console.error);
     }
 }
 
@@ -1778,7 +1790,8 @@ function displayMarkdownMessageStream(text, messageElement) {
     }
     
     // Update content (this will be called multiple times as stream comes in)
-    const html = markdown.render(text);
+    // const html = markdown.render(text);
+    const html = markdown.render(normalizeLatexDelimiters(text));
     contentDiv.innerHTML = html;
 
     // Check if buttons already added to messageElement
@@ -1846,8 +1859,12 @@ function displayMarkdownMessageStream(text, messageElement) {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
-    if (window.MathJax) {
-        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // if (window.MathJax) {
+    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
+    // }
+    if (window.MathJax?.typesetPromise) {
+        MathJax.typesetClear([contentDiv]);           // กันสมการซ้อน/หน่วง
+        MathJax.typesetPromise([contentDiv]).catch(console.error);
     }
 }
 
@@ -2071,7 +2088,10 @@ function populateModes(returnDefault = false) {
 // Added returnDefault parameter to get the default value without modifying the DOM
 function populateModels(returnDefault = false) {
     const models = [
-        { id: '01:18m', name: '01:18m' },
+        { id: '{_IFXGPT_API_}gpt-5.2', name: 'gpt-5.2' },
+        { id: '{_IFXGPT_API_}gpt-5.1-chat', name: 'gpt-5.1-chat' },
+        { id: '{_IFXGPT_API_}gpt-5-mini', name: 'gpt-5-mini' },
+        { id: '{_IFXGPT_API_}claudesonnet4.5', name: 'claudesonnet4.5' },
         // { id: '{_Ollama_API_}deepcoder:1.5b', name: 'deepcoder:1.5b' },
         // { id: '{_Ollama_API_}deepcoder:14b', name: 'deepcoder:14b' },
         // { id: '{_Ollama_API_}deepseek-coder:1.3b', name: 'deepseek-coder:1.3b' },
@@ -2089,10 +2109,15 @@ function populateModels(returnDefault = false) {
         // { id: '{_Ollama_API_}gemma3:12b', name: 'gemma3:12b' },
         // { id: '{_Ollama_API_}gemma3:27b', name: 'gemma3:27b' },
         { id: '{_Ollama_API_}qwen3:4b', name: 'OLqwen3:4b'},
+<<<<<<< HEAD
         { id: '{_Ollama_API_}qwen3:8b', name: 'OLqwen3:8b'},
         { id: '{_Ollama_API_}qwen3.5:0.8b', name: 'OLqwen3.5:0.8b'},
         { id: '{_Ollama_API_}qwen3.5:4b', name: 'OLqwen3.5:4b'},
         { id: '{_Ollama_API_}qwen3.5:9b', name: 'OLqwen3.5:9b'},
+=======
+        { id: '{_Ollama_API_}functiongemma', name: 'OLfunctiongemma'},
+        { id: '{_Ollama_API_}translategemma:4b', name: 'OLtranslategemma:4b'},
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         { id: '{_Google_API_}gemma-3-1b-it', name: 'GGgemma-3-1b-it'},
         { id: '{_Google_API_}gemma-3-4b-it', name: 'GGemma-3-4b-it'},
         { id: '{_Google_API_}gemma-3-12b-it', name: 'GGgemma-3-12b-it'},

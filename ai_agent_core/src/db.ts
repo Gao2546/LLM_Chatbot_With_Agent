@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     chat_history_id INTEGER NOT NULL,
     uploaded_file_id INTEGER NOT NULL,
     extracted_text TEXT,
-    embedding VECTOR(2048),
+    embedding VECTOR(1536),
     page_number INTEGER DEFAULT -1, -- <<< NEW/UPDATED COLUMN
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
@@ -1400,6 +1400,7 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
 //     `);
 //     console.log('📊 Verified Answers Stats:', countResult.rows[0]);
 
+<<<<<<< HEAD
 //     // Search using question and answer embeddings, prioritize sum_verified_answer for request type
 //     // For 'request' type with sum_verified_answer, use it; otherwise use regular answer
 //     // IMPORTANT: Include questions that have sum_verified_answer_embedding even if question_embedding is NULL
@@ -1435,6 +1436,51 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
 //        LIMIT $3`,
 //       [embeddingStr, threshold, limit]
 //     );
+=======
+    // Search using question and answer embeddings, prioritize sum_verified_answer for request type
+    // For 'request' type with sum_verified_answer, use it; otherwise use regular answer
+    // IMPORTANT: Include questions that have sum_verified_answer_embedding even if question_embedding is NULL
+    // FILTER: Only include VERIFIED answers (verification_type != 'staging')
+    //   - 'self': Self-verified by creator
+    //   - 'request': Requested verification from others (with sum_verified_answer = verified)
+    const result = await pool.query(
+      `SELECT 
+        id,
+        question,
+        CASE 
+          WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL 
+          THEN sum_verified_answer
+          ELSE answer
+        END as answer,
+        verification_type,
+        created_by,
+        tags,
+        GREATEST(
+          COALESCE(1 - (question_embedding <-> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <-> $1::vector), 0),
+          CASE 
+            WHEN sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (sum_verified_answer_embedding <-> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity
+       FROM verified_answers
+       WHERE verification_type != 'staging'
+         AND (
+           (verification_type = 'self')
+           OR (verification_type = 'request' AND sum_verified_answer IS NOT NULL)
+         )
+         AND (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+         AND (
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <-> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <-> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <-> $1::vector) > $2)
+         )
+       ORDER BY similarity DESC
+       LIMIT $3`,
+      [embeddingStr, threshold, limit]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     console.log(`🔍 searchVerifiedAnswers: threshold=${threshold}, found ${result.rows.length} results`);
 //     if (result.rows.length > 0) {
@@ -1450,6 +1496,7 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
 //   }
 // }
 
+<<<<<<< HEAD
 // /**
 //  * ③ ดึงคะแนนและคอมเมนต์
 //  * Retrieves ratings and comments for a verified answer
@@ -1463,6 +1510,212 @@ async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void
 //        ORDER BY created_at DESC`,
 //       [answerId]
 //     );
+=======
+/**
+ * HYBRID SEMANTIC SEARCH - Enhanced version with keyword and freshness scoring
+ * 
+ * This function enhances vector similarity with:
+ * 1. Keyword extraction and matching (stopwords removed)
+ * 2. Freshness scoring (exponential decay, 180-day half-life)
+ * 3. Weighted combination: Vector 55% + Keyword 30% + Freshness 15%
+ * 
+ * @param questionText - The question text (will generate embedding)
+ * @param threshold - Minimum vector similarity threshold (default: 0.25, lower for better recall)
+ * @param limit - Maximum results to return
+ * @returns Array of results with confidence scores and match details
+ */
+async function searchVerifiedAnswersHybrid(
+  questionText: string,
+  threshold: number = 0.25,  // Lower threshold for better recall
+  limit: number = 10
+) {
+  try {
+    // 1. Generate embedding for question
+    const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+    const embeddingResponse = await fetch(`${API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: questionText, dimensions: 2048, is_query: true })
+    });
+    
+    if (!embeddingResponse.ok) {
+      console.error('Failed to get embedding for hybrid search');
+      return [];
+    }
+    
+    const embeddingData = await embeddingResponse.json();
+    const questionEmbedding = embeddingData.embedding;
+    
+    if (!questionEmbedding || questionEmbedding.length === 0) {
+      console.warn('Empty embedding provided, returning empty results');
+      return [];
+    }
+
+    const embeddingStr = `[${questionEmbedding.join(',')}]`;
+
+    // 2. Get vector similarity results (broad search) - using COSINE distance (<=>)
+    // FILTER: Only include VERIFIED answers (verification_type != 'staging')
+    const vectorResults = await pool.query(
+      `SELECT 
+        id,
+        question,
+        CASE 
+          WHEN verification_type = 'request' AND sum_verified_answer IS NOT NULL 
+          THEN sum_verified_answer
+          ELSE answer
+        END as answer,
+        verification_type,
+        created_by,
+        tags,
+        created_at,
+        GREATEST(
+          COALESCE(1 - (question_embedding <=> $1::vector), 0),
+          COALESCE(1 - (answer_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity
+       FROM verified_answers
+       WHERE verification_type != 'staging'
+         AND (
+           (verification_type = 'self')
+           OR (verification_type = 'request' AND sum_verified_answer IS NOT NULL)
+         )
+         AND (question_embedding IS NOT NULL OR sum_verified_answer_embedding IS NOT NULL)
+         AND (
+           (question_embedding IS NOT NULL AND 1 - (question_embedding <=> $1::vector) > $2)
+           OR (answer_embedding IS NOT NULL AND 1 - (answer_embedding <=> $1::vector) > $2)
+           OR (sum_verified_answer_embedding IS NOT NULL AND 1 - (sum_verified_answer_embedding <=> $1::vector) > $2)
+         )
+       ORDER BY similarity DESC
+       LIMIT $3`,
+      [embeddingStr, threshold, limit * 2] // Get more results for hybrid filtering
+    );
+
+    console.log(`🔍 Hybrid Search: Vector search found ${vectorResults.rows.length} results (threshold=${threshold})`);
+
+    if (vectorResults.rows.length === 0) {
+      return [];
+    }
+
+    // 3. Extract keywords from query (simple version - remove stopwords)
+    const queryKeywords = extractKeywordsSimple(questionText);
+    console.log(`   Query keywords: [${queryKeywords.join(', ')}]`);
+
+    // 4. Score each result with hybrid approach
+    const hybridResults = vectorResults.rows.map(row => {
+      // Vector score
+      const vectorScore = row.similarity;
+
+      // Keyword score (Jaccard similarity)
+      const docKeywords = extractKeywordsSimple(row.question);
+      const intersection = queryKeywords.filter(kw => docKeywords.includes(kw));
+      const union = [...new Set([...queryKeywords, ...docKeywords])];
+      const keywordScore = union.length > 0 ? intersection.length / union.length : 0;
+
+      // Freshness score (exponential decay, 180-day half-life)
+      const now = new Date();
+      const createdAt = row.created_at ? new Date(row.created_at) : now;
+      const ageDays = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      const freshnessScore = Math.max(Math.pow(0.5, ageDays / 180), 0.01); // Min 0.01
+
+      // Detect cross-lingual: query vs document in different languages
+      const queryThaiChars = (questionText.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const docThaiChars = (row.question.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const queryIsMainlyThai = queryThaiChars > 0 && queryThaiChars / Math.max(1, questionText.length) > 0.2;
+      const docIsMainlyThai = docThaiChars > 0 && docThaiChars / Math.max(1, row.question.length) > 0.2;
+      const isCrossLingual = queryIsMainlyThai !== docIsMainlyThai;
+
+      // Weighted combination - adjust weights for cross-lingual queries
+      // Cross-lingual: keyword matching is unreliable, rely more on vector similarity
+      let confidenceScore: number;
+      if (isCrossLingual) {
+        // Cross-lingual: Vector 80% + Keyword 5% + Freshness 15%
+        confidenceScore = (vectorScore * 0.80) + (keywordScore * 0.05) + (freshnessScore * 0.15);
+      } else {
+        // Same language: Vector 55% + Keyword 30% + Freshness 15%
+        confidenceScore = (vectorScore * 0.55) + (keywordScore * 0.30) + (freshnessScore * 0.15);
+      }
+
+      return {
+        ...row,
+        vectorScore,
+        keywordScore,
+        freshnessScore,
+        confidenceScore,
+        matchedKeywords: intersection.length,
+        totalKeywords: queryKeywords.length,
+        isCrossLingual
+      };
+    });
+
+    // 5. Filter by minimum confidence (lowered to 0.40 for cross-lingual support)
+    const minConfidence = 0.40;
+    const filtered = hybridResults.filter(r => r.confidenceScore >= minConfidence);
+
+    // 6. Sort by confidence score
+    filtered.sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+    // 7. Limit results
+    const final = filtered.slice(0, limit);
+
+    console.log(`   Hybrid results: ${vectorResults.rows.length} → ${filtered.length} → ${final.length} (after scoring & limit)`);
+    if (final.length > 0) {
+      final.forEach((r, idx) => {
+        console.log(`   ${idx + 1}. Q${r.id}: confidence=${(r.confidenceScore * 100).toFixed(1)}% [vec:${(r.vectorScore * 100).toFixed(0)}% kw:${(r.keywordScore * 100).toFixed(0)}% fresh:${(r.freshnessScore * 100).toFixed(0)}%]${r.isCrossLingual ? ' 🌐CROSS-LANG' : ''} "${r.question.substring(0, 60)}..."`);
+      });
+    }
+
+    return final;
+  } catch (error) {
+    console.error('Error in hybrid semantic search:', error);
+    throw error;
+  }
+}
+
+/**
+ * Simple keyword extraction helper
+ * Removes stopwords and short words
+ */
+function extractKeywordsSimple(text: string): string[] {
+  const stopwords = new Set([
+    // English
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
+    'could', 'can', 'may', 'might', 'must', 'of', 'at', 'by', 'for',
+    'with', 'about', 'against', 'between', 'into', 'through', 'during',
+    'to', 'from', 'in', 'out', 'on', 'off', 'over', 'under', 'how',
+    'what', 'which', 'who', 'when', 'where', 'why', 'this', 'that',
+    // Thai
+    'ที่', 'ใน', 'การ', 'เป็น', 'ของ', 'มี', 'ได้', 'จาก', 'และ', 'ให้',
+    'ต้อง', 'จะ', 'อยู่', 'แล้ว', 'ด้วย', 'ว่า', 'คือ', 'ซึ่ง', 'นี้', 'นั้น',
+    'ไม่', 'หรือ', 'เพราะ', 'โดย', 'เพื่อ', 'กับ', 'เช่น'
+  ]);
+
+  return text
+    .toLowerCase()
+    .replace(/[^\w\sก-๙]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length >= 2 && !stopwords.has(word) && !/^\d+$/.test(word))
+    .filter((word, idx, arr) => arr.indexOf(word) === idx); // Remove duplicates
+}
+
+/**
+ * ③ ดึงคะแนนและคอมเมนต์
+ * Retrieves ratings and comments for a verified answer
+ */
+async function getAnswerVerifications(answerId: number) {
+  try {
+    const result = await pool.query(
+      `SELECT commenter_name, rating, comment, created_at
+       FROM answer_verifications
+       WHERE verified_answer_id = $1
+       ORDER BY created_at DESC`,
+      [answerId]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     return result.rows;
 //   } catch (error) {
@@ -2306,6 +2559,7 @@ async function setFileProcessStatus(fileId: number, status: string) {
 //   }
 // }
 
+<<<<<<< HEAD
 // /**
 //  * Get AI performance summary (for dashboard)
 //  */
@@ -2322,6 +2576,36 @@ async function setFileProcessStatus(fileId: number, status: string) {
 //        WHERE created_at >= NOW() - INTERVAL '${days} days'
 //        GROUP BY ai_model_used`
 //     );
+=======
+/**
+ * Get AI performance summary (for dashboard)
+ * 🔧 FIXED: Count only the LATEST decision per verified_answer_id
+ */
+async function getAIPerformanceSummary(days: number = 30) {
+  try {
+    // Get only the latest AI suggestion per verified_answer_id
+    const result = await pool.query(
+      `WITH latest_suggestions AS (
+        SELECT DISTINCT ON (verified_answer_id)
+          verified_answer_id,
+          ai_model_used,
+          decision,
+          created_at
+        FROM ai_suggestions
+        WHERE verified_answer_id IS NOT NULL
+        ORDER BY verified_answer_id, created_at DESC
+      )
+      SELECT 
+        ai_model_used,
+        COUNT(*) as total_suggestions,
+        COUNT(CASE WHEN decision = 'accepted' THEN 1 END) as accepted_count,
+        COUNT(CASE WHEN decision = 'rejected' THEN 1 END) as rejected_count,
+        COUNT(CASE WHEN decision = 'pending' THEN 1 END) as pending_count
+       FROM latest_suggestions
+       WHERE created_at >= NOW() - INTERVAL '${days} days'
+       GROUP BY ai_model_used`
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     
 //     return result.rows;
 //   } catch (error) {
@@ -2371,6 +2655,7 @@ async function setFileProcessStatus(fileId: number, status: string) {
 //       ON verified_answers USING GIN(tags);
 //     `);
     
+<<<<<<< HEAD
 //     const result = await pool.query(`
 //       SELECT 
 //         ala.predicted_group,
@@ -2396,6 +2681,39 @@ async function setFileProcessStatus(fileId: number, status: string) {
 //     throw error;
 //   }
 // }
+=======
+    const result = await pool.query(`
+      SELECT 
+        CASE 
+          WHEN ala.predicted_group = 'Health' THEN 'Health & Wellness'
+          ELSE ala.predicted_group
+        END as predicted_group,
+        COUNT(DISTINCT va.id) as total_questions,
+        COUNT(*) as total_predictions,
+        ROUND(AVG(ala.group_confidence)::numeric, 3) as avg_confidence,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'pending' THEN va.id END) as pending_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'accepted' THEN va.id END) as accepted_count,
+        COUNT(DISTINCT CASE WHEN ais.decision = 'rejected' THEN va.id END) as rejected_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence >= 0.80) as high_conf_count,
+        COUNT(*) FILTER (WHERE ala.group_confidence < 0.50) as low_conf_count
+      FROM ai_learning_analysis ala
+      INNER JOIN ai_suggestions ais ON ala.ai_suggestion_id = ais.id
+      INNER JOIN verified_answers va ON ais.verified_answer_id = va.id
+      WHERE ala.predicted_group IS NOT NULL
+      GROUP BY CASE 
+        WHEN ala.predicted_group = 'Health' THEN 'Health & Wellness'
+        ELSE ala.predicted_group
+      END
+      ORDER BY total_questions DESC, rejected_count DESC
+      LIMIT 100
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error getting knowledge group analytics:', error);
+    throw error;
+  }
+}
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // /**
 //  * Get confidence distribution histogram
@@ -2535,12 +2853,22 @@ export {
   setFileProcessStatus,
 
   // Verified Answers Functions (จากเดิม verifiedAnswers.ts)
+<<<<<<< HEAD
   // saveVerifiedAnswer,
   // searchVerifiedAnswers,
   // getAnswerVerifications,
   // filterQuestionsByType,
   // countQuestionsByType,
   // triggerNotificationsForQuestion,
+=======
+  saveVerifiedAnswer,
+  searchVerifiedAnswers,
+  searchVerifiedAnswersHybrid,
+  getAnswerVerifications,
+  filterQuestionsByType,
+  countQuestionsByType,
+  triggerNotificationsForQuestion,
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
   // Question Attachments Functions
   // saveQuestionAttachment,

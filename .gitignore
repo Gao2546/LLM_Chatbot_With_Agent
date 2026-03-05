@@ -16,6 +16,7 @@ tmp/
 .save
 .env/
 *.png
+!ai_agent_core/public/image.png
 *.jpg
 *.jpeg
 *.xml
@@ -27,6 +28,8 @@ tmp/
 *.zip
 *.backup
 .key
+*.keys
+*.crt
 __pycache__/
 data*/
 low_save/

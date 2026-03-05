@@ -10,33 +10,38 @@ import io # NEW IMPORT
 import concurrent.futures
 import multiprocessing
 import numpy as np
+<<<<<<< HEAD
 from io import BytesIO
 from PIL import Image
+=======
+import unicodedata
+import time
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 # Third-party libraries
-import bs4
+# import bs4
 import dotenv
-import torch
+# import torch
 import fitz # NEW IMPORT
-from duckduckgo_search import DDGS
+# from duckduckgo_search import DDGS
 from flask import Flask, jsonify, request, send_from_directory
-from googlesearch import search
+# from googlesearch import search
 from pandas import options
-from selenium import webdriver
-from selenium.common.exceptions import NoAlertPresentException, UnexpectedAlertPresentException
-from selenium.webdriver.common.alert import Alert
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
+# from selenium import webdriver
+# from selenium.common.exceptions import NoAlertPresentException, UnexpectedAlertPresentException
+# from selenium.webdriver.common.alert import Alert
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.chrome.service import Service
+# from webdriver_manager.chrome import ChromeDriverManager
+# from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+# from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
 # LangChain and related libraries
-from langchain_core.embeddings import Embeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import OpenAIEmbeddings
+# from langchain_core.embeddings import Embeddings
+# from langchain_core.vectorstores import InMemoryVectorStore
+# from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Local imports (assuming 'utils' is a local package/directory)
@@ -74,9 +79,19 @@ from utils.util import (
     search_similar_documents_by_active_user_all,
     search_similar_pages_by_active_user_all,
     DeepInfraInference,
+    IFXGPTInference,
+    IFXGPTEmbedding,
+    read_stream,
 )
 
 from utils.util import LOCAL
+
+MAX_RETRIES = 3
+RATE_LIMIT_SLEEP = 60  # 1 minute
+
+def is_rate_limit_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return ("rate limit" in msg) or ("error code: 429" in msg) or ("429" in msg)
 
 conn = get_db_connection()
 
@@ -86,8 +101,10 @@ TEXT_FILE_EXTENSIONS = ['.txt', '.pdf', '.docx', '.pptx', '.odt', '.rtf']
 dotenv.load_dotenv()
 
 LOCAL = os.getenv("LOCAL", True)
+IFXGPT = os.getenv("IFXGPT", True)
 
 LOCAL = True if LOCAL == "True" else False
+IFXGPT = True if IFXGPT == "True" else False
 
 if LOCAL:
     print("Run model on local")
@@ -108,16 +125,18 @@ if project_root not in sys.path:
 # from TextToImage.utils.node import *
 # from object_detection_byVLM_Grounding_DINO.grounding_dino_api import detect_objects_from_url, detect_objects_from_image_bytes
 
+print("App name:", __name__)
 app = Flask(__name__)
 
 def clear_gpu():
-    import torch
-    import gc
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        print("Cleared GPU memory.")
-    gc.collect()
+    pass
+    # import torch
+    # import gc
+    # if torch.cuda.is_available():
+    #     torch.cuda.empty_cache()
+    #     torch.cuda.ipc_collect()
+    #     print("Cleared GPU memory.")
+    # gc.collect()
 
 
 def init_driver():
@@ -177,10 +196,42 @@ def get_page(driver, url):
     page_source = driver.find_element(By.TAG_NAME, "body").get_attribute('innerHTML')
     return page_source
 
+@app.route('/system/info', methods=['GET'])
+def get_system_info():
+    """Get system information"""
+    try:
+        import psutil
+        import platform
+        
+        system_info = {
+            'platform': platform.system(),
+            'processor': platform.processor(),
+            'python_version': platform.python_version(),
+            'cpu_count': psutil.cpu_count(),
+            'cpu_percent': psutil.cpu_percent(interval=1),
+            'memory': {
+                'total_gb': round(psutil.virtual_memory().total / (1024**3), 2),
+                'used_gb': round(psutil.virtual_memory().used / (1024**3), 2),
+                'percent': psutil.virtual_memory().percent
+            },
+            'disk': {
+                'total_gb': round(psutil.disk_usage('/').total / (1024**3), 2),
+                'used_gb': round(psutil.disk_usage('/').used / (1024**3), 2),
+                'percent': psutil.disk_usage('/').percent
+            }
+        }
+        return jsonify(system_info), 200
+    except Exception as e:
+        print(f"Error getting system info: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/test_db', methods=['GET'])
 def test_db():
     """Test database connection and check document_embeddings table"""
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         
         # Count total records
@@ -238,6 +289,7 @@ def test_embedding_save():
         # Try to save
         save_vector_to_db(**test_data)
         
+        conn = get_db_connection()
         # Verify save
         cur = conn.cursor()
         cur.execute(
@@ -840,7 +892,10 @@ def process():
             print(f"✅ Text extracted: {len(file_text)} characters")
             
             try:
-                data_vector = encode_text_for_embedding(file_text)
+                if IFXGPT:
+                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                else:
+                    data_vector = encode_text_for_embedding(chunk_text)
                 print(f"✅ Vector created: {len(data_vector)} dimensions")
                 
                 save_vector_to_db(
@@ -853,6 +908,7 @@ def process():
                     page_number=-1
                 )
                 
+                conn = get_db_connection()
                 # ✅ Verify save to DB
                 cur = conn.cursor()
                 cur.execute(
@@ -968,6 +1024,23 @@ def process():
 
 # This endpoint is specifically designed for processing documents that are meant to be added to the Knowledge Base, where we want to force the `chat_history_id` to -1 to indicate a global context. It accepts both file uploads and raw text input, and allows the client to specify whether they want to process the input as 'text' or 'image' (for VLM embeddings). The endpoint handles the necessary logic to upload files, extract text, generate embeddings, and save everything to the database accordingly.
 
+def normalize_uploaded_filename(name: str) -> str:
+    # Keep only the final path component (some clients send full paths)
+    name = os.path.basename(name)
+
+    # If it's mojibake (UTF-8 bytes decoded as latin-1), repair it.
+    # Try only when it actually looks like mojibake.
+    if "Ã" in name or "à" in name:
+        try:
+            name = name.encode("latin-1").decode("utf-8")
+        except UnicodeError:
+            pass
+
+    # Normalize Unicode (handles composed vs decomposed forms used by different OSes)
+    name = unicodedata.normalize("NFC", name)
+
+    return name
+
 @app.route('/processDocument', methods=['POST'])
 def process_document_api():
     """
@@ -980,6 +1053,7 @@ def process_document_api():
         files = request.files.getlist('files')
         text_input = request.form.get('text', '')
         method = request.form.get('method', 'text')
+        chat_history_id = int(request.form.get('chat_history_id',-1))
         
         # Get user_id sent from TypeScript agent
         user_id_str = request.form.get('user_id')
@@ -988,7 +1062,7 @@ def process_document_api():
         user_id = int(user_id_str)
 
         # Force Chat ID to -1 for "Knowledge Base" / Global context
-        chat_history_id = -1 
+        # chat_history_id = -1 
 
     except Exception as e:
         return jsonify({"error": f"Invalid form data: {e}"}), 400
@@ -1004,7 +1078,7 @@ def process_document_api():
         
         # Create a dummy file record for pure text
         uploaded_file_id, object_name = upload_file_to_minio_and_db(
-            user_id=0,
+            user_id=user_id,
             chat_history_id=chat_history_id,
             file_name=f"text_snippet_{int(time.time())}.txt",
             file_bytes=text_input.encode('utf-8')
@@ -1021,12 +1095,15 @@ def process_document_api():
                  embedding = get_image_embedding_jinna_api(text=text_input)
              
              if embedding:
-                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, 1, embedding)
+                 save_page_vector_to_db(user_id, chat_history_id, uploaded_file_id, chat_history_id, embedding)
                  processed_files.append({"name": "Raw Text", "status": "indexed_as_multimodal_text"})
 
         else:
             # Standard Text Embedding
-            embedding = encode_text_for_embedding(text_input)
+            if IFXGPT:
+                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+            else:
+                data_vector = encode_text_for_embedding(chunk_text)
             save_vector_to_db(user_id, chat_history_id, uploaded_file_id, "Raw Text Input", text_input, embedding, -1)
             processed_files.append({"name": "Raw Text", "status": "indexed_as_legacy_text"})
 
@@ -1034,7 +1111,8 @@ def process_document_api():
     # --- SCENARIO B: File Processing ---
     for file in files:
         start_process = time.time()
-        filename = file.filename
+        # filename = file.filename
+        filename = normalize_uploaded_filename(file.filename)
         file.seek(0)
         file_bytes = file.read()
         
@@ -1042,7 +1120,7 @@ def process_document_api():
             continue
 
         # 1. Upload to MinIO & DB
-        user_id = 0
+        # user_id = 0
         uploaded_file_id, object_name = upload_file_to_minio_and_db(
             user_id=user_id,
             chat_history_id=chat_history_id,
@@ -1151,29 +1229,98 @@ def process_document_api():
                 elif filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
                     file_text = extract_image_text(file_stream)
                 elif filename.lower().endswith(('.docx','.doc','.odt','.rtf')):
-                    file_text = extract_docx_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith(('.pptx','.ppt')):
-                    file_text = extract_pptx_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith(('.xlsx','.xlsm')):
-                    file_text = extract_excel_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 elif filename.lower().endswith('.xls'):
-                    file_text = extract_xls_text(file_stream)
+                    file_text = read_stream(file_stream, filename)
                 else:
                     # Default to TXT extractor
                     file_text = extract_txt_file(file_stream)
 
                 if file_text and file_text.strip():
-                    data_vector = encode_text_for_embedding(file_text)
-                    save_vector_to_db(
-                        user_id=user_id,
-                        chat_history_id=chat_history_id,
-                        uploaded_file_id=uploaded_file_id,
-                        file_name=filename,
-                        text=file_text,
-                        embedding=data_vector,
-                        page_number=-1
+                    # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=3072,  # Conservative chunk size to stay under 8164 tokens
+                        chunk_overlap=614,
+                        separators=["\n\n", "\n", "。", "!", "?", " ", ""] # Added common punctuation
                     )
-                    processed_files.append({"name": filename, "status": "indexed_as_text"})
+                    text_chunks = text_splitter.split_text(file_text)
+                    print("size of chunck : ",len(text_chunks))
+                    for c in text_chunks:
+                        print(c)
+                    
+                    if not text_chunks:
+                        print(f"No text chunks extracted from {filename}")
+                        continue
+                    
+                    print(f"Processing {len(text_chunks)} chunks from {filename}")
+                    
+                    # # Process each chunk
+                    # chunk_count = 0
+                    # for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                    #     try:
+                    #         # Generate embedding for this chunk
+                    #         if IFXGPT:
+                    #             data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                    #         else:
+                    #             data_vector = encode_text_for_embedding(chunk_text)
+                            
+                    #         # Save chunk to database
+                    #         save_vector_to_db(
+                    #             user_id=user_id,
+                    #             chat_history_id=chat_history_id,
+                    #             uploaded_file_id=uploaded_file_id,
+                    #             file_name=filename,
+                    #             text=chunk_text,
+                    #             embedding=data_vector,
+                    #             page_number=chunk_idx  # Use chunk index as page number
+                    #         )
+                    #         chunk_count += 1
+                    #     except Exception as chunk_err:
+                    #         print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                    #         continue
+
+                    chunk_count = 0
+                    for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                        for attempt in range(1, MAX_RETRIES + 1):
+                            try:
+                                if IFXGPT:
+                                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                                else:
+                                    data_vector = encode_text_for_embedding(chunk_text)
+                    
+                                save_vector_to_db(
+                                    user_id=user_id,
+                                    chat_history_id=chat_history_id,
+                                    uploaded_file_id=uploaded_file_id,
+                                    file_name=filename,
+                                    text=chunk_text,
+                                    embedding=data_vector,
+                                    page_number=chunk_idx
+                                )
+                                chunk_count += 1
+                                break  # success
+                            except Exception as chunk_err:
+                                if is_rate_limit_error(chunk_err) and attempt < MAX_RETRIES:
+                                    print(f"Rate limit on chunk {chunk_idx}. Sleeping {RATE_LIMIT_SLEEP}s then retrying...")
+                                    time.sleep(RATE_LIMIT_SLEEP)
+                                    continue
+
+                                print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                                break
+                    
+                    if chunk_count > 0:
+                        processed_files.append({
+                            "name": filename,
+                            "status": "indexed_as_text",
+                            "chunks": chunk_count
+                        })
+                        print(f"Successfully saved {chunk_count} chunks from {filename}")
+                    else:
+                        print(f"Failed to process any chunks from {filename}")
                 else:
                     print(f"No text extracted from {filename}")
 
@@ -1236,6 +1383,7 @@ def search_similar_api_unified():
         queryT = data.get('query')
         user_id = int(data.get('user_id'))
         chat_history_id = int(data.get('chat_history_id'))
+        chat_history_messages = data.get('chat_history_messages', [])
         
         top_k_text = int(data.get('top_k_text', 5))
         top_k_pages = int(data.get('top_k_pages', 5))
@@ -1264,22 +1412,54 @@ User Query: {queryT}
 Type of Document: Datasheet or Manual (Table, Graph, Diagram or Text)
 Prompt Language: English
 Prompt Type: Markdown
+User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
+    # Try to get embedding with fallback
+    try:
+        if IFXGPT:
+            query_embeddingT = IFXGPTEmbedding(inputs=[queryT])[0]
+        else:
+            query_embeddingT = encode_text_for_embedding(queryT)
+    except Exception as e:
+        print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
+        query_embeddingT = encode_text_for_embedding(queryT)
+    
     if not LOCAL:
-            search_text = DeepInfraInference(
-                prompt=create_search_prompt,
-                # system_prompt=system_prompt,
-                # image_bytes_list=image_bytes_list,
-                model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-            )
+        if IFXGPT:
+            try:
+                search_text = IFXGPTInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
+            except Exception as e:
+                print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
+        else:
+            try:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
+            except Exception as e:
+                print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
 
     else :
         search_text = ollama_generate_text(
             prompt=create_search_prompt,
             model="gemma3:4b"
         )
+        query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
     print(f"Search prompt: {search_text}")
 
     # =========================================================
@@ -1290,25 +1470,27 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 legacy_results = search_similar_documents_by_active_user(
                     query_text=text,
                     search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if legacy_results:
                     break
 
             # 2. New Page Image Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 page_search_results = search_similar_pages_by_active_user(
                     query_text=text,
                     search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if page_search_results:
                     break
@@ -1322,25 +1504,27 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             # 1. Legacy Text Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 legacy_results = search_similar_documents_by_active_user_all(
                     query_text=text,
                     search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_text,
                     threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if legacy_results:
                     break
 
             # 2. New Page Image Search
-            for text in [search_text, queryT]:
+            for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                 page_search_results = search_similar_pages_by_active_user_all(
                     query_text=text,
                     search_text=search_text,
                     user_id=user_id,
                     top_k=top_k_pages,
                     threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                    query_embedding=query_embedding,
                 )
                 if page_search_results:
                     break
@@ -1354,6 +1538,7 @@ Output only the simulated excerpt.
     elif document_search_method == 'none':
         print(f"  - executing 'none' (chat context) strategy for chat {chat_history_id}...")
         
+        conn = get_db_connection()
         # Check DB for Legacy Data
         cur = conn.cursor()
         cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
@@ -1368,7 +1553,7 @@ Output only the simulated excerpt.
         for i in range(0,9,2):
             print(f"Threshold : {threshold_text * float(np.log(np.exp(1) + i))}")
             if has_legacy:
-                for text in [search_text, queryT]:
+                for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                     legacy_results = search_similar_documents_by_chat(
                         query_text=text, 
                         search_text=search_text,
@@ -1376,12 +1561,13 @@ Output only the simulated excerpt.
                         chat_history_id=chat_history_id, 
                         top_k=top_k_text,
                         threshold_text=threshold_text * float(np.log(np.exp(1) + i)),
+                        query_embedding=query_embedding,
                     )
                     if legacy_results:
                         break
 
             if has_pages:
-                for text in [search_text, queryT]:
+                for text,query_embedding in zip([search_text, queryT],[query_embeddingS, query_embeddingT]):
                     page_search_results = search_similar_pages(
                         query_text=text, 
                         search_text=search_text,
@@ -1389,6 +1575,7 @@ Output only the simulated excerpt.
                         chat_history_id=chat_history_id, 
                         top_k=top_k_pages, 
                         threshold=threshold_page * float(np.log(np.exp(1) + i)),
+                        query_embedding=query_embedding,
                     )
                     if page_search_results:
                         break
@@ -1907,38 +2094,38 @@ def detect_objects_route():
         'duration_sec': round(sto - st, 3)
     })
 
-class GemmaEmbeddings(Embeddings):
-    def __init__(self, model_name: str = "google/embeddinggemma-300m", quantized: bool = True):
-        self.model_name = model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+# class GemmaEmbeddings(Embeddings):
+#     def __init__(self, model_name: str = "google/embeddinggemma-300m", quantized: bool = True):
+#         self.model_name = model_name
+#         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        if quantized:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-            self.model = AutoModel.from_pretrained(
-                model_name,
-                device_map="auto",
-                quantization_config=bnb_config,
-            )
-        else:
-            self.model = AutoModel.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
+#         if quantized:
+#             bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+#             self.model = AutoModel.from_pretrained(
+#                 model_name,
+#                 device_map="auto",
+#                 quantization_config=bnb_config,
+#             )
+#         else:
+#             self.model = AutoModel.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.device = next(self.model.parameters()).device
+#         self.device = next(self.model.parameters()).device
 
-    def _embed(self, texts):
-        inputs = self.tokenizer(
-            texts, padding=True, truncation=True, return_tensors="pt"
-        ).to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Mean pooling
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-        return embeddings.cpu().numpy()
+#     def _embed(self, texts):
+#         inputs = self.tokenizer(
+#             texts, padding=True, truncation=True, return_tensors="pt"
+#         ).to(self.device)
+#         with torch.no_grad():
+#             outputs = self.model(**inputs)
+#             # Mean pooling
+#             embeddings = outputs.last_hidden_state.mean(dim=1)
+#         return embeddings.cpu().numpy()
 
-    def embed_documents(self, texts):
-        return self._embed(texts).tolist()
+#     def embed_documents(self, texts):
+#         return self._embed(texts).tolist()
 
-    def embed_query(self, text):
-        return self._embed([text])[0].tolist()
+#     def embed_query(self, text):
+#         return self._embed([text])[0].tolist()
 
 
 # === VERIFIED ANSWERS ENDPOINT ===
@@ -1989,12 +2176,14 @@ if __name__ == '__main__':
     # path_keys = os.popen("find ../ -name '.key'").read().split("\n")[0]
     # with open(path_keys, "r") as f:
     #     key = f.read().strip()
-    APP_URL = os.getenv("API_APP", "http://localhost:5000")
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not os.environ.get("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = api_key
 
-    model_name = "google/embeddinggemma-300m"
+    
+    # APP_URL = os.getenv("API_APP", "http://localhost:5000")
+    # api_key = os.getenv("OPENAI_API_KEY")
+    # if not os.environ.get("OPENAI_API_KEY"):
+    #     os.environ["OPENAI_API_KEY"] = api_key
+
+    # model_name = "google/embeddinggemma-300m"
 
     
     # Configure quantization (new method)

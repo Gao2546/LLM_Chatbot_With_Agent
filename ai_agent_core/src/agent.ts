@@ -8,7 +8,11 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
+<<<<<<< HEAD
 // import { saveVerifiedAnswer, searchVerifiedAnswers, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics } from './db.js';
+=======
+import { saveVerifiedAnswer, searchVerifiedAnswers, searchVerifiedAnswersHybrid, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics } from './db.js';
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 dotenv.config();
 
@@ -68,6 +72,8 @@ import fs = require('fs');
 import { get } from 'http';
 import { json } from 'stream/consumers';
 import { error } from 'console';
+import { OpenAI } from 'openai';
+import https from 'https';
 
 // Configure Multer to use memory storage instead of disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -307,6 +313,7 @@ export default async function agentRouters(ios: SocketIOServer) {
   return router;
 }
 
+<<<<<<< HEAD
 // 1. ฟังก์ชันเช็คว่า Model รองรับรูปภาพหรือไม่ (ปรับแก้รายชื่อโมเดลได้ตามที่คุณใช้งานจริง)
 function isMultimodalModel(modelName: string): boolean {
   if (!modelName) return false;
@@ -364,6 +371,203 @@ async function buildMessages(setting_prompt: string, question: string, modelName
   const isMultimodal = isMultimodalModel(modelName);
   const messages: { role: string; content: any }[] = [];
   
+=======
+
+// Initialize IFX GPT Client
+// Make sure to add IFXGPT_TOKEN, IFXGPT_BASE_URL, and IFXGPT_CERT_PATH to your .env
+function generateBase64String(username: string, password: string): string {
+  return Buffer.from(`${username}:${password}`, "utf8").toString("base64");
+}
+
+const basicAuth = process.env.IFXGPT_BASIC_AUTH === "True"; // or your own flag
+const windowUser = process.env.IFXGPT_USER || "";
+const windowPassword = process.env.IFXGPT_PASSWORD || "";
+const bearerToken = process.env.IFXGPT_TOKEN || "";
+
+const authHeader = basicAuth
+  ? `Basic ${generateBase64String(windowUser, windowPassword)}`
+  : `Bearer ${bearerToken}`;
+
+// ---- Initialize IFX GPT Client ----
+const ifxCertPath = process.env.IFXGPT_CERT_PATH || "ca-bundle.crt";
+const ifxBaseUrl =
+  process.env.IFXGPT_BASE_URL || "https://gpt4ifx.icp.infineon.com";
+
+// Create HTTPS agent with certificate (required for company security)
+const httpsAgent = new https.Agent({
+  ca: fs.existsSync(ifxCertPath) ? fs.readFileSync(ifxCertPath) : undefined,
+});
+
+const ifxClient = new OpenAI({
+  // OpenAI SDK expects apiKey, but we'll also force our Authorization header:
+  apiKey: "unused",
+  baseURL: ifxBaseUrl,
+  httpAgent: undefined,
+  httpsAgent,
+
+  // This makes every request send your chosen Authorization header
+  defaultHeaders: {
+    Authorization: authHeader,
+  },
+} as any);
+
+// Check if IFXGPT is properly configured
+const ifxClientAvailable = fs.existsSync(ifxCertPath) && (!!bearerToken || !!(windowUser && windowPassword));
+if (ifxClientAvailable) {
+  console.log('✅ IFXGPT client initialized successfully');
+  console.log(`  Certificate: ${ifxCertPath}`);
+  console.log(`  Auth: ${basicAuth ? 'Basic Auth' : 'Bearer Token'}`);
+} else {
+  console.warn('⚠️ IFXGPT may not work properly:');
+  console.warn(`  Certificate path: ${ifxCertPath} (exists: ${fs.existsSync(ifxCertPath)})`);
+  console.warn(`  Has bearer token: ${!!bearerToken}`);
+  console.warn(`  Has basic auth: ${!!(windowUser && windowPassword)}`);
+}
+
+
+export async function IFXGPTInference(
+  messages: any[],
+  model: string,
+  socket: any,
+  controller: AbortController
+): Promise<string> {
+  let fullText = "";
+
+  console.log("Calling IFX GPT API (internal OpenAI)...");
+  console.log("Message :", messages);
+
+  try {
+    const stream: any = await ifxClient.chat.completions.create({
+      model,
+      messages,
+      stream: true,
+      temperature: 1.0,
+    });
+
+    const it = stream.iterator(); // IMPORTANT: iterator is a function
+
+    // Wait for first chunk (or timeout)
+    const first = await Promise.race([
+      it.next(),
+      new Promise<{ done: true; value?: any }>((_, reject) =>
+        setTimeout(() => reject(new Error("Stream timeout: no first chunk within 8s")), 8000)
+      ),
+    ]);
+
+    // If stream ended immediately
+    if (!first || first.done) {
+      throw new Error("Stream ended immediately without data");
+    }
+
+    // Process first chunk
+    {
+      const chunk = first.value;
+      console.log("first chunk:", JSON.stringify(chunk));
+
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        chunk?.choices?.[0]?.text ??
+        "";
+
+      if (content) {
+        fullText += content;
+        socket?.emit("StreamText", fullText);
+      }
+    }
+
+    // Process remaining chunks
+    while (!controller.signal.aborted) {
+      const { value: chunk, done } = await it.next();
+      if (done) break;
+
+      console.log("chunk:", JSON.stringify(chunk));
+
+      const content =
+        chunk?.choices?.[0]?.delta?.content ??
+        chunk?.choices?.[0]?.message?.content ??
+        chunk?.choices?.[0]?.text ??
+        "";
+
+      if (content) {
+        fullText += content;
+        socket?.emit("StreamText", fullText);
+      }
+    }
+
+    return fullText;
+  } catch (e: any) {
+    // content filter
+    if (e?.code === "content_filter" || e?.error?.code === "content_filter") {
+      const msg =
+        "Your prompt was blocked by the content policy. Please rephrase and try again.";
+      socket?.emit("StreamText", msg);
+      return "";
+    }
+
+    // If streaming fails, try non-streaming to see what server returns
+    try {
+      console.log("Streaming failed:", e?.message ?? e);
+      console.log("Falling back to non-streaming...");
+
+      const resp = await ifxClient.chat.completions.create({
+        model,
+        messages,
+        stream: false,
+        temperature: 1.0,
+      });
+
+      console.log("non-stream resp:", JSON.stringify(resp));
+
+      const text = resp?.choices?.[0]?.message?.content ?? "";
+      if (text) socket?.emit("StreamText", text);
+      return text;
+    } catch (e2) {
+      console.error("Non-streaming also failed:", e2);
+      throw e2;
+    }
+  }
+}
+
+
+// function buildMessages(setting_prompt: string, question: string) {
+//   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+//     { role: "system", content: setting_prompt },
+//   ];
+
+//   const normalized = question.trim();
+
+//   const parts = normalized.includes("<DATA_SECTION>")
+//     ? normalized.split("<DATA_SECTION>").map(s => s.trim()).filter(Boolean)
+//     : [normalized];
+
+//   let addedAny = false;
+
+//   for (const part of parts) {
+//     if (/^user\s*:/.test(part)) {
+//       messages.push({ role: "user", content: part.replace(/^user\s*:\s*/i, "") });
+//       addedAny = true;
+//     } else if (/^(assistant|assistance)\s*:/.test(part)) {
+//       messages.push({ role: "assistant", content: part.replace(/^(assistant|assistance)\s*:\s*/i, "") });
+//       addedAny = true;
+//     } else {
+//       // fallback: treat as user content
+//       messages.push({ role: "user", content: part });
+//       addedAny = true;
+//     }
+//   }
+
+//   if (!addedAny) {
+//     messages.push({ role: "user", content: normalized });
+//   }
+
+//   return messages;
+// }
+
+
+function buildMessages(setting_prompt: string, question: string) {
+  const messages: { role: string; content: string }[] = [];
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
   messages.push({ role: "system", content: setting_prompt });
 
   const parts = question.includes("<DATA_SECTION>")
@@ -533,6 +737,474 @@ router.get('/storage/*', async (req: Request, res: Response) => {
         res.status(500).send('Internal server error while retrieving file.');
     }
 });
+
+// =================================================================================
+// KNOWLEDGE GROUP HELPER FUNCTIONS
+// =================================================================================
+
+/**
+ * Strip follow-up questions and suggestions from AI-generated answer.
+ * Removes lines like "Do you have any attachments?", "Would you like to know more?",
+ * "หากมีคำถามเพิ่มเติม...", "ต้องการให้อธิบายเพิ่มไหม?" etc.
+ */
+function stripFollowUpQuestions(text: string): string {
+  if (!text) return '';
+  
+  const lines = text.split('\n');
+  const filteredLines: string[] = [];
+  
+  // Patterns that indicate follow-up/suggestion lines to remove
+  const followUpPatterns = [
+    // English patterns
+    /^(do you have any|would you like|feel free to|if you (have|need|want|would)|let me know|don't hesitate)/i,
+    /^(is there anything|shall I|want me to|need (more|any|further)|for (more|further|additional))/i,
+    /^(you (might|may|can) also|you('re| are) welcome to|please (let|feel|don't))/i,
+    /^(if (there are|you'd|this|that)|I('d| would) be happy to|I can also)/i,
+    /^(any (questions|other|further|more)|hope this helps|I hope)/i,
+    // Thai patterns
+    /^(หากมี|ถ้ามี|หากต้องการ|ถ้าต้องการ|หากสนใจ|ถ้าสนใจ|ต้องการ(ให้|ทราบ)|อยากทราบ)/,
+    /^(สามารถ(สอบถาม|ติดต่อ|ถาม)|สอบถามเพิ่มเติม|ติดต่อ(สอบถาม|เรา))/,
+    /^(ไม่ลังเล|อย่าลังเล|ยินดี(ช่วย|ตอบ|ให้)|หวังว่า)/,
+    /^(มีอะไร(เพิ่มเติม|อื่น)|มีคำถาม(อื่น|เพิ่ม))/,
+  ];
+  
+  // Patterns within any position in line
+  const followUpInlinePatterns = [
+    /do you have any (attachments|questions|other)/i,
+    /would you like (me to|to know|more|further)/i,
+    /feel free to (ask|contact|reach)/i,
+    /หากมีคำถามเพิ่มเติม/,
+    /ต้องการให้อธิบายเพิ่ม/,
+    /สามารถสอบถามเพิ่มเติม/,
+    /หากสนใจเรื่อง/,
+    /อย่าลังเลที่จะ/,
+  ];
+  
+  let skipRemaining = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Skip empty lines at the end if we already started skipping
+    if (skipRemaining) {
+      if (trimmed === '') continue;
+      // Check if this line is also a follow-up
+      const isFollowUp = followUpPatterns.some(p => p.test(trimmed)) || 
+                          followUpInlinePatterns.some(p => p.test(trimmed));
+      if (isFollowUp) continue;
+      // If it's not a follow-up, stop skipping and include it
+      skipRemaining = false;
+    }
+    
+    // Check if this line matches follow-up patterns
+    const isFollowUpLine = followUpPatterns.some(p => p.test(trimmed)) ||
+                           followUpInlinePatterns.some(p => p.test(trimmed));
+    
+    if (isFollowUpLine) {
+      skipRemaining = true; // Skip this and any trailing lines
+      continue;
+    }
+    
+    filteredLines.push(line);
+  }
+  
+  // Remove trailing empty lines
+  while (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].trim() === '') {
+    filteredLines.pop();
+  }
+  
+  return filteredLines.join('\n').trim();
+}
+
+/**
+ * Strip prompt structural markers that LLM may echo back in its response
+ * e.g. "========== ฐานความรู้ (ลำดับที่ 1) =========="
+ */
+function stripPromptMarkers(text: string): string {
+  if (!text) return '';
+  
+  // Remove lines that are purely structural markers from the prompt
+  const markerPatterns = [
+    /^={3,}.*={3,}$/,                            // ========== ... ==========
+    /^-{3,}$/,                                    // ---
+    /^#{1,2}\s*ฐานความรู้/,                        // # ฐานความรู้ or ## ฐานความรู้
+    /^#{1,2}\s*KNOWLEDGE BASE/i,                  // # KNOWLEDGE BASE
+    /^ลำดับที่\s*\d/,                              // ลำดับที่ 1
+    /^PRIORITY\s*\d/i,                            // PRIORITY 1
+    /^คำถามที่คล้ายกัน:\s*/,                         // คำถามที่คล้ายกัน:
+    /^คำตอบ:\s*##/,                                // คำตอบ: ##
+    /^ความคล้าย:\s*\d+/,                           // ความคล้าย: 85%
+    /^ประเภท:\s*(ยืนยัน|self|request)/,             // ประเภท: ยืนยัน...
+    /^แหล่งที่มา:\s*/,                               // แหล่งที่มา:
+    /^\[\d+\]\s*คำถาม:/,                           // [1] คำถาม:
+    /^\s*ข้อมูลฐานความรู้/,                          // ข้อมูลฐานความรู้
+    /^\s*KNOWLEDGE BASE DATA/i,
+    /^\s*ATTACHED FILES DATA/i,
+    /^\s*ข้อมูลจากไฟล์แนบ/,
+    /^\s*Reference Data from/i,
+    /^\s*User-Verified Answer \(by/i,
+    /^\s*คำตอบที่ยืนยันแล้วจากผู้ใช้/,
+  ];
+  
+  const lines = text.split('\n');
+  const filteredLines: string[] = [];
+  let consecutiveRemoved = 0;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Check if line matches any marker pattern
+    const isMarker = markerPatterns.some(p => p.test(trimmed));
+    
+    if (isMarker) {
+      consecutiveRemoved++;
+      // Don't add more than 1 blank line when removing markers
+      if (consecutiveRemoved <= 1 && filteredLines.length > 0) {
+        // Add a blank line only if previous line wasn't blank
+        const lastLine = filteredLines[filteredLines.length - 1];
+        if (lastLine && lastLine.trim() !== '') {
+          filteredLines.push('');
+        }
+      }
+      continue;
+    }
+    
+    consecutiveRemoved = 0;
+    filteredLines.push(line);
+  }
+  
+  // Clean up multiple blank lines and trim
+  return filteredLines.join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Detect language of text (Thai vs English/Other)
+ * Returns 'thai' if text contains significant Thai characters, otherwise 'english'
+ */
+function detectTextLanguage(text: string): 'thai' | 'english' {
+  const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+  // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+  if (thaiChars > 0) return 'thai';
+  return 'english';
+}
+
+/**
+ * Strip echoed source data / raw context that LLM may have appended
+ * e.g. "คำตอบนี้ถูกสังเคราะห์จากความเห็น..." followed by raw English answers
+ * or trailing "คำตอบ: <english text>" blocks that are raw source echoes
+ */
+function stripEchoedSources(text: string, isThaiQuestion: boolean): string {
+  if (!text) return '';
+  
+  // Pattern 1: Remove "คำตอบนี้ถูกสังเคราะห์จาก..." and everything after it
+  const synthesisIdx = text.indexOf('คำตอบนี้ถูกสังเคราะห์จาก');
+  if (synthesisIdx > 100) { // Only if there's substantial content before it
+    text = text.substring(0, synthesisIdx).trim();
+  }
+  
+  // Pattern 2: For Thai questions, remove trailing "คำตอบ:" blocks that are in English
+  if (isThaiQuestion) {
+    const lines = text.split('\n');
+    let cutIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      
+      // Detect "คำตอบ:" followed by mostly English text (raw source echo)
+      if (/^คำตอบ:\s*.+/.test(trimmed)) {
+        // Check if the content after "คำตอบ:" is mostly English
+        const afterLabel = trimmed.replace(/^คำตอบ:\s*/, '');
+        const thaiChars = (afterLabel.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const englishChars = (afterLabel.match(/[a-zA-Z]/g) || []).length;
+        
+        if (englishChars > 20 && thaiChars < englishChars * 0.3) {
+          // This is a raw English source echo - cut from here
+          cutIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (cutIndex > 5) { // Only if there's substantial Thai content before
+      // Also remove any blank lines right before the cut
+      while (cutIndex > 0 && lines[cutIndex - 1].trim() === '') {
+        cutIndex--;
+      }
+      text = lines.slice(0, cutIndex).join('\n').trim();
+    }
+    
+    // Pattern 3: Remove large trailing English-only blocks (3+ paragraphs of pure English)
+    const paragraphs = text.split(/\n\n+/);
+    let lastThaiParaIdx = -1;
+    
+    for (let i = paragraphs.length - 1; i >= 0; i--) {
+      const para = paragraphs[i].trim();
+      if (!para) continue;
+      
+      const thaiInPara = (para.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const englishInPara = (para.match(/[a-zA-Z]/g) || []).length;
+      
+      // If paragraph has Thai content, this is the boundary
+      if (thaiInPara > 5 || (thaiInPara > 0 && englishInPara < thaiInPara * 3)) {
+        lastThaiParaIdx = i;
+        break;
+      }
+    }
+    
+    // If we found trailing English-only paragraphs (at least 2)
+    if (lastThaiParaIdx >= 0 && lastThaiParaIdx < paragraphs.length - 2) {
+      text = paragraphs.slice(0, lastThaiParaIdx + 1).join('\n\n').trim();
+    }
+  }
+  
+  return text.trim();
+}
+
+/**
+ * Check if AI answer language matches expected language
+ * Returns true if the answer is in the wrong language and needs re-generation
+ */
+function isAnswerWrongLanguage(answer: string, isThaiQuestion: boolean): boolean {
+  if (!answer || answer.length < 50) return false;
+  
+  const thaiChars = (answer.match(/[\u0E00-\u0E7F]/g) || []).length;
+  const englishChars = (answer.match(/[a-zA-Z]/g) || []).length;
+  const totalChars = thaiChars + englishChars;
+  if (totalChars === 0) return false;
+  
+  const thaiRatio = thaiChars / totalChars;
+  
+  if (isThaiQuestion) {
+    // คำถามเป็นไทย แต่คำตอบเป็นอังกฤษ (Thai chars < 15% of all chars)
+    if (thaiRatio < 0.15) {
+      console.log(`⚠️ Language mismatch: Question is Thai but answer has only ${(thaiRatio * 100).toFixed(1)}% Thai chars`);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Attempt to fix answer language by re-generating with explicit language instruction
+ */
+async function fixAnswerLanguage(
+  answer: string, 
+  isThaiQuestion: boolean,
+  ifxClient: any
+): Promise<string> {
+  if (!isThaiQuestion) return answer;
+  
+  try {
+    console.log('🔄 Fixing answer language: translating to Thai...');
+    const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+    
+    const fixMessages = [
+      { role: 'system' as const, content: 'คุณคือนักแปล แปลข้อความต่อไปนี้เป็นภาษาไทยทั้งหมด คงรูปแบบ Markdown เดิมไว้ คำศัพท์เทคนิคภาษาอังกฤษให้คงไว้เป็นภาษาอังกฤษได้ แต่คำอธิบายต้องเป็นภาษาไทย' },
+      { role: 'user' as const, content: `แปลเป็นภาษาไทย:\n\n${answer}` }
+    ];
+    
+    const response = await ifxClient.chat.completions.create({
+      model: ifxModel,
+      messages: fixMessages,
+      temperature: 0.3,
+      max_completion_tokens: 20000,
+      stream: false
+    });
+    
+    const fixedAnswer = response.choices[0]?.message?.content?.trim();
+    if (fixedAnswer && fixedAnswer.length > 50) {
+      console.log('✅ Answer language fixed to Thai');
+      return fixedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+    }
+  } catch (fixError) {
+    console.warn('⚠️ Failed to fix answer language:', fixError);
+  }
+  
+  return answer; // Return original if fix fails
+}
+
+/**
+ * Calculate string similarity using Levenshtein distance (normalized)
+ * Returns value between 0 (completely different) and 1 (identical)
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  
+  if (s1 === s2) return 1;
+  if (s1.length === 0 || s2.length === 0) return 0;
+  
+  // Levenshtein distance
+  const matrix: number[][] = [];
+  
+  for (let i = 0; i <= s2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= s1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= s2.length; i++) {
+    for (let j = 1; j <= s1.length; j++) {
+      if (s2.charAt(i - 1) === s1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+  
+  const maxLen = Math.max(s1.length, s2.length);
+  const distance = matrix[s2.length][s1.length];
+  return 1 - distance / maxLen;
+}
+
+/**
+ * Get existing knowledge groups from database
+ */
+async function getExistingKnowledgeGroups(): Promise<string[]> {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT predicted_group
+      FROM ai_learning_analysis
+      WHERE predicted_group IS NOT NULL
+      ORDER BY predicted_group
+    `);
+    return result.rows.map(row => row.predicted_group);
+  } catch (error) {
+    console.error('Error getting existing knowledge groups:', error);
+    return [];
+  }
+}
+
+/**
+ * Find the most similar existing group for a new predicted group
+ * Returns the existing group name if similarity > threshold, otherwise returns null
+ */
+/**
+ * Normalize knowledge group name for better matching
+ * - Convert to lowercase
+ * - Replace "&" with "and"
+ * - Remove extra spaces
+ * - Remove special characters
+ */
+// Map of group names that should be normalized to a standard name
+// ⚠️ IMPORTANT: Only merge groups that are TRULY the same thing (just different spelling/format)
+// DO NOT merge specific technical topics (pad, die, wafer, defect, etc. must stay separate)
+const GROUP_NORMALIZATION_MAP: Record<string, string> = {
+  // Health related - only merge different spellings of same concept
+  'health and wellness': 'Health & Wellness',
+  'health & wellness': 'Health & Wellness',
+  
+  // IT related - only merge different spellings
+  'it and computer': 'IT & Computer',
+  'it & computer': 'IT & Computer',
+  'information technology': 'IT & Computer',
+  
+  // HR related - only merge different spellings  
+  'hr and training': 'HR & Training',
+  'hr & training': 'HR & Training',
+  'human resources': 'HR & Training',
+  
+  // ⛔ BANNED: General categories - these should NEVER be used
+  // AI must choose a specific category instead
+  'general knowledge': '__BANNED__',
+  'general': '__BANNED__',
+  'miscellaneous': '__BANNED__',
+  'other': '__BANNED__',
+  'others': '__BANNED__',
+  'อื่นๆ': '__BANNED__',
+  'ทั่วไป': '__BANNED__',
+  'ความรู้ทั่วไป': '__BANNED__',
+};
+
+function normalizeGroupName(groupName: string): string {
+  const normalized = groupName
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')  // "Health & Wellness" → "health and wellness"
+    .replace(/[^a-z0-9\s]/g, '')    // Remove special chars
+    .replace(/\s+/g, ' ')           // Normalize spaces
+    .trim();
+  
+  // Check if this matches a known group that should be normalized
+  if (GROUP_NORMALIZATION_MAP[normalized]) {
+    return GROUP_NORMALIZATION_MAP[normalized].toLowerCase().replace(/\s*&\s*/g, ' and ');
+  }
+  
+  return normalized;
+}
+
+/**
+ * Get the standardized group name for display/storage
+ * Returns the properly formatted group name (e.g., "Health & Wellness" not "health and wellness")
+ * If the group is BANNED (like "General Knowledge"), returns null to force re-classification
+ */
+function getStandardGroupName(groupName: string): string | null {
+  const normalized = groupName
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/[^a-z0-9\sก-๙]/g, '')  // Keep Thai characters too
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Check if this is a BANNED category
+  if (GROUP_NORMALIZATION_MAP[normalized] === '__BANNED__') {
+    console.log(`  ⛔ BANNED group detected: "${groupName}" - will require re-classification`);
+    return null; // Force re-classification
+  }
+  
+  // Return the standard name if it exists in the map
+  if (GROUP_NORMALIZATION_MAP[normalized]) {
+    return GROUP_NORMALIZATION_MAP[normalized];
+  }
+  
+  // If not in map, return the original with proper capitalization
+  return groupName;
+}
+
+async function findSimilarKnowledgeGroup(newGroup: string, similarityThreshold: number = 0.75): Promise<string | null> {
+  const existingGroups = await getExistingKnowledgeGroups();
+  
+  if (existingGroups.length === 0) {
+    return null; // No existing groups, use the new one
+  }
+  
+  // 🆕 Normalize for better matching
+  const normalizedNew = normalizeGroupName(newGroup);
+  
+  let bestMatch: string | null = null;
+  let bestSimilarity = 0;
+  
+  for (const existingGroup of existingGroups) {
+    const normalizedExisting = normalizeGroupName(existingGroup);
+    
+    // Calculate similarity on NORMALIZED strings
+    const similarity = calculateStringSimilarity(normalizedNew, normalizedExisting);
+    
+    console.log(`  📊 Similarity: "${newGroup}" vs "${existingGroup}" = ${(similarity * 100).toFixed(1)}%`);
+    
+    if (similarity > bestSimilarity) {
+      bestSimilarity = similarity;
+      bestMatch = existingGroup;
+    }
+  }
+  
+  // 🔄 Lower threshold to 70% for better grouping
+  if (bestSimilarity >= 0.70) {
+    console.log(`  ✅ Matched to existing group: "${bestMatch}" (${(bestSimilarity * 100).toFixed(1)}% similar)`);
+    return bestMatch;
+  } else {
+    console.log(`  🆕 Creating new group: "${newGroup}" (best match was ${(bestSimilarity * 100).toFixed(1)}%)`);
+    return null; // Not similar enough, use the new group
+  }
+}
 
 // =================================================================================
 // FILE PROCESSING HELPER FUNCTIONS
@@ -705,7 +1377,8 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
               'Content-Type': form.getHeaders()['content-type'] 
           },
           maxContentLength: Infinity,
-          maxBodyLength: Infinity
+          maxBodyLength: Infinity,
+          timeout: 24 * 60 * 60 * 1000, // 15 minutes
       });
       // Check if the Python server returned a "success" status and update file process status
       if (flaskRes.data && flaskRes.data.status === "success") {
@@ -839,6 +1512,24 @@ router.post('/message', async (req : Request, res : Response) => {
     let serch_doc = ""
     // const documentSearchMethod = docSearchMethod || "none";
 
+    let chatContent = "";
+    if (currentChatId) {
+      const rows = await readChatHistory(currentChatId);
+      // REMOVED: await createChatFolder(userId, currentChatId);
+      if (rows.length > 0) {
+        chatContent = rows[0].message;
+        if (!currentChatMode) {
+           currentChatMode = rows[0].chat_mode ?? initialMode;
+           req.session.user!.currentChatMode = currentChatMode;
+        }
+        if (!currentChatModel) {
+           currentChatModel = rows[0].chat_model ?? initialModel;
+           req.session.user!.currentChatModel = currentChatModel;
+        }
+      }
+      req.session.user!.socketId = socketId;
+    }
+
     if (currentChatId){
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
@@ -848,11 +1539,12 @@ router.post('/message', async (req : Request, res : Response) => {
           query: userMessage,
           user_id: userId,
           chat_history_id: currentChatId,
+          chat_history_messages: chatContent,
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
-          threshold_page: 0.8,
-          threshold_text: 0.8,
+          threshold_page: 1.5,
+          threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
@@ -883,23 +1575,23 @@ router.post('/message', async (req : Request, res : Response) => {
     console.log(serch_doc);
     console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
 
-    let chatContent = "";
-    if (currentChatId) {
-      const rows = await readChatHistory(currentChatId);
-      // REMOVED: await createChatFolder(userId, currentChatId);
-      if (rows.length > 0) {
-        chatContent = rows[0].message;
-        if (!currentChatMode) {
-           currentChatMode = rows[0].chat_mode ?? initialMode;
-           req.session.user!.currentChatMode = currentChatMode;
-        }
-        if (!currentChatModel) {
-           currentChatModel = rows[0].chat_model ?? initialModel;
-           req.session.user!.currentChatModel = currentChatModel;
-        }
-      }
-      req.session.user!.socketId = socketId;
-    }
+    // let chatContent = "";
+    // if (currentChatId) {
+    //   const rows = await readChatHistory(currentChatId);
+    //   // REMOVED: await createChatFolder(userId, currentChatId);
+    //   if (rows.length > 0) {
+    //     chatContent = rows[0].message;
+    //     if (!currentChatMode) {
+    //        currentChatMode = rows[0].chat_mode ?? initialMode;
+    //        req.session.user!.currentChatMode = currentChatMode;
+    //     }
+    //     if (!currentChatModel) {
+    //        currentChatModel = rows[0].chat_model ?? initialModel;
+    //        req.session.user!.currentChatModel = currentChatModel;
+    //     }
+    //   }
+    //   req.session.user!.socketId = socketId;
+    // }
 
     if (selectedRole == "user"){
       chatContent += (chatContent ? "\n<DATA_SECTION>\n" : "") + "user" + ": " + userMessage + "\n";
@@ -907,14 +1599,14 @@ router.post('/message', async (req : Request, res : Response) => {
 
     let question : string = "";
     let question_backup
-    if ((currentChatMode) && (serch_doc != "")){
-      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
-      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need.";
+    if ((currentChatMode) && (serch_doc != "\n\n")){
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
+      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
     else{
       console.log("No document")
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = chatContent + "\n\n" + "No Document" + "\n" + "If there is insufficient information to answer the user's question, tell the user what information you need."
+      question_backup = chatContent + "\n\n" + "document" + ": " + "No Document" + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     const modelToUse = currentChatModel || initialModel;
@@ -944,6 +1636,7 @@ router.post('/message', async (req : Request, res : Response) => {
 
     let response: { text: string } | null = null;
     
+<<<<<<< HEAD
 //     // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
 //     if (modeToUse === 'ai_suggests') {
 //       console.log('AI Suggests Mode: Using LLM + Verified Knowledge Base...');
@@ -1257,11 +1950,58 @@ router.post('/message', async (req : Request, res : Response) => {
 //         }
         
 //         response = { text: finalResponse };
+=======
+    // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
+    if (modeToUse === 'ai_suggests') {
+      console.log('🤖 AI Suggests Mode: Using shared core function with streaming...');
+      
+      const userQuestion = userMessage || '';
+      
+      // Detect language (outside try block for error handler)
+      const detectLanguage = (text: string): 'thai' | 'english' => {
+        const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+        // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+        if (thaiChars > 0) return 'thai';
+        return 'english';
+      };
+      
+      const isThaiQuestion = detectLanguage(userQuestion) === 'thai';
+      
+      try {
+        
+        // Call core function with streaming enabled
+        const result = await generateAISuggestionCore(userQuestion, {
+          streaming: true,
+          socket: socket,
+          questionId: null  // No questionId for chat mode
+        });
+        
+        // Build final response - ถ้ามี sources ให้ตอบพร้อมเอกสารอ้างอิง ถ้าไม่มี ให้ตอบว่าไม่มีข้อมูล
+        let finalResponse = '';
+        
+        if (result.totalSources > 0) {
+          // มีข้อมูล - ตอบจาก sources
+          finalResponse = result.answer;
+          const footer = isThaiQuestion 
+            ? `\n\n---\n📚 *อ้างอิงจาก ${result.totalSources} คำตอบที่ยืนยันแล้ว*`
+            : `\n\n---\n📚 *Referenced from ${result.totalSources} verified answer${result.totalSources > 1 ? 's' : ''}*`;
+          finalResponse += footer;
+        } else {
+          // ไม่มีข้อมูล - ตอบแค่เนื้อหา result.answer (ซึ่งมี message ว่า "ไม่มีข้อมูล" แล้ว)
+          finalResponse = result.answer;
+        }
+        
+        // Stream the footer (answer was already streamed by core function)
+        socket?.emit('StreamText', finalResponse);
+        
+        response = { text: finalResponse };
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         
 //         // Save to chat history
 //         chatContent += "\n<DATA_SECTION>\n" + "assistance: " + finalResponse + "\n";
 //         await storeChatHistory(currentChatId, chatContent);
         
+<<<<<<< HEAD
 //         return res.json({ response: finalResponse });
         
 //       } catch (aiSuggestError: any) {
@@ -1272,6 +2012,21 @@ router.post('/message', async (req : Request, res : Response) => {
 //       }
 //     }
 //     // ===== END AI SUGGESTS MODE =====
+=======
+        console.log(`✅ AI Suggests: Completed (${result.totalSources} sources)`);
+        return res.json({ response: finalResponse });
+        
+      } catch (aiSuggestError: any) {
+        console.error('❌ AI Suggests Error:', aiSuggestError);
+        const errorMsg = isThaiQuestion
+          ? '❌ เกิดข้อผิดพลาดในการค้นหาฐานความรู้: ' + aiSuggestError.message
+          : '❌ Knowledge base search error: ' + aiSuggestError.message;
+        socket?.emit('StreamText', errorMsg);
+        return res.status(500).json({ error: errorMsg });
+      }
+    }
+    // ===== END AI SUGGESTS MODE =====
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     
     // AI Model calling logic (Google, Ollama, OpenRouter, MyModel) remains the same...
     // ... [ The large block of code for calling different AI APIs is omitted for brevity but should be kept as is ] ...
@@ -1759,6 +2514,43 @@ router.post('/message', async (req : Request, res : Response) => {
       }
     }
 
+    // Inside router.post('/message') and router.post('/edit-message')
+
+   else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
+    try {
+      console.log("Calling IFX GPT API (internal OpenAI)...");
+      
+      const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
+      
+      // Use your existing buildMessages function
+      const messageHistory = buildMessages(
+        modeToUse === "code" ? setting_prompt : "You are a helpful assistant" + "\n"  + "If there is insufficient information to answer the user's question, tell the user what information you need.", 
+        question_backup
+      );
+
+      console.log("Message :");
+      console.log(messageHistory);
+    
+      // Call our new helper
+      const result = await IFXGPTInference(
+        messageHistory,
+        internalModelName,
+        socket,
+        controller
+      );
+    
+      response = { text: result };
+      console.log("IFXGPT_Response : ");
+      console.log(result);
+    
+    } catch (err) {
+      console.error("Error calling IFX GPT API:", err);
+      return res.status(500).json({
+        error: `Internal API Error: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+  }
+
 
     if (!response){
       console.error("No response received from AI model");
@@ -1998,6 +2790,7 @@ router.post('/edit-message', async (req, res) => {
           query: newMessage,
           user_id: userId,
           chat_history_id: chatId,
+          chat_history_message: newChatContent,
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
@@ -2023,13 +2816,14 @@ router.post('/edit-message', async (req, res) => {
     }
     console.log(serch_doc);
     console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
-    if ((modeToUse) && (serch_doc != '')){
-      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc;
-      question_backup = newChatContent + "\n\n" + "document" + ": " + serch_doc
+    if ((modeToUse) && (serch_doc != "\n\n")){
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n") + "\n\ndocument" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
+      question_backup = chatContent + "\n\n" + "document" + ": " + serch_doc + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need.";
     }
     else{
-      question = newChatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = newChatContent
+      console.log("No document")
+      question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
+      question_backup = chatContent + "\n\n" + "document" + ": " + "No Document" + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     question = "Model name: " + modelToUse.match(regexM)![1] + "\n\n" + "--------------** Start Conversation Section** --------------\n\n" + question;
@@ -2062,6 +2856,7 @@ router.post('/edit-message', async (req, res) => {
 //       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
 //       let embedding: number[] = [];
       
+<<<<<<< HEAD
 //       // Detect language of the question
 //       const detectLang = (text: string): 'thai' | 'english' => {
 //         const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
@@ -2078,6 +2873,61 @@ router.post('/edit-message', async (req, res) => {
 //           { text: newMessage, dimensions: 2048, is_query: true },  // ← cross-lingual search
 //           { timeout: 30000 }
 //         );
+=======
+      // Detect language of the question
+      const detectLang = (text: string): 'thai' | 'english' => {
+        const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+        // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+        if (thaiChars > 0) return 'thai';
+        return 'english';
+      };
+      const questionLanguage = detectLang(newMessage);
+      const isThaiQuestion = questionLanguage === 'thai';
+      console.log(`🌐 AI Suggests (edit-message): Detected language = ${questionLanguage}`);
+      
+      // 🆕 แปลคำถาม English → Thai ก่อน search (cross-lingual support)
+      let searchQuery = newMessage;
+      if (!isThaiQuestion) {
+        console.log(`🌐 AI Suggests (edit-message): Translating English question to Thai for better KB search...`);
+        try {
+          const translateRes = await axios.post(
+            `${process.env.IFXGPT_API_URL || 'https://ifxgpt.intra.infineon.com'}/api/chat/completions`,
+            {
+              model: process.env.IFXGPT_MODEL || 'gpt-5.2',
+              messages: [
+                { role: 'system', content: 'You are a translator. Translate the following English text to Thai. Output ONLY the Thai translation, nothing else.' },
+                { role: 'user', content: newMessage }
+              ],
+              temperature: 0.1,
+              max_tokens: 500
+            },
+            {
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.IFXGPT_API_KEY || ''}`
+              },
+              timeout: 15000
+            }
+          );
+          
+          const translateData = translateRes.data as { choices?: Array<{ message?: { content?: string } }> };
+          const thaiTranslation = translateData.choices?.[0]?.message?.content?.trim();
+          if (thaiTranslation) {
+            searchQuery = thaiTranslation;
+            console.log(`✅ Translated to Thai: "${thaiTranslation.substring(0, 100)}..."`);
+          }
+        } catch (translateError: any) {
+          console.log(`⚠️ Translation failed, using original English: ${translateError.message}`);
+        }
+      }
+      
+      try {
+        const embeddingRes = await axios.post(
+          `${API_SERVER_URL}/encode_embedding`,
+          { text: searchQuery, dimensions: 2048, is_query: true },  // ← ใช้ searchQuery (แปลแล้ว)
+          { timeout: 30000 }
+        );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         
 //         if (embeddingRes.data && embeddingRes.data.embedding) {
 //           embedding = embeddingRes.data.embedding;
@@ -2089,13 +2939,19 @@ router.post('/edit-message', async (req, res) => {
 //         return res.json({ response: errorMsg });
 //       }
       
+<<<<<<< HEAD
 //       // Search verified answers with lower threshold for cross-lingual
 //       const results = await searchVerifiedAnswers(embedding, 0.3, 5);
+=======
+      // 🆕 ใช้ searchVerifiedAnswersHybrid แทน searchVerifiedAnswers
+      const results = await searchVerifiedAnswersHybrid(searchQuery, 0.25, 10);
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
       
 //       let context = '';
 //       let sourcesUsed: any[] = [];
 //       let totalSources = 0;
       
+<<<<<<< HEAD
 //       if (results && results.length > 0) {
 //         context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
 //         results.forEach((result: any, idx: number) => {
@@ -2107,6 +2963,29 @@ router.post('/edit-message', async (req, res) => {
 //           totalSources++;
 //         });
 //       }
+=======
+      if (results && results.length > 0) {
+        context += isThaiQuestion ? 'ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว:\n\n' : 'Verified knowledge base data:\n\n';
+        
+        for (const result of results) {
+          // 🆕 ใช้ confidenceScore จาก hybrid search (threshold >= 55%)
+          const confidenceScore = result.confidenceScore || 0;
+          if (confidenceScore < 0.55) {
+            console.log(`⏭️ AI Suggests (edit-message): Skip Q${result.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%)`);
+            continue;
+          }
+          
+          const similarity = Math.round(confidenceScore * 100);
+          context += isThaiQuestion 
+            ? `[คำถาม ${totalSources + 1}]: ${result.question}\n[คำตอบ]: ${result.answer}\n[ความคล้ายคลึง]: ${similarity}%\n\n`
+            : `[Question ${totalSources + 1}]: ${result.question}\n[Answer]: ${result.answer}\n[Similarity]: ${similarity}%\n\n`;
+          sourcesUsed.push({ type: 'verified_answer', question: result.question, confidence: confidenceScore });
+          totalSources++;
+          
+          console.log(`✅ AI Suggests (edit-message): Q${result.id} confidence=${similarity}% "${result.question.substring(0, 50)}..."`);
+        }
+      }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
       
 //       // Build prompt for LLM
 //       const hasKnowledgeData = totalSources > 0;
@@ -2116,13 +2995,23 @@ router.post('/edit-message', async (req, res) => {
 //         systemPrompt = isThaiQuestion
 //           ? `คุณคือ AI Assistant ที่ตอบคำถามโดยใช้ข้อมูลจากฐานความรู้ที่ยืนยันแล้ว
 
+<<<<<<< HEAD
 // กฎ: ใช้ข้อมูลจากฐานความรู้เป็นหลัก, สรุปให้ชัดเจน, ตอบเป็นภาษาไทย
+=======
+🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
+
+📝 **วิธีการตอบ:**
+- ใช้ข้อมูลจากฐานความรู้เป็นหลัก
+- สรุปให้ชัดเจน กระชับ
+- ห้ามแนะนำคำถามต่อหรือถามกลับ
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // ========== ข้อมูลจากฐานความรู้ ==========
 // ${context}
 // ==========================================`
 //           : `You are an AI Assistant that answers questions using verified knowledge base data.
 
+<<<<<<< HEAD
 // Rules: Use knowledge base as primary source, summarize clearly, answer in English
 
 // ========== Knowledge Base Data ==========
@@ -2173,6 +3062,109 @@ router.post('/edit-message', async (req, res) => {
 //       let finalResponse = aiGeneratedAnswer || (totalSources > 0 
 //         ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
 //         : (isThaiQuestion ? 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask' : 'No answers found in knowledge base. Try Ask mode'));
+=======
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST ANSWER IN ENGLISH ONLY** because the question is in English.
+Even if the knowledge base data below is in Thai or another language, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
+📝 **How to Answer:**
+- Use knowledge base as primary source (translate Thai content to English if needed)
+- Summarize clearly and concisely
+- Do NOT suggest follow-up questions or ask questions back
+
+========== Knowledge Base Data ==========
+${context}
+==========================================`;
+      } else {
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ไม่พบข้อมูลในฐานความรู้ กรุณาแจ้งว่าไม่พบข้อมูล`
+          : `You are an AI Assistant. No data found in knowledge base. Please indicate that no data was found.`;
+      }
+      
+      const userPrompt = isThaiQuestion 
+        ? `คำถาม: ${newMessage}\n\nสร้างคำตอบ (ห้ามแนะนำคำถามต่อ):`
+        : `Question: ${newMessage}\n\nGenerate answer (do NOT suggest follow-up questions):`;
+      
+      let aiGeneratedAnswer = '';
+      let aiModelUsed = 'gpt-5.2';
+      
+      // Call LLM - Use IFXGPT (gpt-5.2) first, fallback to Gemma
+      try {
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+        console.log(`🤖 AI Suggests: Trying IFX GPT (${ifxModel})...`);
+        
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const ifxResponse = await ifxClient.chat.completions.create({
+          model: ifxModel,
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_completion_tokens: 4000,
+          stream: false
+        });
+        
+        if (ifxResponse?.choices?.[0]?.message?.content) {
+          aiGeneratedAnswer = ifxResponse.choices[0].message.content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          aiModelUsed = ifxModel;
+          console.log('✅ AI Suggests: IFX GPT succeeded');
+        }
+      } catch (ifxError: any) {
+        console.error('⚠️ AI Suggests: IFX GPT failed:', ifxError.message);
+        
+        // 🔄 FALLBACK 1: Try Google AI (Gemma)
+        try {
+          console.log('🔄 AI Suggests: Trying Google AI as fallback...');
+          const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+          const aiResponse = await ai.models.generateContent({
+            model: modelToUse?.replace('{_Google_API_}', '') || 'gemma-3-4b-it',
+            contents: fullPrompt
+          });
+          
+          if (aiResponse && aiResponse.text) {
+            aiGeneratedAnswer = aiResponse.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            aiModelUsed = 'gemma-3-4b-it (Google)';
+            console.log('✅ AI Suggests: Google AI fallback succeeded');
+          }
+        } catch (googleError: any) {
+          console.error('⚠️ AI Suggests: Google AI also failed:', googleError.message);
+          
+          // 🔄 FALLBACK 2: Try Ollama gemma3:1b
+          try {
+            console.log('🔄 AI Suggests: Trying Ollama gemma3:1b as final fallback...');
+            const ollamaResponse = await fetch(`${process.env.API_OLLAMA}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                model: 'gemma3:1b', 
+                prompt: `${systemPrompt}\n\n${userPrompt}`, 
+                stream: false,
+                options: { temperature: 0.3, num_predict: 2000 }
+              })
+            });
+            if (ollamaResponse.ok) {
+              const ollamaData = await ollamaResponse.json() as { response: string };
+              aiGeneratedAnswer = (ollamaData.response || '').replace(/\n{3,}/g, '\n\n').trim();
+              aiModelUsed = 'gemma3:1b (Ollama)';
+              console.log('✅ AI Suggests: Ollama gemma3:1b fallback succeeded');
+            }
+          } catch (e) { 
+            console.error('❌ AI Suggests: All AI models failed');
+          }
+        }
+      }
+      
+      // 🧹 Strip follow-up questions/suggestions from AI answer
+      aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
+      
+      // Build final response
+      let finalResponse = aiGeneratedAnswer || (totalSources > 0 
+        ? results.map((r: any, i: number) => `### ${i+1}. ${r.question}\n${r.answer}`).join('\n\n---\n\n')
+        : (isThaiQuestion ? 'ไม่พบคำตอบในฐานความรู้ ลองใช้โหมด Ask' : 'No answers found in knowledge base. Try Ask mode'));
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
       
 //       if (aiGeneratedAnswer && totalSources > 0) {
 //         finalResponse += isThaiQuestion
@@ -2670,6 +3662,42 @@ router.post('/edit-message', async (req, res) => {
         return res.status(500).json({ error: `Failed to communicate with MyModel model: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
+
+
+    else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
+    try {
+      console.log("Calling IFX GPT API (internal OpenAI)...");
+      
+      const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
+      
+      // Use your existing buildMessages function
+      const messageHistory = buildMessages(
+        modeToUse === "code" ? setting_prompt : "You are a helpful assistant" + "\n"  + "If there is insufficient information to answer the user's question, tell the user what information you need.", 
+        question_backup
+      );
+
+      console.log("Message :");
+      console.log(messageHistory);
+    
+      // Call our new helper
+      const result = await IFXGPTInference(
+        messageHistory,
+        internalModelName,
+        socket,
+        controller
+      );
+    
+      response = { text: result };
+      console.log("IFXGPT_Response : ");
+      console.log(result);
+    
+    } catch (err) {
+      console.error("Error calling IFX GPT API:", err);
+      return res.status(500).json({
+        error: `Internal API Error: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+  }
 
   if (response) {
     newChatContent += "\n<DATA_SECTION>\n" + "assistance: " + response.text + "\n";
@@ -3223,6 +4251,7 @@ const uploadFiles = multer({
 //         console.warn('Could not trigger notifications:', notifError);
 //       }
 
+<<<<<<< HEAD
 //       // 🤖 Pre-generate AI suggestion in the background (don't wait)
 //       // This allows the AI suggestion to be ready when users view the question
 //       if (verificationType === 'request') {
@@ -3232,6 +4261,35 @@ const uploadFiles = multer({
 //         });
 //       }
 //     }
+=======
+      // 🤖 Handle verification based on type
+      if (verificationType === 'self') {
+        // Self-verified: Auto-accept immediately
+        console.log(`✅ Auto-accepting self-verified question ${result.answerId}`);
+        try {
+          // Mark as fully verified by setting sum_verified_answer_embedding
+          // Note: Only update columns that actually exist in the verified_answers table
+          await pool.query(
+            `UPDATE verified_answers 
+             SET sum_verified_answer_embedding = (
+               SELECT answer_embedding FROM verified_answers WHERE id = $1 LIMIT 1
+             )
+             WHERE id = $1`,
+            [result.answerId]
+          );
+          console.log(`✅ Question ${result.answerId} auto-accepted (self-verified)`);
+        } catch (acceptError) {
+          console.error('Error auto-accepting self-verified question:', acceptError);
+        }
+      } else if (verificationType === 'request') {
+        // Request verification: Generate AI suggestion in the background
+        console.log(`🤖 Starting background AI suggestion generation for question ${result.answerId}`);
+        generateAISuggestionBackground(result.answerId, question, answer).catch(err => {
+          console.warn('Background AI suggestion generation failed:', err);
+        });
+      }
+    }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     res.json({ success: true, message: 'Answer verified and saved successfully', answerId: result.answerId });
 
@@ -4238,6 +5296,7 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //     const newQuestion = result.rows[0];
 //     console.log('✅ Question created:', newQuestion.id);
 
+<<<<<<< HEAD
 //     // If self-verify, add an automatic verification
 //     if (verificationType === 'self' && userId) {
 //       await pool.query(`
@@ -4255,6 +5314,38 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //       `, [newQuestion.id, userId || null, username, 'Verification request pending', requestedDepartments || []]);
 //       console.log('✅ Request verification added');
 //     }
+=======
+    // If self-verify, add an automatic verification
+    if (verificationType === 'self' && userId) {
+      await pool.query(`
+        INSERT INTO answer_verifications 
+        (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, 'self', $5, NOW());
+      `, [newQuestion.id, userId, username, 'Self-verified by department', [userDept]]);
+      console.log('✅ Self-verification added');
+      
+      // 🤖 Auto-accept for self-verified: Set sum_verified_answer_embedding
+      try {
+        await pool.query(
+          `UPDATE verified_answers 
+           SET sum_verified_answer_embedding = answer_embedding
+           WHERE id = $1 AND answer_embedding IS NOT NULL`,
+          [newQuestion.id]
+        );
+        console.log(`✅ Question ${newQuestion.id} auto-accepted (self-verified) - sum_verified_answer_embedding set`);
+      } catch (acceptError) {
+        console.error('Error auto-accepting self-verified question:', acceptError);
+      }
+    } else if (verificationType === 'request') {
+      // For request verification, add a record to track the verification request
+      await pool.query(`
+        INSERT INTO answer_verifications 
+        (verified_answer_id, user_id, commenter_name, comment, verification_type, requested_departments, created_at)
+        VALUES ($1, $2, $3, $4, 'request', $5, NOW());
+      `, [newQuestion.id, userId || null, username, 'Verification request pending', requestedDepartments || []]);
+      console.log('✅ Request verification added');
+    }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     res.json({ 
 //       success: true, 
@@ -4499,6 +5590,7 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //               },
 //             });
             
+<<<<<<< HEAD
 //             synthesizedAnswer = geminiResult.text || '';
 //             console.log(`✅ Gemma-3-4B synthesis complete: ${synthesizedAnswer.length} characters`);
 //           } catch (llmError) {
@@ -4529,6 +5621,38 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //               console.error('Both Gemini and Ollama synthesis failed:', ollamaError);
 //             }
 //           }
+=======
+            synthesizedAnswer = geminiResult.text || '';
+            console.log(`✅ Gemma-3-4B (Google AI) synthesis complete: ${synthesizedAnswer.length} characters`);
+          } catch (llmError) {
+            console.warn('Google AI synthesis failed, trying Ollama gemma3:1b:', llmError);
+            
+            // 🔄 FALLBACK to Ollama gemma3:1b for answer synthesis
+            try {
+              const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'gemma3:1b',
+                  prompt: synthesisPrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.3,
+                    num_predict: 2000
+                  }
+                })
+              });
+              
+              if (ollamaResponse.ok) {
+                const ollamaData = await ollamaResponse.json() as { response?: string };
+                synthesizedAnswer = ollamaData.response || '';
+                console.log(`✅ Ollama gemma3:1b synthesis complete: ${synthesizedAnswer.length} characters`);
+              }
+            } catch (ollamaError) {
+              console.error('Both Google AI and Ollama gemma3:1b synthesis failed:', ollamaError);
+            }
+          }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
           
 //           // If synthesis succeeded, create embedding and save to sum_verified_answer
 //           if (synthesizedAnswer && synthesizedAnswer.length > 50) {
@@ -4630,6 +5754,7 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 
 //           let judgeResult: any = null;
           
+<<<<<<< HEAD
 //           // Use Google Gemma-3-4B for FASTEST LLM Judge (⚡ MAXIMUM SPEED)
 //           try {
 //             const geminiResult = await ai.models.generateContent({
@@ -4680,6 +5805,82 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //               console.warn('LLM Judge (Ollama) also failed:', ollamaJudgeError);
 //             }
 //           }
+=======
+          // 🚀 Use IFXGPT (gpt-5.2) for LLM Judge - PRIMARY
+          try {
+            console.log('🔍 LLM Judge: Trying IFXGPT (gpt-5.2)...');
+            const ifxJudgeResponse = await ifxClient.chat.completions.create({
+              model: 'gpt-5.2',
+              messages: [
+                { role: 'system', content: 'You are an expert judge that evaluates AI responses. Always respond with valid JSON only.' },
+                { role: 'user', content: judgePrompt }
+              ],
+              max_completion_tokens: 1000,
+              temperature: 0.1,
+            });
+            
+            const responseText = ifxJudgeResponse.choices[0]?.message?.content || '';
+            
+            // Extract JSON from response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              judgeResult = JSON.parse(jsonMatch[0]);
+              console.log('✅ LLM Judge (IFXGPT gpt-5.2) succeeded');
+            }
+          } catch (ifxJudgeError) {
+            console.warn('LLM Judge (IFXGPT) failed, trying Google AI:', ifxJudgeError);
+            
+            // 🔄 FALLBACK 1: Google AI (gemma-3-4b-it)
+            try {
+              const geminiResult = await ai.models.generateContent({
+                model: 'gemma-3-4b-it',
+                contents: judgePrompt,
+                config: {
+                  maxOutputTokens: 1000,
+                  temperature: 0.1,
+                },
+              });
+              
+              const responseText = geminiResult.text || '';
+              const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                judgeResult = JSON.parse(jsonMatch[0]);
+                console.log('✅ LLM Judge (Google AI) succeeded');
+              }
+            } catch (llmError) {
+              console.warn('LLM Judge (Google AI) failed, trying Ollama gemma3:1b:', llmError);
+              
+              // 🔄 FALLBACK 2: Ollama gemma3:1b
+              try {
+                const ollamaJudgeResponse = await fetch(process.env.API_OLLAMA!, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'gemma3:1b',
+                    prompt: judgePrompt,
+                    stream: false,
+                    options: { 
+                      temperature: 0.1,
+                      num_predict: 1000
+                    }
+                  })
+                });
+                
+                if (ollamaJudgeResponse.ok) {
+                  const ollamaData = await ollamaJudgeResponse.json() as { response?: string };
+                  const responseText = ollamaData.response || '';
+                  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    judgeResult = JSON.parse(jsonMatch[0]);
+                    console.log('✅ LLM Judge (Ollama gemma3:1b) succeeded');
+                  }
+                }
+              } catch (ollamaJudgeError) {
+                console.warn('LLM Judge (Ollama gemma3:1b) also failed:', ollamaJudgeError);
+              }
+            }
+          }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
           
 //           // Fallback: Smarter text comparison if both LLMs fail
 //           if (!judgeResult) {
@@ -4809,6 +6010,7 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //             // Get full context for better classification
 //             const aiAnswerText = aiSuggestion.ai_generated_answer || '';
             
+<<<<<<< HEAD
 //             const classificationPrompt = `
 // Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
 
@@ -4887,6 +6089,216 @@ router.get('/reload-page', async (req: Request, res: Response) => {
 //             console.warn('Knowledge group classification failed (non-critical):', classifyError);
 //           }
 //           // ========== END AI Knowledge Group Classification ==========
+=======
+            console.log('🏷️ Starting knowledge group classification...');
+            console.log(`  📝 Question: ${originalQuestion.substring(0, 100)}...`);
+            console.log(`  📝 Answer length: ${aiAnswerText.length || humanAnswer.length} chars`);
+            
+            // Shorter prompt for faster classification
+            const classificationPrompt = `Classify this Q&A into ONE category.
+
+Q: ${originalQuestion.substring(0, 200)}
+A: ${(aiAnswerText || humanAnswer).substring(0, 200)}
+
+Categories: Wafer Processing, Die Processing, Wire Bonding, Pad & Metallization, Defect Analysis, Molding & Encapsulation, Testing & Inspection, Equipment Maintenance, Quality Control, Yield Improvement, Safety & Environment, IT & Computer, HR & Training, Finance & Procurement, Health & Wellness
+
+DO NOT use: General, Other, Miscellaneous
+
+Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
+
+            // 🔄 Use IFXGPT first, fallback to Google AI, then Ollama gemma3:1b for classification
+            let classificationSucceeded = false;
+            
+            // ========== Try IFXGPT first (use global ifxClient with certificate) ==========
+            if (ifxClientAvailable && ifxClient) {
+              console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification...');
+              try {
+                // Use global ifxClient (has certificate and proper auth configured)
+                const ifxResponse = await ifxClient.chat.completions.create({
+                  model: 'gpt-5.2', // Use gpt-5.2 (same as LLM Judge) for better classification
+                  messages: [
+                    { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
+                    { role: 'user', content: classificationPrompt }
+                  ],
+                max_completion_tokens: 150, // Increase tokens for proper JSON response
+                temperature: 0.2, // Add temperature for better response
+              });
+              
+              const classifyText = ifxResponse.choices[0]?.message?.content || '';
+              console.log('🔍 IFXGPT classification response:', classifyText.substring(0, 200));
+              
+              // Check for empty response and trigger fallback
+              if (!classifyText.trim()) {
+                console.warn('⚠️ IFXGPT returned empty response, will try fallback...');
+                throw new Error('Empty response from IFXGPT');
+              }
+              
+              const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+              if (jsonMatch) {
+                const classification = JSON.parse(jsonMatch[0]);
+                const rawPredictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Raw Knowledge Group from IFXGPT: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                
+                if (rawPredictedGroup) {
+                  const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                  
+                  if (normalizedGroup) {
+                    const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                    if (similarGroup && similarGroup !== normalizedGroup) {
+                      console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                      predictedGroup = similarGroup;
+                    } else {
+                      predictedGroup = normalizedGroup;
+                    }
+                    classificationSucceeded = true;
+                    console.log(`✅ Classification succeeded with IFXGPT: ${predictedGroup}`);
+                  } else {
+                    console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try fallback`);
+                  }
+                }
+              } else {
+                console.warn('⚠️ IFXGPT response does not contain valid JSON, will try fallback...');
+              }
+              } catch (ifxError) {
+                console.warn('❌ IFXGPT classification failed:', ifxError);
+                console.warn('  Will try Google AI fallback...');
+              }
+            } else {
+              console.log('⚠️ IFXGPT not available, skipping to Google AI fallback...');
+            }
+            
+            // ========== Fallback to Google AI ==========
+            if (!classificationSucceeded) {
+              console.log('🔍 Calling Google AI (gemma-3-4b-it) for knowledge group classification (fallback 1)...');
+            
+            // Try Google AI
+            try {
+              console.log('  📤 Sending request to Google AI...');
+              const geminiResult = await ai.models.generateContent({
+                model: 'gemma-3-4b-it',
+                contents: classificationPrompt,
+                config: {
+                  maxOutputTokens: 100,
+                  temperature: 0.2,
+                },
+              });
+              
+              const classifyText = geminiResult.text || '';
+              console.log('🔍 Google AI classification response:', classifyText.substring(0, 200));
+              
+              const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+              if (jsonMatch) {
+                const classification = JSON.parse(jsonMatch[0]);
+                const rawPredictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Raw Knowledge Group from Google AI: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                
+                if (rawPredictedGroup) {
+                  // First normalize the group name (e.g., "General Knowledge" → null for banned)
+                  const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                  
+                  // If normalizedGroup is null, it means the group is BANNED - don't mark as succeeded
+                  if (normalizedGroup) {
+                    const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                    if (similarGroup && similarGroup !== normalizedGroup) {
+                      console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                      predictedGroup = similarGroup;
+                    } else {
+                      predictedGroup = normalizedGroup;
+                    }
+                    classificationSucceeded = true;
+                    console.log(`✅ Classification succeeded with Google AI: ${predictedGroup}`);
+                  } else {
+                    console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try re-classification`);
+                    // Don't mark as succeeded - will try Ollama fallback
+                  }
+                }
+              }
+            } catch (googleError) {
+              console.warn('❌ Google AI classification failed:', googleError);
+              console.warn('  Will try Ollama gemma3:1b fallback...');
+            }
+            } // Close the "if (!classificationSucceeded)" for Google AI fallback
+            
+            // 🔄 FALLBACK to Ollama gemma3:1b if still not succeeded
+            if (!classificationSucceeded) {
+              console.log('🔍 Calling Ollama gemma3:1b for knowledge group classification (fallback 2)...');
+              const classifyResponse = await fetch(process.env.API_OLLAMA!, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'gemma3:1b',
+                  prompt: classificationPrompt,
+                  stream: false,
+                  options: { 
+                    temperature: 0.2,
+                    num_predict: 100
+                  }
+                })
+              });
+              
+              console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+              
+              if (classifyResponse.ok) {
+                const classifyData = await classifyResponse.json() as { response?: string };
+                const classifyText = classifyData.response || '';
+                
+                console.log('🔍 Ollama gemma3:1b classification response:', classifyText.substring(0, 200));
+                
+                // Try to extract JSON from response
+                const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                if (jsonMatch) {
+                  try {
+                    const classification = JSON.parse(jsonMatch[0]);
+                    const rawPredictedGroup = classification.group || null;
+                    groupConfidence = typeof classification.confidence === 'number' 
+                      ? Math.min(1, Math.max(0, classification.confidence)) 
+                      : null;
+                    
+                    console.log(`📁 Raw Knowledge Group from Ollama: ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                    
+                    // ========== Similarity Check with Existing Groups ==========
+                    if (rawPredictedGroup) {
+                      // First normalize the group name (e.g., "General Knowledge" → null for banned)
+                      const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                      
+                      // If normalizedGroup is null, the group is BANNED - use original with warning
+                      if (normalizedGroup) {
+                        const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                        
+                        if (similarGroup && similarGroup !== normalizedGroup) {
+                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                          predictedGroup = similarGroup;
+                        } else {
+                          predictedGroup = normalizedGroup;
+                        }
+                      } else {
+                        // Last resort: use "Unclassified" if even Ollama returns banned category
+                        console.log(`  ⚠️ Ollama also returned banned group "${rawPredictedGroup}", using original question context`);
+                        predictedGroup = 'Unclassified';
+                      }
+                    }
+                    // ========== END Similarity Check ==========
+                  } catch (parseErr) {
+                    console.warn('Could not parse classification JSON:', parseErr);
+                  }
+                }
+              }
+            }
+            
+            console.log(`📁 Final Knowledge Group: ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+          } catch (classifyError) {
+            console.warn('Knowledge group classification failed (non-critical):', classifyError);
+          }
+          // ========== END AI Knowledge Group Classification ==========
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
           
 //           await saveAILearningAnalysis(aiSuggestion.id, {
 //             conflictType: judgeResult.conflictType || 'none',
@@ -5118,6 +6530,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       return res.json({ success: true, results: [] });
 //     }
 
+<<<<<<< HEAD
 //     // 2. Get total count of related questions (same criteria as main query)
 //     // Include both self-verified and request-verified (with sum_verified_answer) questions
 //     // Lower threshold to 0.50 for better coverage
@@ -5137,9 +6550,31 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         )`,
 //       [qId, question_embedding]
 //     );
+=======
+    // 2. Get total count of related questions (same criteria as main query)
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Threshold set to 0.6 for better quality
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total
+      FROM verified_answers va
+      WHERE va.id != $1
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $2::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $2::vector)) > 0.6)
+        )`,
+      [qId, question_embedding]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     
 //     const totalRelated = parseInt(countResult.rows[0]?.total) || 0;
 
+<<<<<<< HEAD
 //     // 3. Search for similar questions using vector similarity
 //     // Include both self-verified and request-verified (with synthesized answer) questions
 //     const relatedResult = await pool.query(
@@ -5180,6 +6615,48 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       LIMIT 5`,
 //       [question_embedding, qId]
 //     );
+=======
+    // 3. Search for similar questions using vector similarity
+    // Include both self-verified and request-verified (with synthesized answer) questions
+    const relatedResult = await pool.query(
+      `SELECT 
+        va.id,
+        va.question,
+        va.created_by,
+        va.views,
+        va.tags,
+        va.verification_type,
+        va.created_at,
+        va.sum_verified_answer IS NOT NULL as is_fully_verified,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
+        COALESCE(COUNT(av.id), 0) as verification_count
+      FROM verified_answers va
+      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+      WHERE va.id != $2
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.6)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding, va.sum_verified_answer
+      ORDER BY 
+        similarity_score DESC
+      LIMIT 5`,
+      [question_embedding, qId]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     const relatedQuestions = relatedResult.rows.map(row => ({
 //       id: row.id,
@@ -5230,6 +6707,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       return res.json({ success: true, results: [] });
 //     }
 
+<<<<<<< HEAD
 //     // 2. Search for ALL similar questions - improved filtering
 //     // Include both self-verified and request-verified (with sum_verified_answer) questions
 //     // Lower threshold to 0.50 for better coverage
@@ -5268,6 +6746,46 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       ORDER BY similarity_score DESC`,
 //       [question_embedding, qId]
 //     );
+=======
+    // 2. Search for ALL similar questions - improved filtering
+    // Include both self-verified and request-verified (with sum_verified_answer) questions
+    // Threshold set to 0.6 for better quality
+    const relatedResult = await pool.query(
+      `SELECT 
+        va.id,
+        va.question,
+        va.created_by,
+        va.views,
+        va.tags,
+        va.verification_type,
+        va.created_at,
+        GREATEST(
+          COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+          CASE 
+            WHEN va.sum_verified_answer_embedding IS NOT NULL 
+            THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+            ELSE 0
+          END
+        ) as similarity_score,
+        COALESCE(COUNT(av.id), 0) as verification_count
+      FROM verified_answers va
+      LEFT JOIN answer_verifications av ON va.id = av.verified_answer_id
+      WHERE va.id != $2
+        AND (va.question_embedding IS NOT NULL OR va.sum_verified_answer_embedding IS NOT NULL)
+        AND (
+          (va.verification_type = 'self')
+          OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+        )
+        AND LENGTH(va.question) >= 10
+        AND (
+          (va.question_embedding IS NOT NULL AND (1 - (va.question_embedding <=> $1::vector)) > 0.6)
+          OR (va.sum_verified_answer_embedding IS NOT NULL AND (1 - (va.sum_verified_answer_embedding <=> $1::vector)) > 0.6)
+        )
+      GROUP BY va.id, va.question, va.created_by, va.views, va.tags, va.verification_type, va.created_at, va.question_embedding, va.sum_verified_answer_embedding
+      ORDER BY similarity_score DESC`,
+      [question_embedding, qId]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     const relatedQuestions = relatedResult.rows.map(row => ({
 //       id: row.id,
@@ -5297,6 +6815,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // // Separate from main chat flow - used in Q&A Detail page
 // // =====================================================
 
+<<<<<<< HEAD
 // /**
 //  * Background function to generate AI suggestion without blocking
 //  * Called after a new question is created to pre-generate the suggestion
@@ -5309,6 +6828,814 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     const fullQuestionText = answerText 
 //       ? `${questionText}\n\n${answerText}` 
 //       : questionText;
+=======
+/**
+ * CORE FUNCTION: Generate AI suggestion from knowledge base
+ * Used by both:
+ * 1. AI Suggests Mode (chat interface) - with streaming
+ * 2. Q&A Detail page (suggestion tab) - save to database
+ * 
+ * @param questionText - The question text
+ * @param options - { streaming, socket, questionId }
+ * @returns { answer, sources, confidence, totalSources }
+ */
+interface GenerateAISuggestionOptions {
+  streaming?: boolean;
+  socket?: any;
+  questionId?: number | null;
+}
+
+async function generateAISuggestionCore(
+  questionText: string, 
+  options: GenerateAISuggestionOptions = {}
+): Promise<{ answer: string; sources: any[]; confidence: number; totalSources: number }> {
+  const { streaming = false, socket = null, questionId = null } = options;
+  
+  try {
+    console.log(`🤖 Core: Generating AI suggestion (streaming=${streaming})...`);
+    
+    let question = questionText;
+    let questionBody = '';
+    
+    // Get question details if questionId provided
+    if (questionId) {
+      const questionResult = await pool.query(
+        'SELECT question, answer FROM verified_answers WHERE id = $1',
+        [questionId]
+      );
+      if (questionResult.rows.length > 0) {
+        question = questionResult.rows[0].question;
+        questionBody = questionResult.rows[0].answer || '';
+      }
+    }
+    
+    // Combine title + body for better embedding
+    const fullQuestionText = questionBody 
+      ? `${question}\n\n${questionBody}` 
+      : question;
+    
+    // 1. Generate embedding
+    const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullQuestionText, dimensions: 2048, is_query: true })
+    });
+
+    if (!embeddingResponse.ok) {
+      throw new Error('Failed to generate embedding');
+    }
+
+    const embeddingData = await embeddingResponse.json() as { embedding: number[] };
+    const questionEmbedding = embeddingData.embedding;
+
+    // 2. Search verified answers from knowledge base
+    let context = '';
+    const sourcesUsed: any[] = [];
+    let totalSources = 0;
+    
+    // Check if current question is self-verified (if questionId provided)
+    let isCurrentSelfVerified = false;
+    let currentAnswer = '';
+    let currentCreatedBy = 'Unknown';
+    
+    if (questionId) {
+      const currentQuestionData = await pool.query(
+        `SELECT id, question, answer, verification_type, created_by
+         FROM verified_answers 
+         WHERE id = $1`,
+        [questionId]
+      );
+      
+      if (currentQuestionData.rows.length > 0) {
+        isCurrentSelfVerified = currentQuestionData.rows[0].verification_type === 'self';
+        currentAnswer = currentQuestionData.rows[0].answer || '';
+        currentCreatedBy = currentQuestionData.rows[0].created_by || 'Unknown';
+        
+        // Use self-verified answer if available
+        if (isCurrentSelfVerified && currentAnswer) {
+          context = `คำตอบที่ยืนยันแล้วสำหรับคำถามนี้ (โดย ${currentCreatedBy}):\n${currentAnswer}\n\n`;
+          sourcesUsed.push({
+            type: 'self_verified',
+            questionId: questionId,
+            verifiedBy: currentCreatedBy
+          });
+          totalSources++;
+        }
+      }
+    }
+    
+    // Search for similar verified questions
+    if (!isCurrentSelfVerified || totalSources === 0) {
+      console.log(`🔍 Using HYBRID SEARCH for similar questions...`);
+      
+      // 🆕 Cross-language search: If question is English, also search with Thai translation
+      let searchQueries = [question]; // Start with original question
+      
+      // Detect if question is English
+      const thaiCharsInQuestion = (question.match(/[\u0E00-\u0E7F]/g) || []).length;
+      const englishCharsInQuestion = (question.match(/[a-zA-Z]/g) || []).length;
+      const isQuestionEnglish = englishCharsInQuestion > 0 && 
+        (thaiCharsInQuestion / Math.max(1, thaiCharsInQuestion + englishCharsInQuestion)) < 0.1;
+      
+      if (isQuestionEnglish) {
+        console.log(`🌐 Question is in English - will translate to Thai for better KB matching`);
+        
+        // Try to translate question to Thai using LLM
+        try {
+          const translatePrompt = `Translate this English question to Thai. Return ONLY the Thai translation, nothing else:\n\n${question}`;
+          
+          // Use Ollama for quick translation
+          const translateResponse = await fetch(`${process.env.OLLAMA_URL || 'http://localhost:11434'}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: translatePrompt,
+              stream: false,
+              options: { temperature: 0.1, num_predict: 200 }
+            })
+          });
+          
+          if (translateResponse.ok) {
+            const translateData = await translateResponse.json() as { response?: string };
+            const thaiQuestion = translateData.response?.trim();
+            if (thaiQuestion && thaiQuestion.length > 5) {
+              console.log(`🔄 Translated question: "${thaiQuestion.substring(0, 100)}..."`);
+              searchQueries.push(thaiQuestion); // Add Thai translation for search
+            }
+          }
+        } catch (translateError) {
+          console.warn(`⚠️ Translation failed, using original English query only`);
+        }
+      }
+      
+      // Search with all queries and combine results
+      let allHybridResults: any[] = [];
+      const seenIds = new Set<number>();
+      
+      for (const searchQuery of searchQueries) {
+        console.log(`   Searching with: "${searchQuery.substring(0, 80)}..."`);
+        const results = await searchVerifiedAnswersHybrid(searchQuery, 0.40, 5);
+        
+        // Add unique results
+        for (const r of results) {
+          if (!seenIds.has(r.id)) {
+            seenIds.add(r.id);
+            allHybridResults.push(r);
+          }
+        }
+      }
+      
+      // Sort combined results by confidence score
+      allHybridResults.sort((a, b) => b.confidenceScore - a.confidenceScore);
+      const hybridResults = allHybridResults.slice(0, 5); // Limit to top 5 (same as Q&A Detail)
+      
+      // 🔍 DEBUG: Log all results before filtering
+      console.log(`🔍 DEBUG: Found ${allHybridResults.length} total results before filtering:`);
+      for (const r of hybridResults.slice(0, 5)) {
+        console.log(`   - Q${r.id}: ${(r.confidenceScore * 100).toFixed(1)}% "${r.question?.substring(0, 50)}..."`);
+      }
+      
+      // Filter out current question if provided
+      const similarQuestions = questionId 
+        ? hybridResults.filter((r: any) => r.id !== questionId)
+        : hybridResults;
+
+      if (similarQuestions.length > 0) {
+        console.log(`📚 Core: Found ${similarQuestions.length} similar questions (hybrid search)`);
+        context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
+        
+        for (const q of similarQuestions) {
+          // Use confidence score from hybrid search (already combines vector + keyword + freshness)
+          const confidenceScore = q.confidenceScore || 0;
+          
+          // 🔧 Use same threshold as Q&A Detail (50%)
+          if (confidenceScore < 0.50) {
+            console.log(`⏭️  Skip Q${q.id}: confidence too low (${(confidenceScore * 100).toFixed(1)}%) - need >= 50%`);
+            continue;
+          }
+          
+          // Log detailed scoring breakdown
+          console.log(`✅ Q${q.id}: confidence=${(confidenceScore * 100).toFixed(1)}% [vec:${(q.vectorScore * 100).toFixed(0)}% kw:${(q.keywordScore * 100).toFixed(0)}% fresh:${(q.freshnessScore * 100).toFixed(0)}%] "${q.question.substring(0, 60)}..."`);
+          
+          context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
+          
+          // Check if this is a request-type question with verification comments
+          if (q.verification_type === 'request') {
+            // Get verification comments for this question
+            const verificationComments = await pool.query(
+              `SELECT commenter_name, comment, requested_departments
+               FROM answer_verifications 
+               WHERE verified_answer_id = $1 
+               AND verification_type = 'verification'
+               AND comment IS NOT NULL AND comment != ''
+               ORDER BY created_at`,
+              [q.id]
+            );
+            
+            if (verificationComments.rows.length > 0) {
+              context += `    ประเภท: ยืนยันจากผู้เชี่ยวชาญ ${verificationComments.rows.length} คน\n`;
+              verificationComments.rows.forEach((v) => {
+                const dept = v.requested_departments?.[0] || 'General';
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 1500)}${v.comment.length > 1500 ? '...' : ''}\n`;
+              });
+              
+              sourcesUsed.push({
+                type: 'verification_comments',
+                questionId: q.id,
+                question: q.question,
+                confidence: confidenceScore,  // Use hybrid confidence score
+                vectorScore: q.vectorScore,
+                keywordScore: q.keywordScore,
+                freshnessScore: q.freshnessScore,
+                verifierCount: verificationComments.rows.length
+              });
+              totalSources++;
+              continue;
+            }
+          }
+          
+          // Original answer or synthesized answer
+          context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 3000)}${q.answer.length > 3000 ? '...' : ''}\n`;
+          
+          sourcesUsed.push({
+            type: 'similar_verified',
+            questionId: q.id,
+            question: q.question,
+            verificationType: q.verification_type,
+            verifiedBy: q.created_by,
+            confidence: confidenceScore,  // Use hybrid confidence score
+            vectorScore: q.vectorScore,
+            keywordScore: q.keywordScore,
+            freshnessScore: q.freshnessScore
+          });
+          totalSources++;
+        }
+      } else {
+        console.log('📚 No similar verified questions found');
+      }
+    }
+    
+    // 🆕 NEW: Also get verification comments for the CURRENT question (if questionId provided)
+    if (questionId && totalSources === 0) {
+      console.log(`📚 Core: Checking verification comments for current question ${questionId}...`);
+      
+      const currentVerifications = await pool.query(
+        `SELECT commenter_name, comment, requested_departments, created_at
+         FROM answer_verifications 
+         WHERE verified_answer_id = $1 
+         AND verification_type = 'verification'
+         AND comment IS NOT NULL AND comment != ''
+         ORDER BY created_at`,
+        [questionId]
+      );
+      
+      if (currentVerifications.rows.length > 0) {
+        console.log(`✅ Core: Found ${currentVerifications.rows.length} verification comments for current question`);
+        context += `\nคำตอบจากผู้เชี่ยวชาญที่ verify คำถามนี้:\n`;
+        
+        currentVerifications.rows.forEach((v, idx) => {
+          const dept = v.requested_departments?.[0] || 'General';
+          context += `\n[${idx + 1}] ${v.commenter_name} (${dept}):\n${v.comment}\n`;
+        });
+        
+        sourcesUsed.push({
+          type: 'current_question_verifications',
+          questionId: questionId,
+          verifierCount: currentVerifications.rows.length,
+          verifiers: currentVerifications.rows.map(v => v.commenter_name)
+        });
+        
+        totalSources += 1; // 🔄 FIXED: Count as 1 source group, not by number of verifications
+      }
+    }
+
+    console.log(`📚 Core: Total sources = ${totalSources}`);
+
+    // 3. Generate AI answer using LLM
+    // 🆕 IMPROVED: Better language detection - prioritize question language
+    const detectLanguage = (text: string): 'thai' | 'english' => {
+      const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+      // ถ้ามีตัวอักษรไทยแม้แต่ตัวเดียว ถือว่าเป็นไทย (ไทยผสม English = ไทย)
+      if (thaiChars > 0) return 'thai';
+      return 'english';
+    };
+    
+    const questionLanguage = detectLanguage(question);
+    const isThaiQuestion = questionLanguage === 'thai';
+    console.log(`🌐 Detected question language: ${questionLanguage} (Thai chars ratio: ${((question.match(/[\u0E00-\u0E7F]/g) || []).length / Math.max(1, (question.match(/[\u0E00-\u0E7Fa-zA-Z]/g) || []).length) * 100).toFixed(1)}%)`);
+    
+    // 🔧 FIXED: ตรวจสอบว่ามี verified sources จริงหรือไม่ (รวมทุก type ที่เพิ่มไว้)
+    const verifiedSources = sourcesUsed.filter(s => 
+      s.type === 'self_verified' || 
+      s.type === 'similar_verified' ||           // 🆕 เพิ่ม
+      s.type === 'verification_comments' ||       // 🆕 เพิ่ม
+      s.type === 'current_question_verifications'
+    );
+    const hasVerifiedData = verifiedSources.length > 0 && context.trim().length > 0;
+    const hasKnowledgeData = hasVerifiedData; // ใช้เฉพาะ verified sources
+    
+    console.log(`📊 Core: verifiedSources=${verifiedSources.length}, hasVerifiedData=${hasVerifiedData}, sourcesUsed types: ${sourcesUsed.map(s => s.type).join(', ')}`);
+    console.log(`📊 Core: isCurrentSelfVerified=${isCurrentSelfVerified}`);
+    
+    let systemPrompt = '';
+    if (hasKnowledgeData) {
+      // 🆕 ถ้าเป็น self-verified: AI ทำหน้าที่เป็น Editor ไม่ใช่ Author
+      // - เรียบเรียงภาษาใหม่ให้เข้าใจง่ายขึ้น
+      // - จัดโครงสร้างข้อมูลให้เป็นระเบียบ
+      // - คงความหมายเดิม แต่ปรับรูปแบบการนำเสนอ
+      // - ไม่เปลี่ยนสาระ ไม่เพิ่มข้อมูลใหม่
+      if (isCurrentSelfVerified && currentAnswer) {
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for self-verified question (streaming=${streaming})`);
+        
+        if (streaming) {
+          // ========== AI Agent Interface (Chat) - ตอบแบบธรรมชาติ ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Assistant ที่ช่วยอธิบายคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้เข้าใจง่าย
+
+ตอบเป็นภาษาไทยเท่านั้น
+
+สิ่งสำคัญ:
+- ตอบแบบธรรมชาติเหมือนคนอธิบายให้เพื่อนฟัง ไม่ต้องจัดเป็นหัวข้อ ไม่ต้องใช้โครงสร้างแข็งๆ
+- อธิบายตรงตามคำถามที่ถาม ไม่ต้องพูดทุกเรื่อง เน้นเฉพาะสิ่งที่ถูกถาม
+- เขียนเป็นย่อหน้าที่อ่านลื่น ใช้ภาษาง่ายๆ
+- ถ้าจำเป็นต้องแจกแจง ใช้ bullet points สั้นๆ ได้ แต่ไม่ต้องจัดเป็นโครงสร้างทั้งหมด
+- คงความหมายเดิม 100% ห้ามเพิ่มข้อมูลใหม่
+- ห้ามถามกลับ ห้ามแนะนำหัวข้อต่อ ตอบให้จบในตัวเอง
+
+========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
+${currentAnswer}
+===============================================================`
+            : `You are an AI Assistant that explains user-verified answers in a clear and easy-to-understand way.
+
+You MUST respond in English only.
+
+Important:
+- Answer naturally, like explaining to a friend. Do NOT use rigid structure with headers and sections.
+- Focus on what was actually asked. Don't cover everything, just answer the specific question.
+- Write in flowing paragraphs that are easy to read.
+- Use bullet points briefly only when listing is truly needed, but don't structure the whole answer that way.
+- Keep 100% of the original meaning. Do NOT add new information.
+- Do NOT ask follow-up questions. Do NOT suggest related topics. Answer completely.
+
+========== User-Verified Answer (by ${currentCreatedBy}) ==========
+${currentAnswer}
+===================================================================`;
+        } else {
+          // ========== Q&A Detail Page - ตอบแบบจัดโครงสร้าง (เดิม) ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Editor ที่ทำหน้าที่เรียบเรียงคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้อ่านง่ายขึ้น
+
+🌐 **ภาษา: ตอบเป็นภาษาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
+
+🎯 **บทบาทของคุณ: Editor (ไม่ใช่ Author)**
+คำตอบนี้ได้รับการยืนยันความถูกต้องจากผู้ใช้แล้ว คุณไม่ได้เป็นผู้สร้างเนื้อหาใหม่ แต่เป็นผู้ช่วยเรียบเรียงให้ดีขึ้น
+
+📝 **สิ่งที่คุณควรทำ:**
+1. **เรียบเรียงภาษาใหม่** - ให้เข้าใจง่ายขึ้น ชัดเจนขึ้น
+2. **จัดโครงสร้าง** - แยกประเด็นออกเป็นข้อ ๆ หรือใช้หัวข้อย่อย
+3. **ใช้ Markdown** - ใช้ **ตัวหนา**, bullet points, ลำดับเลข ให้อ่านง่าย
+4. **คงความหมายเดิม 100%** - ปรับเฉพาะ "รูปแบบการนำเสนอ" ไม่ใช่ "เนื้อหา"
+
+⚠️ **สิ่งที่ห้ามทำ:**
+- ❌ ห้ามเพิ่มข้อมูลใหม่ที่ไม่มีในคำตอบเดิม
+- ❌ ห้ามเปลี่ยนแปลงสาระสำคัญหรือความหมาย
+- ❌ ห้ามลบข้อมูลสำคัญออก
+- ❌ ห้ามตีความเพิ่มเติมจากความรู้ทั่วไป
+
+🚫 **ห้ามถามกลับหรือแนะนำต่อ:**
+- ❌ ห้ามถามกลับผู้ใช้ เช่น "ต้องการให้อธิบายเพิ่มไหม?"
+- ❌ ห้ามแนะนำหัวข้อหรือคำถามต่อ
+- ตอบให้จบในตัวเอง ไม่ต้องเชื้อเชิญให้ถามต่อ
+
+========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
+${currentAnswer}
+===============================================================`
+            : `You are an AI Editor who rephrases and restructures user-verified answers for better readability.
+
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST RESPOND IN ENGLISH ONLY** because the question is in English.
+Even if the verified answer below is in Thai, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
+🎯 **Your Role: Editor (NOT Author)**
+This answer has been verified by the user. You are NOT creating new content, but helping to improve the presentation.
+
+📝 **What you SHOULD do:**
+1. **Rephrase for clarity** - Make it easier to understand (translate to English if needed)
+2. **Structure the content** - Break into bullet points or sections
+3. **Use Markdown** - Use **bold**, bullet points, numbered lists for readability
+4. **Keep 100% original meaning** - Change only "presentation format", not "substance"
+
+⚠️ **What you must NOT do:**
+- ❌ Do NOT add new information not in the original answer
+- ❌ Do NOT change the core meaning or substance
+- ❌ Do NOT remove important information
+- ❌ Do NOT interpret or add from general knowledge
+
+🚫 **DO NOT ask follow-up or suggest topics:**
+- ❌ Do NOT ask "Would you like me to elaborate?"
+- ❌ Do NOT suggest related topics or questions
+- Answer completely and end definitively. No follow-up suggestions.
+
+========== User-Verified Answer (by ${currentCreatedBy}) ==========
+${currentAnswer}
+===================================================================`;
+        }
+      } else {
+        // ไม่ใช่ self-verified: AI สังเคราะห์จากหลายแหล่ง
+        console.log(`📝 Using ${isThaiQuestion ? 'THAI' : 'ENGLISH'} prompt for non-self-verified question (streaming=${streaming})`);
+        
+        if (streaming) {
+          // ========== AI Agent Interface (Chat) - ตอบแบบธรรมชาติ ==========
+          systemPrompt = isThaiQuestion
+            ? `คุณคือ AI Assistant ที่ตอบคำถามโดยอ้างอิงจากฐานความรู้ที่ยืนยันแล้ว
+
+ตอบเป็นภาษาไทยเท่านั้น
+
+สิ่งสำคัญ:
+- ตอบแบบธรรมชาติเหมือนคนอธิบายให้เพื่อนฟัง ไม่ต้องจัดเป็นหัวข้อ ไม่ต้องใช้โครงสร้างแข็งๆ
+- ตอบตรงคำถามที่ถูกถาม อธิบายให้เข้าใจง่ายด้วยภาษาพูดธรรมดา
+- เขียนเป็นย่อหน้าที่อ่านลื่น ไม่ต้องแบ่งเป็นหมวดหมู่
+- ถ้ามีหลายประเด็นจริงๆ ใช้ bullet points สั้นๆ ได้บ้าง แต่ไม่ต้องจัดเป็นโครงสร้างทั้งหมด
+- ใช้ข้อมูลจากฐานความรู้เป็นหลัก ถ้าข้อมูลไม่ตรงกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลในฐานความรู้ที่ตรงกับคำถามนี้"
+- ห้ามถามกลับ ห้ามแนะนำหัวข้อต่อ ตอบให้จบในตัวเอง
+
+========== ข้อมูลอ้างอิงจากฐานความรู้ ==========
+${context}
+================================================`
+            : `You are an AI Assistant that answers questions based on verified knowledge base data.
+
+You MUST answer in English only. If the reference data is in Thai, translate it.
+
+Important:
+- Answer naturally, like explaining to a friend. Do NOT use rigid structure with headers and sections.
+- Answer the specific question that was asked. Explain in simple, easy-to-understand language.
+- Write in flowing paragraphs. Don't break everything into categories or sections.
+- If there are truly multiple points to list, you can use brief bullet points, but don't structure the whole answer that way.
+- Use knowledge base data as primary source. If data doesn't match, say "No relevant data found in knowledge base for this question."
+- Do NOT ask follow-up questions. Do NOT suggest related topics. Answer completely.
+
+========== Reference Data from Knowledge Base ==========
+${context}
+========================================================`;
+        } else {
+          // ========== Q&A Detail Page - ตอบแบบจัดโครงสร้าง (เดิม) ==========
+          systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Assistant ที่ตอบคำถามโดยอ้างอิงจากฐานความรู้ที่ยืนยันแล้ว
+
+🌐 **ภาษา: ตอบเป็นภาষาไทยเท่านั้น** (เพราะคำถามเป็นภาษาไทย)
+
+📝 **วิธีการตอบ (Markdown Format):**
+1. **หัวข้อหลัก**: ใช้ **หัวข้อ:** (ตัวหนา + โคลอน)
+2. **จัดโครงสร้างชัดเจน**: 
+   * ใช้ bullet points (•) สำหรับรายการ
+   * ใช้ตัวเลข 1. 2. 3. สำหรับขั้นตอน
+   * ใช้ **ตัวหนา** สำหรับข้อมูลสำคัญ
+3. **ความยาว**: ตอบ 150-300 คำ ครบถ้วนแต่กระชับ
+
+✨ **รูปแบบการตอบ:**
+- เริ่มต้นด้วยการสรุปสั้นๆ
+- แบ่งเป็นหัวข้อย่อยด้วย **หัวข้อ:**
+- ใช้ bullet points หรือตัวเลขจัดกลุ่มข้อมูล
+- ลงท้ายด้วยข้อมูลสำคัญ (ถ้ามี)
+
+⚠️ **ข้อจำกัด:**
+- ใช้ข้อมูลจากฐานความรู้เป็นหลัก
+- ถ้าข้อมูลไม่ตรงกับคำถาม ให้ตอบว่า "ไม่มีข้อมูลในฐานความรู้ที่ตรงกับคำถามนี้"
+
+🚫 **ห้ามทำ:**
+- ❌ ห้ามถามกลับผู้ใช้ เช่น "ต้องการให้อธิบายเพิ่มไหม?"
+- ❌ ห้ามแนะนำหัวข้อหรือคำถามต่อ เช่น "หากสนใจเรื่อง..."
+- ❌ ห้ามใช้ประโยคลงท้ายแบบเปิด เช่น "หากมีคำถามเพิ่มเติม..."
+- ❌ ห้ามใช้ "Title:", "Introduction:", "Summary:", "Conclusion:" ในการเริ่มต้น
+- ตอบให้จบในตัวเอง ไม่ต้องเชื้อเชิญให้ถามต่อ
+
+========== ข้อมูลอ้างอิงจากฐานความรู้ ==========
+${context}
+================================================`
+          : `You are an AI Assistant that answers questions based on verified knowledge base data.
+
+🌐 **CRITICAL - LANGUAGE INSTRUCTION:**
+**YOU MUST ANSWER IN ENGLISH ONLY** because the question is in English.
+Even if the reference data below is in Thai or another language, you MUST translate and respond in English.
+Do NOT mix languages. Your entire response must be in English.
+
+📝 **How to Answer (Markdown Format):**
+1. **Main Headings**: Use **Title:** (bold with colon)
+2. **Clear Structure**: 
+   * Use bullet points (•) for lists
+   * Use numbers 1. 2. 3. for steps
+   * Use **bold** for important information
+3. **Length**: Answer in 150-300 words, comprehensive but concise
+
+✨ **Answer Format:**
+- Start with a brief summary
+- Break into sub-sections with **Heading:**
+- Use bullet points or numbers to organize information
+- End with key takeaways (if applicable)
+
+⚠️ **Constraints:**
+- Use knowledge base data as the primary source (translate Thai content to English if needed)
+- If data doesn't match the question, respond: "No relevant data found in knowledge base for this question"
+
+🚫 **DO NOT:**
+- ❌ Do NOT ask follow-up questions like "Would you like me to elaborate?"
+- ❌ Do NOT suggest related topics like "You might also be interested in..."
+- ❌ Do NOT end with open invitations like "Feel free to ask if..."
+- ❌ Do NOT offer to explain more or provide additional information
+- ❌ Do NOT use "Title:", "Introduction:", "Summary:", "Conclusion:" prefixes
+- Answer completely and end definitively. No follow-up suggestions.
+
+========== Reference Data from Knowledge Base ==========
+${context}
+========================================================`;
+        }
+      }
+    } else {
+      // 🆕 ไม่มีข้อมูลที่ยืนยันแล้ว - ไม่ต้องเรียก LLM แค่ return ข้อความบอกว่าไม่มีข้อมูล
+      console.log('❌ Core: No verified data found - returning no data message');
+      
+      const noDataAnswer = isThaiQuestion 
+        ? '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
+        : '⚠️ No data available in the knowledge base for this question. Please wait for expert verification.';
+      
+      return {
+        answer: noDataAnswer,
+        sources: [],
+        confidence: 0,
+        totalSources: 0
+      };
+    }
+    
+    // 🆕 User prompt แยกตาม mode: Editor (self-verified) vs Author (สังเคราะห์จากหลายแหล่ง)
+    // และแยกตาม streaming (AI Agent Interface) vs non-streaming (Q&A Detail)
+    let userPrompt = '';
+    if (isCurrentSelfVerified && currentAnswer) {
+      if (streaming) {
+        // Editor mode + AI Agent Interface: เรียบเรียงแบบธรรมชาติ
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาอธิบายคำตอบด้านบนใหม่ด้วยภาษาที่เข้าใจง่าย ตอบตรงคำถาม เน้นอธิบายแบบธรรมชาติ ไม่ต้องจัดเป็นโครงสร้าง`
+          : `Question: ${question}\n\nPlease explain the answer above in simple, natural language. Answer the question directly without rigid formatting.`;
+      } else {
+        // Editor mode + Q&A Detail: เรียบเรียงแบบจัดโครงสร้าง (เดิม)
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}
+
+กรุณาเรียบเรียงคำตอบด้านบนใหม่ โดย:
+- จัดโครงสร้างให้อ่านง่าย (ใช้ bullet points, ลำดับเลข, หัวข้อย่อย)
+- ใช้ภาษาที่ชัดเจน กระชับ
+- คงความหมายเดิมทั้งหมด ห้ามเพิ่มข้อมูลใหม่
+- แสดงข้อมูลสำคัญให้เห็นชัด (ใช้ **ตัวหนา**)`
+          : `Question: ${question}
+
+Please rephrase and restructure the answer above by:
+- Organize for better readability (use bullet points, numbered lists, headings)
+- Use clear and concise language
+- Keep 100% of the original meaning - do NOT add new information
+- Highlight important information (use **bold**)`;
+      }
+    } else {
+      if (streaming) {
+        // Author mode + AI Agent Interface: ตอบแบบธรรมชาติ
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาตอบคำถามนี้โดยอ้างอิงจากข้อมูลด้านบน อธิบายด้วยภาษาง่ายๆ แบบธรรมชาติ ตอบตรงคำถาม ไม่ต้องจัดเป็นโครงสร้าง`
+          : `Question: ${question}\n\nPlease answer this question based on the data above. Explain naturally in simple language, directly addressing what was asked.`;
+      } else {
+        // Author mode + Q&A Detail: ตอบแบบจัดโครงสร้าง (เดิม)
+        userPrompt = isThaiQuestion 
+          ? `คำถาม: ${question}\n\nกรุณาสร้างคำตอบใหม่อย่างละเอียดและครบถ้วน โดยอ้างอิงจากข้อมูลในฐานความรู้ด้านบน อธิบายให้เข้าใจง่าย ใช้หัวข้อย่อยและ bullet points:`
+          : `Question: ${question}\n\nPlease create a comprehensive and detailed NEW answer based on the knowledge base data above. Explain clearly with headings and bullet points:`;
+      }
+    }
+    
+    let aiGeneratedAnswer = '';
+    
+    // 4. Call LLM with streaming support
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+    
+    if (streaming && socket) {
+      // Streaming mode for AI Suggests - Use IFX GPT first, fallback to Ollama
+      try {
+        // Use IFXGPT model from environment or default to gpt-5.2 (IFXGPT's best model)
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+        console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) for streaming...`);
+        
+        // 🆕 Use IFX GPT instead of Google AI
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const stream = await ifxClient.chat.completions.create({
+          model: ifxModel,
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_completion_tokens: 20000,
+          stream: true
+        });
+        
+        let chunkCount = 0;
+        for await (const chunk of stream) {
+          chunkCount++;
+          const chunkText = chunk.choices[0]?.delta?.content || '';
+          if (chunkCount <= 3) {
+            console.log(`📦 Chunk ${chunkCount}:`, JSON.stringify(chunk.choices[0]?.delta));
+          }
+          if (chunkText) {
+            aiGeneratedAnswer += chunkText;
+            socket.emit('StreamText', aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'));
+          }
+        }
+        
+        console.log(`📊 Core: Received ${chunkCount} chunks, total chars: ${aiGeneratedAnswer.length}`);
+        
+        // 🆕 ถ้า streaming ได้ 0 chars ให้ fallback ไป non-streaming mode
+        if (aiGeneratedAnswer.length === 0) {
+          console.log('⚠️ Core: Streaming returned 0 chars, trying non-streaming fallback...');
+          
+          const nonStreamResponse = await ifxClient.chat.completions.create({
+            model: ifxModel,
+            messages: ifxMessages,
+            temperature: 0.7,
+            max_completion_tokens: 20000,
+            stream: false
+          });
+          
+          aiGeneratedAnswer = (nonStreamResponse.choices[0]?.message?.content || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+          console.log(`✅ Core: Non-streaming fallback got ${aiGeneratedAnswer.length} chars`);
+          
+          // Emit the full answer to client
+          if (aiGeneratedAnswer && socket) {
+            socket.emit('StreamText', aiGeneratedAnswer);
+          }
+        }
+        
+        aiGeneratedAnswer = aiGeneratedAnswer.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        console.log('✅ Core: IFX GPT completed');
+        
+      } catch (ifxError) {
+        console.error('⚠️ Core: IFX GPT streaming failed, trying Ollama:', ifxError);
+        
+        // 🔄 FALLBACK to Ollama gemma3:1b
+        try {
+          const OLLAMA_HOST = process.env.OLLAMA_HOST || process.env.API_OLLAMA?.replace('/api/generate', '') || 'http://localhost:11434';
+          const ollamaResponse = await fetch(`${OLLAMA_HOST}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: fullPrompt,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 4000 }
+            })
+          });
+          
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response?: string };
+            aiGeneratedAnswer = (ollamaData.response || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            socket?.emit('StreamText', aiGeneratedAnswer);
+            console.log('✅ Core: Ollama gemma3:1b fallback completed');
+          } else {
+            throw new Error(`Ollama API error: ${ollamaResponse.status}`);
+          }
+        } catch (ollamaError) {
+          console.error('❌ Core: All AI models failed:', ollamaError);
+          throw new Error('All AI models (IFX GPT, Ollama) are unavailable');
+        }
+      }
+    } else {
+      // Non-streaming mode for Q&A Detail - Use IFX GPT first
+      try {
+        // Use IFXGPT model from environment or default to gpt-5.2
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+        console.log(`🤖 Core: Trying IFX GPT (${ifxModel}) non-streaming...`);
+        
+        const ifxMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: userPrompt }
+        ];
+        
+        const response = await ifxClient.chat.completions.create({
+          model: ifxModel,
+          messages: ifxMessages,
+          temperature: 0.7,
+          max_completion_tokens: 20000,
+          stream: false
+        });
+        
+        aiGeneratedAnswer = (response.choices[0]?.message?.content || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        console.log('✅ Core: IFX GPT non-streaming completed');
+        
+      } catch (ifxError) {
+        console.error('⚠️ Core: IFX GPT failed, falling back to Ollama gemma3:1b:', ifxError);
+        
+        // 🔄 FALLBACK to Ollama gemma3:1b
+        try {
+          const OLLAMA_HOST = process.env.OLLAMA_HOST || process.env.API_OLLAMA?.replace('/api/generate', '') || 'http://localhost:11434';
+          const ollamaResponse = await fetch(`${OLLAMA_HOST}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: fullPrompt,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 4000 }
+            })
+          });
+          
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response?: string };
+            aiGeneratedAnswer = (ollamaData.response || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            console.log('✅ Core: Ollama gemma3:1b fallback completed');
+          } else {
+            console.error('❌ Core: Ollama API error:', ollamaResponse.status);
+            throw new Error(`Ollama API error: ${ollamaResponse.status}`);
+          }
+        } catch (ollamaError) {
+          console.error('❌ Core: All AI models failed:', ollamaError);
+          throw new Error('All AI models (IFX GPT, Ollama) are unavailable');
+        }
+      }
+    }
+    
+    // 🆕 CHECK: If AI answer says "no data", force totalSources = 0 and return standard message
+    const noDataKeywords = [
+      'ไม่มีข้อมูล', 'ยังไม่มีข้อมูล', 'no data', 'no information', 'no verified',
+      'does not contain', 'ไม่พบข้อมูล', 'knowledge base does not',
+      'ไม่ได้กล่าวถึง', 'ไม่ได้มีข้อมูล', 'ไม่ตรงกับคำถาม', 'ไม่เกี่ยวข้อง',
+      'ข้อมูลที่ให้มาไม่ได้', 'no relevant', 'not found', 'doesn\'t contain'
+    ];
+    
+    const answersaysNoData = noDataKeywords.some(keyword => 
+      aiGeneratedAnswer.toLowerCase().includes(keyword.toLowerCase())
+    );
+    
+    if (answersaysNoData) {
+      console.log(`⚠️ Core: AI answer indicates no relevant data - returning standard no-data message`);
+      const noDataAnswer = '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+      
+      return {
+        answer: noDataAnswer,
+        sources: [],
+        confidence: 0,
+        totalSources: 0
+      };
+    }
+    
+    // Calculate confidence (simplified)
+    const confidence = totalSources > 0 ? Math.min(0.7 + (totalSources * 0.1), 0.95) : 0.3;
+    
+    // 🧹 Strip follow-up questions/suggestions from AI answer
+    aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
+    
+    // 🧹 Strip prompt structural markers that LLM may have echoed
+    aiGeneratedAnswer = stripPromptMarkers(aiGeneratedAnswer);
+    
+    // 🧹 Strip echoed source data (raw context appended by LLM)
+    aiGeneratedAnswer = stripEchoedSources(aiGeneratedAnswer, isThaiQuestion);
+    
+    // 🆕 Post-generation language check: ถ้าคำถามเป็นไทยแต่คำตอบเป็นอังกฤษ ให้แปลกลับ
+    if (isAnswerWrongLanguage(aiGeneratedAnswer, isThaiQuestion)) {
+      aiGeneratedAnswer = await fixAnswerLanguage(aiGeneratedAnswer, isThaiQuestion, ifxClient);
+    }
+    
+    console.log(`✅ Core: Generated answer (${aiGeneratedAnswer.length} chars, confidence=${confidence.toFixed(2)})`);
+    
+    return {
+      answer: aiGeneratedAnswer,
+      sources: sourcesUsed,
+      confidence: confidence,
+      totalSources: totalSources
+    };
+    
+  } catch (error) {
+    console.error('❌ Core: Error in generateAISuggestionCore:', error);
+    throw error;
+  }
+}
+
+/**
+ * Background function to generate AI suggestion without blocking
+ * Called after a new question is created to pre-generate the suggestion
+ */
+async function generateAISuggestionBackground(questionId: number, questionText: string, answerText: string) {
+  try {
+    console.log(`🤖 [Background] Generating AI suggestion for question ${questionId}`);
+    
+    // 🆕 Check if suggestion already exists (e.g., generated by frontend)
+    const existingSuggestion = await getAISuggestion(questionId);
+    if (existingSuggestion) {
+      console.log(`⏭️ [Background] Suggestion already exists for question ${questionId} (id=${existingSuggestion.id}), skipping background generation`);
+      return;
+    }
+    
+    // Generate embedding for the question
+    const fullQuestionText = answerText 
+      ? `${questionText}\n\n${answerText}` 
+      : questionText;
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     
 //     const embeddingResponse = await fetch(`${process.env.API_SERVER_URL}/encode_embedding`, {
 //       method: 'POST',
@@ -5323,6 +7650,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     const embeddingData = await embeddingResponse.json() as { embedding: number[] };
 //     const questionEmbedding = embeddingData.embedding;
 
+<<<<<<< HEAD
 //     // Search for similar verified questions
 //     const SIMILARITY_THRESHOLD = 0.6;
 //     const similarQuestions = await pool.query(
@@ -5346,6 +7674,31 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //        LIMIT 5`,
 //       [`[${questionEmbedding.join(',')}]`, questionId, SIMILARITY_THRESHOLD]
 //     );
+=======
+    // Search for similar verified questions
+    const SIMILARITY_THRESHOLD = 0.4;
+    const similarQuestions = await pool.query(
+      `SELECT va.id, va.question, 
+              CASE 
+                WHEN va.verification_type = 'self' THEN va.answer
+                WHEN va.sum_verified_answer IS NOT NULL THEN va.sum_verified_answer
+                ELSE NULL
+              END as verified_answer,
+              va.verification_type,
+              1 - (va.question_embedding <=> $1::vector) as similarity
+       FROM verified_answers va
+       WHERE va.id != $2
+         AND va.question_embedding IS NOT NULL
+         AND (
+           (va.verification_type = 'self')
+           OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+         )
+         AND 1 - (va.question_embedding <=> $1::vector) > $3
+       ORDER BY similarity DESC
+       LIMIT 5`,
+      [`[${questionEmbedding.join(',')}]`, questionId, SIMILARITY_THRESHOLD]
+    );
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     // Build context from similar questions
 //     let context = '';
@@ -5367,6 +7720,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       }
 //     }
 
+<<<<<<< HEAD
 //     // Generate AI suggestion using the context
 //     if (context) {
 //       const systemPrompt = `คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้ที่ผ่านการยืนยันแล้ว
@@ -5412,6 +7766,324 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     throw error;
 //   }
 // }
+=======
+    // ========== 🆕 PROCESS ATTACHMENTS ==========
+    let attachmentContext = '';
+    const attachments = await getQuestionAttachments(questionId);
+    
+    if (attachments && attachments.length > 0) {
+      console.log(`📎 [Background] Found ${attachments.length} attachments for question ${questionId}`);
+      
+      for (const att of attachments) {
+        try {
+          const attachmentData = await getQuestionAttachmentData(att.id);
+          
+          if (attachmentData && attachmentData.file_data) {
+            const mimeType = attachmentData.mime_type || '';
+            const fileName = attachmentData.file_name || 'unknown';
+            const fileSize = attachmentData.file_data.length;
+            
+            console.log(`📎 [Background] Processing: ${fileName} (${mimeType}, ${fileSize} bytes)`);
+            
+            if (mimeType.startsWith('image/')) {
+              // Try VLM for images
+              try {
+                const imageBase64 = attachmentData.file_data.toString('base64');
+                const vlmResponse = await fetch(`${process.env.API_SERVER_URL}/analyze_image`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    image_base64: imageBase64,
+                    prompt: `Describe this image in detail. What information does it contain? Answer in Thai if the image contains Thai text.`
+                  })
+                });
+                
+                if (vlmResponse.ok) {
+                  const vlmData = await vlmResponse.json() as { description: string };
+                  if (vlmData.description) {
+                    attachmentContext += `\n[ไฟล์แนบรูปภาพ: ${fileName}]\n${vlmData.description}\n`;
+                    sourcesUsed.push({ type: 'attachment_image', fileName });
+                    console.log(`✅ [Background] Image analyzed: ${fileName}`);
+                    continue;
+                  }
+                }
+              } catch (e) {
+                console.warn(`⚠️ [Background] VLM failed for ${fileName}`);
+              }
+              // Fallback
+              attachmentContext += `\n[ไฟล์แนบรูปภาพ: ${fileName}]\n(รูปภาพแนบมากับคำถาม)\n`;
+              sourcesUsed.push({ type: 'attachment_image', fileName });
+              
+            } else if (mimeType === 'application/pdf' || mimeType.includes('document') || mimeType === 'text/plain') {
+              // Try text extraction for documents
+              try {
+                const fileBase64 = attachmentData.file_data.toString('base64');
+                const extractResponse = await fetch(`${process.env.API_SERVER_URL}/extract_text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    file_base64: fileBase64,
+                    file_name: fileName,
+                    mime_type: mimeType
+                  })
+                });
+                
+                if (extractResponse.ok) {
+                  const extractData = await extractResponse.json() as { text: string };
+                  if (extractData.text && extractData.text.trim()) {
+                    const extractedText = extractData.text.substring(0, 3000);
+                    attachmentContext += `\n[ไฟล์แนบเอกสาร: ${fileName}]\n${extractedText}\n`;
+                    sourcesUsed.push({ type: 'attachment_document', fileName, textLength: extractData.text.length });
+                    console.log(`✅ [Background] Document extracted: ${fileName} (${extractedText.length} chars)`);
+                    continue;
+                  }
+                }
+              } catch (e) {
+                console.warn(`⚠️ [Background] Extract failed for ${fileName}`);
+              }
+              // Fallback
+              attachmentContext += `\n[ไฟล์แนบเอกสาร: ${fileName}]\n(เอกสารแนบมากับคำถาม)\n`;
+              sourcesUsed.push({ type: 'attachment_document', fileName });
+              
+            } else {
+              // Other file types
+              attachmentContext += `\n[ไฟล์แนบ: ${fileName}]\n(ไฟล์ประเภท ${mimeType} แนบมากับคำถาม)\n`;
+              sourcesUsed.push({ type: 'attachment_other', fileName, mimeType });
+            }
+          }
+        } catch (attError) {
+          console.warn(`⚠️ [Background] Error processing attachment ${att.id}:`, attError);
+        }
+      }
+      
+      if (attachmentContext) {
+        console.log(`📎 [Background] Attachment context: ${attachmentContext.length} chars`);
+      }
+    }
+
+    const hasKnowledgeData = context.trim().length > 0;
+    const hasAttachments = attachmentContext.trim().length > 0;
+    
+    // 🆕 Detect language of question for background generation
+    const bgThaiChars = (questionText.match(/[\u0E00-\u0E7F]/g) || []).length;
+    const bgIsThaiQuestion = bgThaiChars > 0;
+    console.log(`📊 [Background] hasKnowledgeData=${hasKnowledgeData}, hasAttachments=${hasAttachments}, isThaiQuestion=${bgIsThaiQuestion}`);
+
+    // Generate AI suggestion using the context - if we have verified data OR attachments
+    if (hasKnowledgeData || hasAttachments) {
+      console.log(`🤖 [Background] Generating AI response with KB=${hasKnowledgeData}, Attachments=${hasAttachments}`);
+      
+      let systemPrompt = bgIsThaiQuestion 
+        ? `⚠️ คุณต้องตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ แม้ข้อมูลจะมีคำศัพท์ภาษาอังกฤษปนอยู่
+
+คุณคือผู้ช่วย AI ที่ให้คำตอบโดยอ้างอิงจากฐานความรู้และไฟล์แนบที่ให้มาเท่านั้น
+
+⚠️ กฎสำคัญ:
+1. ตอบเฉพาะจากข้อมูลที่ให้ไว้เท่านั้น - ห้ามสร้างข้อมูลใหม่
+2. ลำดับความสำคัญ: ฐานความรู้ > ไฟล์แนบ
+3. ถ้ามีเฉพาะไฟล์แนบ ให้ใช้ข้อมูลจากไฟล์แนบตอบคำถาม
+4. สรุปและเรียบเรียงจากข้อมูลที่ให้
+5. ตอบเป็นภาษาไทยเท่านั้น (ใช้คำศัพท์เทคนิคภาษาอังกฤษได้ แต่อธิบายเป็นภาษาไทย)`
+        : `You are an AI assistant that answers questions based on verified knowledge base and attached files only.
+
+IMPORTANT RULES:
+1. Answer ONLY from the data provided - do NOT create new information
+2. Priority: Knowledge Base > Attachments
+3. If only attachments available, use them to answer
+4. Summarize and rephrase from the provided data
+5. You MUST answer in English only`;
+
+      if (hasKnowledgeData) {
+        systemPrompt += `\n\n========== ฐานความรู้ (ลำดับที่ 1) ==========\n${context}\n`;
+      }
+      
+      if (hasAttachments) {
+        systemPrompt += `\n\n========== ไฟล์แนบ (ลำดับที่ 2) ==========\n${attachmentContext}\n`;
+      }
+
+      const userMessage = bgIsThaiQuestion
+        ? `คำถาม: ${questionText}\n\nกรุณาตอบคำถามโดยอ้างอิงจากข้อมูลที่ให้ไว้ (ตอบเป็นภาษาไทยเท่านั้น):`
+        : `Question: ${questionText}\n\nPlease answer the question based on the provided data (answer in English only):`;
+      let suggestion = '';
+      let modelUsed = '';
+
+      // ===== 1. Try IFX GPT first =====
+      try {
+        // Use IFXGPT model from environment or default to gpt-5.2
+        const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+        console.log(`🤖 [Background] Trying IFX GPT (${ifxModel})...`);
+        
+        const ifxMessages: any[] = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ];
+
+        const ifxResponse = await ifxClient.chat.completions.create({
+          model: ifxModel,
+          messages: ifxMessages as any,
+          stream: false,
+          temperature: 0.3,
+        });
+
+        suggestion = ifxResponse.choices?.[0]?.message?.content || '';
+        modelUsed = `${ifxModel} (IFX)`;
+        console.log(`🤖 [Background] IFX GPT response length: ${suggestion.length} chars`);
+        
+      } catch (ifxError) {
+        console.warn(`⚠️ [Background] IFX GPT failed:`, ifxError);
+      }
+
+      // ===== 2. Fallback to Ollama gemma3:1b =====
+      if (!suggestion || suggestion.trim().length === 0) {
+        try {
+          console.log(`🤖 [Background] Falling back to Ollama gemma3:1b...`);
+          
+          const OLLAMA_HOST = process.env.OLLAMA_HOST || process.env.API_OLLAMA?.replace('/api/generate', '') || 'http://localhost:11434';
+          const fullPrompt = `${systemPrompt}\n\n${userMessage}`;
+          
+          const ollamaResponse = await fetch(`${OLLAMA_HOST}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: fullPrompt,
+              stream: false,
+              options: {
+                temperature: 0.3
+              }
+            })
+          });
+
+          console.log(`🤖 [Background] Ollama API response status: ${ollamaResponse.status}`);
+          
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response?: string };
+            suggestion = ollamaData.response || '';
+            modelUsed = 'gemma3:1b (Ollama)';
+            console.log(`🤖 [Background] Ollama response length: ${suggestion.length} chars`);
+          } else {
+            const errorText = await ollamaResponse.text();
+            console.error(`❌ [Background] Ollama API error: ${ollamaResponse.status} - ${errorText}`);
+          }
+        } catch (ollamaError) {
+          console.error(`❌ [Background] Ollama API call failed:`, ollamaError);
+        }
+      }
+
+      // ===== 3. Check if LLM says "no data" and save appropriately =====
+      if (suggestion && suggestion.trim().length > 0) {
+        // 🆕 ตรวจสอบว่า LLM ตอบว่า "ไม่มีข้อมูล" หรือไม่
+        const noDataPatterns = [
+          'ไม่มีข้อมูล',
+          'ไม่ได้กล่าวถึง',
+          'ไม่ได้มีข้อมูล',
+          'ไม่พบข้อมูล',
+          'ไม่ตรงกับคำถาม',
+          'ไม่เกี่ยวข้อง',
+          'no data',
+          'no relevant',
+          'not found',
+          'does not contain',
+          'doesn\'t contain',
+          'ข้อมูลที่ให้มาไม่ได้'
+        ];
+        
+        const lowerSuggestion = suggestion.toLowerCase();
+        const isNoDataResponse = noDataPatterns.some(pattern => 
+          lowerSuggestion.includes(pattern.toLowerCase())
+        );
+        
+        if (isNoDataResponse) {
+          console.log(`⚠️ [Background] LLM indicated no relevant data - saving standard no-data message`);
+          const noDataMessage = '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+          
+          await saveAISuggestion(
+            questionId,
+            noDataMessage,
+            'create_question',
+            {
+              aiModelUsed: 'no-relevant-data',
+              aiConfidence: 0,
+              sourcesUsed: []
+            }
+          );
+          console.log(`✅ [Background] No-data message saved for question ${questionId}`);
+          return;
+        }
+        
+        // LLM ตอบปกติ - strip prompt markers and echoed sources
+        suggestion = stripPromptMarkers(suggestion);
+        suggestion = stripFollowUpQuestions(suggestion);
+        suggestion = stripEchoedSources(suggestion, bgIsThaiQuestion);
+        
+        // 🆕 Check again if suggestion was created while we were generating
+        const existingCheck = await getAISuggestion(questionId);
+        if (existingCheck) {
+          console.log(`⏭️ [Background] Suggestion was created while generating (id=${existingCheck.id}), skipping save`);
+          return;
+        }
+        
+        await saveAISuggestion(
+          questionId,
+          suggestion,
+          'create_question',
+          {
+            aiModelUsed: modelUsed,
+            aiConfidence: hasKnowledgeData ? 0.7 : 0.5,
+            sourcesUsed: sourcesUsed
+          }
+        );
+        console.log(`✅ [Background] AI suggestion saved for question ${questionId} (model: ${modelUsed})`)
+        return; // Success - exit early
+      }
+      
+      // ===== 4. LLM failed but we have attachments - save a fallback message =====
+      if (hasAttachments && sourcesUsed.length > 0) {
+        console.log(`📎 [Background] All LLMs failed, saving attachment-based fallback`);
+        const attachmentNames = sourcesUsed
+          .filter(s => s.type?.startsWith('attachment'))
+          .map(s => s.fileName)
+          .join(', ');
+        
+        const fallbackMessage = `📎 มีไฟล์แนบ: ${attachmentNames}\n\n${attachmentContext.substring(0, 2000)}`;
+        
+        await saveAISuggestion(
+          questionId,
+          fallbackMessage,
+          'create_question',
+          {
+            aiModelUsed: 'attachment-fallback',
+            aiConfidence: 0.3,
+            sourcesUsed: sourcesUsed
+          }
+        );
+        console.log(`✅ [Background] Attachment fallback saved for question ${questionId}`);
+        return;
+      }
+    }
+    
+    // ไม่มีข้อมูลที่เกี่ยวข้องเลย - save ข้อความบอกว่าไม่มีข้อมูล
+    console.log(`🤖 [Background] No data sources available for question ${questionId} - saving no-data message`);
+    
+    const noDataMessage = '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ';
+    
+    await saveAISuggestion(
+      questionId,
+      noDataMessage,
+      'create_question',
+      {
+        aiModelUsed: 'no-llm-needed',
+        aiConfidence: 0,
+        sourcesUsed: []
+      }
+    );
+    console.log(`✅ [Background] No-data message saved for question ${questionId}`);
+  } catch (error) {
+    console.error(`❌ [Background] Error generating AI suggestion for question ${questionId}:`, error);
+    throw error;
+  }
+}
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // /**
 //  * Generate AI suggestion for a question
@@ -5520,6 +8192,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     if (!isCurrentSelfVerified || totalSources === 0) {
 //       console.log('🔍 Searching similar verified questions from knowledge base...');
       
+<<<<<<< HEAD
 //       // Search for:
 //       // 1. Self-verified questions (verification_type = 'self')
 //       // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
@@ -5586,6 +8259,131 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         console.log('📚 No similar verified questions found');
 //       }
 //     }
+=======
+      // Search for:
+      // 1. Self-verified questions (verification_type = 'self')
+      // 2. Request-verified questions that have synthesized answer (sum_verified_answer IS NOT NULL)
+      // 3. 🆕 Request-verified questions that have verification comments
+      // 🔄 CHANGED: Use threshold 0.4 for embedding similarity
+      const SIMILARITY_THRESHOLD = 0.4;
+      
+      const similarQuestions = await pool.query(
+        `SELECT va.id, va.question, 
+                CASE 
+                  WHEN va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL 
+                  THEN va.sum_verified_answer
+                  ELSE va.answer
+                END as answer,
+                va.verification_type, va.created_by,
+                GREATEST(
+                  COALESCE(1 - (va.question_embedding <=> $1::vector), 0),
+                  CASE 
+                    WHEN va.sum_verified_answer_embedding IS NOT NULL 
+                    THEN COALESCE(1 - (va.sum_verified_answer_embedding <=> $1::vector), 0)
+                    ELSE 0
+                  END
+                ) as similarity
+         FROM verified_answers va
+         WHERE va.id != $2
+           AND va.question_embedding IS NOT NULL
+           AND (
+             (va.verification_type = 'self')
+             OR (va.verification_type = 'request' AND va.sum_verified_answer IS NOT NULL)
+             OR (va.verification_type = 'request' AND EXISTS (
+               SELECT 1 FROM answer_verifications av 
+               WHERE av.verified_answer_id = va.id 
+               AND av.verification_type = 'verification'
+               AND av.comment IS NOT NULL AND av.comment != ''
+             ))
+           )
+           AND (1 - (va.question_embedding <=> $1::vector)) > $3
+         ORDER BY similarity DESC
+         LIMIT 5`,
+        [JSON.stringify(questionEmbedding), questionId, SIMILARITY_THRESHOLD]
+      );
+
+      if (similarQuestions.rows.length > 0) {
+        console.log(`📚 Found ${similarQuestions.rows.length} similar verified questions:`);
+        similarQuestions.rows.forEach((q, idx) => {
+          const embeddingSimilarity = parseFloat(q.similarity);
+          const stringSimilarity = calculateStringSimilarity(question, q.question);
+          const questionLang = detectTextLanguage(question);
+          const resultLang = detectTextLanguage(q.question);
+          const isCrossLingual = questionLang !== resultLang;
+          const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          console.log(`   ${idx+1}. Q${q.id} (${q.verification_type}): ${isCrossLingual ? `🌐 CROSS-LINGUAL(${questionLang}→${resultLang})` : `✅ SAME-LANG(${questionLang})`} embedding=${(embeddingSimilarity * 100).toFixed(1)}%${!isCrossLingual ? `, string=${(stringSimilarity * 100).toFixed(1)}%` : ''}, combined=${(combinedSimilarity * 100).toFixed(1)}% - "${q.question.substring(0, 60)}..."`);
+        });
+        
+        context += '\nคำตอบที่ยืนยันแล้วจากคำถามที่คล้ายกัน:\n';
+        
+        for (const q of similarQuestions.rows) {
+          const embeddingSimilarity = parseFloat(q.similarity);
+          const stringSimilarity = calculateStringSimilarity(question, q.question);
+          const questionLang = detectTextLanguage(question);
+          const resultLang = detectTextLanguage(q.question);
+          const isCrossLingual = questionLang !== resultLang;
+          const combinedSimilarity = isCrossLingual ? embeddingSimilarity : (embeddingSimilarity * 0.7) + (stringSimilarity * 0.3);
+          
+          // 🆕 FILTER: ต้องมี combined similarity >= 50% เท่านั้น
+          if (combinedSimilarity < 0.5) {
+            console.log(`⏭️  Skip Q${q.id}: combined similarity too low (${(combinedSimilarity * 100).toFixed(1)}%) - need >= 50%`);
+            continue;
+          }
+          
+          const similarity = (combinedSimilarity * 100).toFixed(1);
+          context += `\n[${totalSources + 1}] คำถาม: ${q.question}\n`;
+          context += `    ความคล้าย: ${similarity}%\n`;
+          
+          // 🆕 If request type without sum_verified_answer, get verification comments directly
+          if (q.verification_type === 'request' && (!q.answer || !q.answer.includes('สังเคราะห์จากความเห็น'))) {
+            const verificationComments = await pool.query(
+              `SELECT commenter_name, comment, requested_departments
+               FROM answer_verifications 
+               WHERE verified_answer_id = $1 
+               AND verification_type = 'verification'
+               AND comment IS NOT NULL AND comment != ''
+               ORDER BY created_at`,
+              [q.id]
+            );
+            
+            if (verificationComments.rows.length > 0) {
+              context += `    ประเภท: ยืนยันจากผู้เชี่ยวชาญ ${verificationComments.rows.length} คน\n`;
+              verificationComments.rows.forEach((v) => {
+                const dept = v.requested_departments?.[0] || 'General';
+                context += `    - ${v.commenter_name} (${dept}): ${v.comment.substring(0, 1500)}${v.comment.length > 1500 ? '...' : ''}\n`;
+              });
+              
+              sourcesUsed.push({
+                type: 'verification_comments',
+                questionId: q.id,
+                question: q.question,
+                similarity: combinedSimilarity,  // 🔄 Use combined similarity
+                verifierCount: verificationComments.rows.length
+              });
+              totalSources++;
+              continue;
+            }
+          }
+          
+          // Original answer or synthesized answer
+          context += `    ประเภท: ${q.verification_type === 'request' ? 'ยืนยันจากผู้เชี่ยวชาญหลายคน' : 'ยืนยันด้วยตนเอง'}\n`;
+          context += `    คำตอบ: ${q.answer.substring(0, 3000)}${q.answer.length > 3000 ? '...' : ''}\n`;
+          
+          sourcesUsed.push({
+            type: 'similar_verified',
+            questionId: q.id,
+            question: q.question,
+            verificationType: q.verification_type,
+            verifiedBy: q.created_by,
+            similarity: combinedSimilarity  // 🔄 Use combined similarity
+          });
+          totalSources++;
+        }
+      } else {
+        console.log('📚 No similar verified questions found');
+      }
+    }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     // 3. ดึง verification comments จากผู้เชี่ยวชาญ (สำหรับคำถามปัจจุบัน)
 //     const expertVerifications = await pool.query(
@@ -5629,6 +8427,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //           // Get full attachment data including file content
 //           const attachmentData = await getQuestionAttachmentData(att.id);
           
+<<<<<<< HEAD
 //           if (attachmentData && attachmentData.file_data) {
 //             const mimeType = attachmentData.mime_type || '';
 //             const fileName = attachmentData.file_name || 'unknown';
@@ -5639,6 +8438,21 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //               console.log(`📎 Processing image: ${fileName}`);
 //               try {
 //                 const imageBase64 = attachmentData.file_data.toString('base64');
+=======
+          if (attachmentData && attachmentData.file_data) {
+            const mimeType = attachmentData.mime_type || '';
+            const fileName = attachmentData.file_name || 'unknown';
+            const fileSize = attachmentData.file_data.length;
+            
+            console.log(`📎 Processing attachment: ${fileName} (${mimeType}, ${fileSize} bytes)`);
+            
+            // Handle different file types
+            if (mimeType.startsWith('image/')) {
+              // For images - try VLM first, fallback to just noting the image
+              console.log(`📎 Processing image: ${fileName}`);
+              try {
+                const imageBase64 = attachmentData.file_data.toString('base64');
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
                 
 //                 // Call Python API to analyze image with VLM
 //                 const vlmResponse = await fetch(`${process.env.API_SERVER_URL}/analyze_image`, {
@@ -5650,6 +8464,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //                   })
 //                 });
                 
+<<<<<<< HEAD
 //                 if (vlmResponse.ok) {
 //                   const vlmData = await vlmResponse.json() as { description: string };
 //                   if (vlmData.description) {
@@ -5671,6 +8486,44 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //               console.log(`📎 Processing document: ${fileName}`);
 //               try {
 //                 const fileBase64 = attachmentData.file_data.toString('base64');
+=======
+                if (vlmResponse.ok) {
+                  const vlmData = await vlmResponse.json() as { description: string };
+                  if (vlmData.description) {
+                    console.log(`✅ Image analyzed successfully: ${fileName}`);
+                    return {
+                      context: `\n[ไฟล์แนบรูปภาพ: ${fileName}]\n${vlmData.description}\n`,
+                      source: {
+                        type: 'attachment_image',
+                        fileName: fileName,
+                        description: vlmData.description.substring(0, 100) + '...'
+                      }
+                    };
+                  }
+                } else {
+                  console.warn(`⚠️ VLM API returned ${vlmResponse.status} for ${fileName}`);
+                }
+              } catch (imgError) {
+                console.warn(`⚠️ Could not analyze image ${fileName}:`, imgError);
+              }
+              
+              // 🆕 FALLBACK: If VLM failed, still note that image exists
+              console.log(`📎 Using fallback for image: ${fileName}`);
+              return {
+                context: `\n[ไฟล์แนบรูปภาพ: ${fileName}]\n(รูปภาพแนบมากับคำถาม - ไม่สามารถวิเคราะห์เนื้อหาได้อัตโนมัติ กรุณาดูรูปภาพประกอบ)\n`,
+                source: {
+                  type: 'attachment_image',
+                  fileName: fileName,
+                  description: 'Image attached (VLM analysis unavailable)'
+                }
+              };
+              
+            } else if (mimeType === 'application/pdf' || mimeType.includes('document') || mimeType === 'text/plain') {
+              // For PDFs and documents - extract text
+              console.log(`📎 Processing document: ${fileName}`);
+              try {
+                const fileBase64 = attachmentData.file_data.toString('base64');
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
                 
 //                 // Call Python API to extract text from document
 //                 const extractResponse = await fetch(`${process.env.API_SERVER_URL}/extract_text`, {
@@ -5683,6 +8536,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //                   })
 //                 });
                 
+<<<<<<< HEAD
 //                 if (extractResponse.ok) {
 //                   const extractData = await extractResponse.json() as { text: string };
 //                   if (extractData.text && extractData.text.trim()) {
@@ -5708,10 +8562,67 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         }
 //         return null;
 //       });
+=======
+                if (extractResponse.ok) {
+                  const extractData = await extractResponse.json() as { text: string };
+                  if (extractData.text && extractData.text.trim()) {
+                    // Limit text length to avoid token overflow
+                    const extractedText = extractData.text.substring(0, 3000);
+                    console.log(`✅ Document text extracted: ${fileName} (${extractedText.length} chars)`);
+                    return {
+                      context: `\n[ไฟล์แนบเอกสาร: ${fileName}]\n${extractedText}\n`,
+                      source: {
+                        type: 'attachment_document',
+                        fileName: fileName,
+                        textLength: extractData.text.length
+                      }
+                    };
+                  }
+                } else {
+                  console.warn(`⚠️ Extract API returned ${extractResponse.status} for ${fileName}`);
+                }
+              } catch (docError) {
+                console.warn(`⚠️ Could not extract text from ${fileName}:`, docError);
+              }
+              
+              // 🆕 FALLBACK: If extraction failed, still note that document exists
+              console.log(`📎 Using fallback for document: ${fileName}`);
+              return {
+                context: `\n[ไฟล์แนบเอกสาร: ${fileName}]\n(เอกสารแนบมากับคำถาม - ไม่สามารถอ่านเนื้อหาได้อัตโนมัติ กรุณาดูเอกสารประกอบ)\n`,
+                source: {
+                  type: 'attachment_document',
+                  fileName: fileName,
+                  textLength: 0,
+                  note: 'Text extraction unavailable'
+                }
+              };
+              
+            } else {
+              // 🆕 OTHER FILE TYPES: Note that file is attached
+              console.log(`📎 Other file type: ${fileName} (${mimeType})`);
+              return {
+                context: `\n[ไฟล์แนบ: ${fileName}]\n(ไฟล์ประเภท ${mimeType} แนบมากับคำถาม)\n`,
+                source: {
+                  type: 'attachment_other',
+                  fileName: fileName,
+                  mimeType: mimeType
+                }
+              };
+            }
+          } else {
+            console.warn(`⚠️ No file data for attachment ${att.id}`);
+          }
+        } catch (attError) {
+          console.warn(`⚠️ Error processing attachment ${att.id}:`, attError);
+        }
+        return null;
+      });
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
       
 //       // Wait for all attachments to be processed in parallel
 //       const attachmentResults = await Promise.allSettled(attachmentPromises);
       
+<<<<<<< HEAD
 //       // Combine results
 //       for (const result of attachmentResults) {
 //         if (result.status === 'fulfilled' && result.value) {
@@ -5739,6 +8650,45 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
 //       // Count English characters
 //       const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+=======
+      // Combine results
+      for (const result of attachmentResults) {
+        if (result.status === 'fulfilled' && result.value) {
+          const { context: ctx, source } = result.value;
+          if (ctx) attachmentContext += ctx;
+          if (source) {
+            sourcesUsed.push(source);
+            totalSources++; // 🔄 Count attachments as sources
+          }
+        }
+      }
+      
+      if (attachmentContext) {
+        console.log(`📎 Attachment context length: ${attachmentContext.length} chars from ${attachments.length} files`);
+      }
+    }
+
+    console.log(`📚 Total sources for AI: ${totalSources} (KB + Attachments)`);
+
+    // Generate AI suggestion using LLM 
+    // 🆕 ตรวจสอบว่ามี verified sources จริงหรือไม่ (ไม่นับ attachments เป็น verified source)
+    const verifiedSourceTypes = ['self_verified', 'similar_verified', 'verification_comments', 'expert_verification'];
+    const verifiedSources = sourcesUsed.filter(s => verifiedSourceTypes.includes(s.type));
+    const hasVerifiedData = verifiedSources.length > 0 && context && context.trim().length > 0;
+    
+    // ใช้ hasVerifiedData แทน hasKnowledgeData เพื่อให้แน่ใจว่าเป็น verified sources
+    const hasKnowledgeData = hasVerifiedData;
+    const hasAttachments = attachmentContext && attachmentContext.trim().length > 0;
+    
+    console.log(`📊 Verified sources: ${verifiedSources.length}, hasVerifiedData: ${hasVerifiedData}, hasAttachments: ${hasAttachments}`);
+    
+    // Detect language of the question (Thai vs English/Other)
+    const detectLanguage = (text: string): 'thai' | 'english' => {
+      // Count Thai characters (Unicode range: \u0E00-\u0E7F)
+      const thaiChars = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+      // Count English characters
+      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
       
 //       // If Thai characters are more than 30% of total alphabetic chars, treat as Thai
 //       const totalChars = thaiChars + englishChars;
@@ -5751,12 +8701,105 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     const isThaiQuestion = questionLanguage === 'thai';
 //     console.log(`🌐 AI Suggestion: Detected language = ${questionLanguage}`);
     
+<<<<<<< HEAD
 //     // Build system prompt with priority: Knowledge Base > Attachments
 //     let systemPrompt = '';
     
 //     if (hasKnowledgeData || hasAttachments) {
 //       if (isThaiQuestion) {
 //         systemPrompt = `คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
+=======
+    // 🆕 ถ้าไม่มี verified sources และไม่มี attachments → ไม่ต้องเรียก LLM
+    if (!hasVerifiedData && !hasAttachments) {
+      console.log('❌ No verified sources found - returning no data message');
+      
+      const noDataAnswer = isThaiQuestion 
+        ? '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
+        : '⚠️ No data available in the knowledge base for this question. Please wait for expert verification.';
+      
+      // Save AI suggestion to database
+      await saveAISuggestion(
+        verifiedAnswerId,
+        noDataAnswer,
+        sourceType as 'chat_verify' | 'create_question',
+        {
+          originalChatMessage,
+          originalAiResponse,
+          aiModelUsed: 'no-llm-needed',
+          aiConfidence: 0,
+          sourcesUsed: []
+        }
+      );
+      
+      return res.json({
+        success: true,
+        answer: noDataAnswer,
+        sources: [],
+        confidence: 0,
+        totalSources: 0
+      });
+    }
+    
+    // Build system prompt with priority: Knowledge Base > Attachments
+    // 🆕 ถ้าเป็น self-verified: AI ทำหน้าที่เป็น Editor (เรียบเรียงใหม่) ไม่ใช่ Author (สร้างใหม่)
+    let systemPrompt = '';
+    
+    if (hasKnowledgeData || hasAttachments) {
+      // 🆕 Check if this is a self-verified question - use Editor mode
+      if (isCurrentSelfVerified && currentAnswer) {
+        // Editor mode for self-verified answers
+        systemPrompt = isThaiQuestion
+          ? `คุณคือ AI Editor ที่ทำหน้าที่เรียบเรียงคำตอบที่ผ่านการยืนยันแล้วจากผู้ใช้ให้อ่านง่ายขึ้น
+
+🎯 **บทบาทของคุณ: Editor (ไม่ใช่ Author)**
+คำตอบนี้ได้รับการยืนยันความถูกต้องจากผู้ใช้แล้ว คุณไม่ได้เป็นผู้สร้างเนื้อหาใหม่ แต่เป็นผู้ช่วยเรียบเรียงให้ดีขึ้น
+
+📝 **สิ่งที่คุณควรทำ:**
+1. **เรียบเรียงภาษาใหม่** - ให้เข้าใจง่ายขึ้น ชัดเจนขึ้น
+2. **จัดโครงสร้าง** - แยกประเด็นออกเป็นข้อ ๆ หรือใช้หัวข้อย่อย
+3. **ใช้ Markdown** - ใช้ **ตัวหนา**, bullet points, ลำดับเลข ให้อ่านง่าย
+4. **คงความหมายเดิม 100%** - ปรับเฉพาะ "รูปแบบการนำเสนอ" ไม่ใช่ "เนื้อหา"
+
+⚠️ **สิ่งที่ห้ามทำ:**
+- ❌ ห้ามเพิ่มข้อมูลใหม่ที่ไม่มีในคำตอบเดิม
+- ❌ ห้ามเปลี่ยนแปลงสาระสำคัญหรือความหมาย
+- ❌ ห้ามลบข้อมูลสำคัญออก
+- ❌ ห้ามตีความเพิ่มเติมจากความรู้ทั่วไป
+
+========== คำตอบที่ยืนยันแล้วจากผู้ใช้ (โดย ${currentCreatedBy}) ==========
+${currentAnswer}
+===============================================================`
+          : `You are an AI Editor who rephrases and restructures user-verified answers for better readability.
+
+🎯 **Your Role: Editor (NOT Author)**
+This answer has been verified by the user. You are NOT creating new content, but helping to improve the presentation.
+
+📝 **What you SHOULD do:**
+1. **Rephrase for clarity** - Make it easier to understand
+2. **Structure the content** - Break into bullet points or sections
+3. **Use Markdown** - Use **bold**, bullet points, numbered lists for readability
+4. **Keep 100% original meaning** - Change only "presentation format", not "substance"
+
+⚠️ **What you must NOT do:**
+- ❌ Do NOT add new information not in the original answer
+- ❌ Do NOT change the core meaning or substance
+- ❌ Do NOT remove important information
+- ❌ Do NOT interpret or add from general knowledge
+
+========== User-Verified Answer (by ${currentCreatedBy}) ==========
+${currentAnswer}
+===================================================================`;
+      } else if (isThaiQuestion) {
+        // Author mode - synthesize from multiple sources (Thai)
+        systemPrompt = `⚠️ คุณต้องตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ แม้ข้อมูลจะมีคำศัพท์ภาษาอังกฤษปนอยู่
+
+คุณคือ AI assistant ที่สร้างคำตอบจากข้อมูลที่ยืนยันแล้วและไฟล์แนบ
+
+⚠️ **สำคัญมาก - คุณต้องใช้เฉพาะข้อมูลที่ให้ไว้ด้านล่าง:**
+- คุณต้องตอบคำถามโดยใช้ข้อมูลจากฐานความรู้และไฟล์แนบที่ให้ไว้เท่านั้น
+- อย่าสร้างข้อมูลใหม่ หรือตอบจากความรู้ทั่วไป
+- ถ้าข้อมูลที่ให้มาไม่เพียงพอ ให้ระบุว่า "ข้อมูลในฐานความรู้ไม่ครอบคลุมคำถามนี้"
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // กฎลำดับความสำคัญ:
 // 1. **ลำดับที่ 1 (สูงสุด)**: ใช้ข้อมูลจากฐานความรู้เป็นแหล่งข้อมูลหลัก
@@ -5764,6 +8807,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // 3. หากข้อมูลจากฐานความรู้และไฟล์แนบขัดแย้งกัน ให้ใช้ข้อมูลจากฐานความรู้
 // 4. หากมีเฉพาะไฟล์แนบ (ไม่มีฐานความรู้) ให้ใช้ข้อมูลจากไฟล์แนบแต่ระบุว่ามาจากไฟล์แนบ
 
+<<<<<<< HEAD
 // กฎการตอบ:
 // 1. ใช้คำตอบที่ยืนยันแล้วและความเห็นผู้เชี่ยวชาญเป็นแหล่งข้อมูลหลัก
 // 2. ใช้เนื้อหาจากไฟล์แนบเป็นข้อมูลเสริม
@@ -5792,6 +8836,39 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // 3. Rephrase and summarize the information clearly - do NOT copy word-for-word
 // 4. Include all important data, numbers, and specifications mentioned
 // 5. Answer in English
+=======
+📝 **กฎการตอบ (ตอบละเอียด):**
+1. ตอบเฉพาะจากข้อมูลที่ให้ไว้ด้านล่าง - ห้ามสร้างข้อมูลขึ้นมาเอง
+2. **ตอบอย่างละเอียด อย่างน้อย 150-300 คำ** - อธิบายครบทุกประเด็น
+3. รวมข้อมูลสำคัญ ตัวเลข และรายละเอียดที่กล่าวถึงทั้งหมด
+4. ตอบเป็นภาษาไทย
+
+📋 **รูปแบบการตอบ:**
+- ใช้หัวข้อย่อยและ bullet points เพื่อจัดระเบียบข้อมูล
+- ใช้ **ตัวหนา** สำหรับคำสำคัญ
+- แยกประเด็นออกเป็นข้อ ๆ ให้ชัดเจน
+- อธิบายแต่ละประเด็นให้ครบถ้วน
+`;
+      } else {
+        systemPrompt = `You are an AI assistant that creates answers from verified knowledge and attached files.
+
+⚠️ **CRITICAL - You must ONLY use the data provided below:**
+- You must answer the question using ONLY the knowledge base and attached file data provided
+- Do NOT create new information or answer from general knowledge
+- If the provided data is insufficient, state "The knowledge base does not cover this question"
+
+IMPORTANT PRIORITY RULES:
+1. **PRIORITY 1 (HIGHEST)**: Use KNOWLEDGE BASE data as the main source of truth
+2. **PRIORITY 2 (SECONDARY)**: Use ATTACHED FILES as supplementary information
+3. If Knowledge Base and Attachments conflict, prefer Knowledge Base data
+4. If only Attachments are available (no Knowledge Base), use them but note it's from attachments
+
+Rules:
+1. Answer ONLY from the data provided below - do NOT make up information
+2. Rephrase and summarize the information clearly - do NOT copy word-for-word
+3. Include all important data, numbers, and specifications mentioned
+4. Answer in English
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // Response format:
 // - Write in continuous paragraphs, concise and clear
@@ -5815,6 +8892,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // `;
 //       }
 
+<<<<<<< HEAD
 //       if (hasAttachments) {
 //         systemPrompt += isThaiQuestion
 //           ? `
@@ -5932,6 +9010,205 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       'Please wait for expert verification',
 //       'กรุณารอผู้เชี่ยวชาญมายืนยัน'
 //     ];
+=======
+      if (hasAttachments) {
+        systemPrompt += isThaiQuestion
+          ? `
+========== ข้อมูลจากไฟล์แนบ (ลำดับที่ 2 - ข้อมูลเสริม) ==========
+${attachmentContext}
+================================================================
+`
+          : `
+========== ATTACHED FILES DATA (PRIORITY 2 - SUPPLEMENTARY) ==========
+${attachmentContext}
+======================================================================
+`;
+      }
+    } else {
+      // ⚠️ ไม่มีข้อมูลเลย - ไม่ต้องเรียก LLM แค่ return คำตอบเลย
+      console.log('❌ No knowledge base data or attachments - skipping LLM call');
+      
+      const noDataAnswer = isThaiQuestion 
+        ? '⚠️ ไม่มีข้อมูลในฐานความรู้สำหรับคำถามนี้ กรุณารอผู้เชี่ยวชาญมายืนยันคำตอบ'
+        : '⚠️ No data available in the knowledge base for this question. Please wait for expert verification.';
+      
+      // Calculate confidence
+      const confidence = 0;
+      
+      // Save AI suggestion to database
+      const saveResult = await saveAISuggestion(
+        verifiedAnswerId,
+        noDataAnswer,
+        sourceType as 'chat_verify' | 'create_question',
+        {
+          originalChatMessage,
+          originalAiResponse,
+          aiModelUsed: 'no-llm-needed',
+          aiConfidence: confidence,
+          sourcesUsed: []
+        }
+      );
+      
+      return {
+        answer: noDataAnswer,
+        sources: [],
+        confidence,
+        totalSources: 0
+      };
+    }
+    
+    // ถ้าเข้ามาถึงตรงนี้แสดงว่ามีข้อมูล (Knowledge Base หรือ Attachments หรือทั้งสองอย่าง)
+    // ไม่ต้องเช็คซ้ำอีก เพราะเช็คไปแล้วด้านบน
+    
+    // 🆕 User prompt แยกตาม mode: Editor (self-verified) vs Author (สังเคราะห์จากหลายแหล่ง)
+    let userPrompt = '';
+    if (isCurrentSelfVerified && currentAnswer) {
+      // Editor mode: เรียบเรียงคำตอบที่ยืนยันแล้ว
+      userPrompt = isThaiQuestion 
+        ? `คำถาม: ${question}
+
+กรุณาเรียบเรียงคำตอบด้านบนใหม่ โดย:
+- จัดโครงสร้างให้อ่านง่าย (ใช้ bullet points, ลำดับเลข, หัวข้อย่อย)
+- ใช้ภาษาที่ชัดเจน กระชับ
+- คงความหมายเดิมทั้งหมด ห้ามเพิ่มข้อมูลใหม่
+- แสดงข้อมูลสำคัญให้เห็นชัด (ใช้ **ตัวหนา**)`
+        : `Question: ${question}
+
+Please rephrase and restructure the answer above by:
+- Organize for better readability (use bullet points, numbered lists, headings)
+- Use clear and concise language
+- Keep 100% of the original meaning - do NOT add new information
+- Highlight important information (use **bold**)`;
+    } else {
+      // Author mode: สร้างคำตอบใหม่จากหลายแหล่ง
+      userPrompt = isThaiQuestion 
+        ? `คำถาม: ${question}
+${questionBody ? `\nรายละเอียด: ${questionBody}` : ''}
+
+สร้างคำตอบอย่างละเอียดจากข้อมูลที่ให้มา:
+- **ถ้ามีข้อมูลจากฐานความรู้ ให้ใช้ข้อมูลจากฐานความรู้เป็นหลัก**
+- **ถ้ามีไฟล์แนบ ให้ใช้ข้อมูลจากไฟล์แนบเป็นเสริม (หรือเป็นหลักถ้าไม่มีฐานความรู้)**
+- **ความยาว: อธิบายอย่างละเอียด 300-800 คำ ครอบคลุมทุกประเด็นสำคัญ**
+- ใช้หัวข้อย่อย bullet points และ **ตัวหนา** ให้อ่านง่าย
+- รวมตัวเลขและข้อมูลสำคัญทุกอย่างที่กล่าวถึง
+- ถ้ามีข้อมูลที่ขัดแย้งกัน ให้ระบุให้ชัดเจน
+- อย่าคัดลอกคำตอบเดิมทั้งหมด แต่ต้องอธิบายให้ครบ
+- ตอบเป็นภาษาไทย`
+        : `Question: ${question}
+${questionBody ? `\nDetails: ${questionBody}` : ''}
+
+Create a comprehensive and detailed answer from the provided data:
+- **If Knowledge Base data is available, use it as the PRIMARY source**
+- **If Attachments are available, use them as SUPPLEMENTARY (or PRIMARY if no KB data)**
+- **Length: Explain thoroughly in 300-800 words, covering all important points**
+- Use headings, bullet points, and **bold** for better readability
+- Include ALL important numbers, data, and specifications mentioned
+- If there are conflicting information, clearly state them
+- Do NOT just copy - rephrase and explain comprehensively
+- Answer in English`;
+    }
+
+    let aiGeneratedAnswer = '';
+    let aiModelUsed = 'ifx-gpt';
+    
+    // 🆕 Try IFX GPT first, then fallback to Google AI, then Ollama
+    try {
+      const ifxModel = process.env.IFXGPT_MODEL || 'gpt-5.2';
+      console.log(`🤖 Trying IFX GPT (${ifxModel}) to synthesize answer...`);
+      
+      const ifxMessages = [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: userPrompt }
+      ];
+      
+      const response = await ifxClient.chat.completions.create({
+        model: ifxModel,
+        messages: ifxMessages,
+        temperature: 0.7,
+        max_completion_tokens: 20000,
+        stream: false
+      });
+      
+      if (response.choices[0]?.message?.content) {
+        aiGeneratedAnswer = response.choices[0].message.content
+          .replace(/\r\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        aiModelUsed = `ifx-gpt (${ifxModel})`;
+        console.log('✅ IFX GPT generated answer successfully');
+      }
+    } catch (ifxError) {
+      console.error('⚠️ IFX GPT call failed:', ifxError);
+      
+      // 🔄 FALLBACK 1: Try Google AI
+      try {
+        console.log('🔄 Trying Google AI as fallback...');
+        const ai = new GoogleGenAI({ apiKey: process.env.Google_API_KEY });
+        
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        
+        const response = await ai.models.generateContent({
+          model: 'gemma-3-4b-it',
+          contents: fullPrompt
+        });
+        
+        if (response && response.text) {
+          aiGeneratedAnswer = response.text
+            .replace(/\r\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          aiModelUsed = 'gemma-3-4b-it';
+          console.log('✅ Google AI generated answer successfully');
+        }
+      } catch (googleError) {
+        console.error('⚠️ Google AI call failed:', googleError);
+        
+        // 🔄 FALLBACK 2: Try Ollama gemma3:1b
+        try {
+          console.log('🔄 Trying Ollama gemma3:1b as fallback...');
+          const llmResponse = await fetch(`${process.env.API_OLLAMA}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: `${systemPrompt}\n\n${userPrompt}`,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 4000 }
+            })
+          });
+          
+          if (llmResponse.ok) {
+            const llmData = await llmResponse.json() as { response: string };
+            aiGeneratedAnswer = (llmData.response || '')
+              .replace(/\r\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            aiModelUsed = 'gemma3:1b (Ollama)';
+            console.log('✅ Ollama gemma3:1b generated answer successfully');
+          }
+        } catch (ollamaError) {
+          console.error('⚠️ Ollama gemma3:1b also failed:', ollamaError);
+        }
+      }
+    }
+    
+    // 🆕 Post-generation language check: ถ้าคำถามเป็นไทยแต่คำตอบเป็นอังกฤษ ให้แปลกลับ
+    if (isAnswerWrongLanguage(aiGeneratedAnswer, isThaiQuestion)) {
+      aiGeneratedAnswer = await fixAnswerLanguage(aiGeneratedAnswer, isThaiQuestion, ifxClient);
+    }
+    
+    // Check if LLM incorrectly said "no data" when we actually have sources
+    const noDataPhrases = [
+      'ยังไม่มีคำตอบที่ยืนยันแล้ว',
+      'ไม่มีข้อมูลในฐานความรู้',
+      'ยังไม่มีข้อมูล',
+      'No data available',
+      'no verified',
+      'No verified answer available',
+      'Please wait for expert verification',
+      'กรุณารอผู้เชี่ยวชาญมายืนยัน'
+    ];
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
     
 //     const llmSaidNoData = noDataPhrases.some(phrase => 
 //       aiGeneratedAnswer.toLowerCase().includes(phrase.toLowerCase())
@@ -5943,11 +9220,26 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //       aiGeneratedAnswer = ''; // Reset to trigger fallback below
 //     }
     
+<<<<<<< HEAD
 //     // Fallback if LLM fails or returns empty
 //     if (!aiGeneratedAnswer) {
 //       if (totalSources > 0) {
 //         // Show verified answers directly from sources
 //         aiGeneratedAnswer = '';
+=======
+    // 🧹 Strip prompt structural markers and echoed sources
+    if (aiGeneratedAnswer) {
+      aiGeneratedAnswer = stripPromptMarkers(aiGeneratedAnswer);
+      aiGeneratedAnswer = stripFollowUpQuestions(aiGeneratedAnswer);
+      aiGeneratedAnswer = stripEchoedSources(aiGeneratedAnswer, isThaiQuestion);
+    }
+    
+    // Fallback if LLM fails or returns empty
+    if (!aiGeneratedAnswer) {
+      if (totalSources > 0) {
+        // Show verified answers directly from sources
+        aiGeneratedAnswer = '';
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
         
 //         // Show self-verified answer if exists
 //         if (isCurrentSelfVerified && currentAnswer) {
@@ -6009,6 +9301,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 
 //     console.log(`✅ AI suggestion generated for question ${verifiedAnswerId} with ${totalSources} sources`);
 
+<<<<<<< HEAD
 //     // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
 //     // Auto-reject ONLY when:
 //     // 1. No knowledge base sources (totalSources === 0)
@@ -6023,12 +9316,48 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //           // Use AI to classify the question topic
 //           const classificationPrompt = `
 // Classify this question into one of the predefined categories. If none fit well, create a new category.
+=======
+    // 🤖 IMMEDIATE Auto-accept for self-verified questions
+    if (isCurrentSelfVerified && saveResult.suggestionId) {
+      console.log(`✅ Auto-accepting AI suggestion for self-verified question ${verifiedAnswerId}`);
+      try {
+        await updateAISuggestionDecision(
+          saveResult.suggestionId,
+          'accepted',
+          currentAnswer,
+          currentCreatedBy
+        );
+        
+        // Note: ai_learning_analysis will be saved later with LLM-judge group classification
+        console.log(`✅ AI suggestion ${saveResult.suggestionId} auto-accepted for self-verified question`);
+      } catch (autoAcceptError) {
+        console.error('Error auto-accepting AI suggestion:', autoAcceptError);
+      }
+    }
+
+    // ========== For "No Answer in KB" questions - classify group and save to ai_learning_analysis ==========
+    // Auto-reject ONLY when:
+    // 1. No knowledge base sources (totalSources === 0)
+    // 2. No attachments (wait for human verification if attachments exist)
+    if (totalSources === 0 && saveResult.suggestionId && !hasAttachments) {
+      console.log('🔄 No knowledge and no attachments - auto-rejecting and classifying topic group for analytics...');
+      setImmediate(async () => {
+        try {
+          let predictedGroup: string | null = null;
+          let groupConfidence: number | null = null;
+          
+          // Use AI to classify the question topic
+          const classificationPrompt = `
+You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY. 
+Your job is to classify questions into SPECIFIC technical categories.
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // **Question:**
 // ${question}
 
 // ${questionBody ? `**Question Details:**\n${questionBody.substring(0, 500)}` : ''}
 
+<<<<<<< HEAD
 // **Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
 // - Die Attach & Bonding
 // - Wire Bonding
@@ -6053,6 +9382,43 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // Return ONLY this JSON format (no markdown, no extra text):
 // {"group": "IT & Computer", "confidence": 0.9}
 // `;
+=======
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
+- Die Processing (die attach, die bonding, die cutting, singulation)
+- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
+- Pad & Metallization (bond pad, metal layer, RDL, bump)
+- Defect Analysis (defect types, failure analysis, root cause, SEM)
+- Molding & Encapsulation (mold compound, underfill, encapsulation)
+- Testing & Inspection (electrical test, optical inspection, probe)
+- Equipment Maintenance (machine, tool, PM, breakdown)
+- Quality Control (SPC, CPK, yield, spec)
+- Yield Improvement (yield loss, optimization, improvement)
+- Safety & Environment (EHS, chemical, safety, clean room)
+- IT & Computer (software, network, system, programming)
+- HR & Training (employee, training, HR policy)
+- Finance & Procurement (cost, purchase, vendor, budget)
+- Health & Wellness (health, exercise, mental health, work-life balance)
+
+**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
+- General Knowledge
+- General
+- Miscellaneous
+- Other/Others
+- ทั่วไป/อื่นๆ
+
+**Instructions:**
+1. Read the question and determine which predefined category fits BEST
+2. If the question is about semiconductor processes, ALWAYS use a specific technical category
+3. If the question relates to a specific component (pad, die, wafer, wire, mold), use that category
+4. ONLY if none of the predefined categories fit, create a NEW specific category
+5. New categories should be SPECIFIC (e.g., "Lead Frame Design" not "Manufacturing")
+6. NEVER use "General Knowledge" or any banned category
+
+Return ONLY this JSON format (no markdown, no extra text):
+{"group": "Category Name", "confidence": 0.9}
+`;
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //           const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
 //           console.log('🔍 Calling Ollama for knowledge group classification (no KB data)...');
@@ -6077,6 +9443,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
             
 //             console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
             
+<<<<<<< HEAD
 //             const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
 //             if (jsonMatch) {
 //               try {
@@ -6092,6 +9459,38 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //               }
 //             }
 //           }
+=======
+            const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+            if (jsonMatch) {
+              try {
+                const classification = JSON.parse(jsonMatch[0]);
+                const rawPredictedGroup = classification.group || null;
+                groupConfidence = typeof classification.confidence === 'number' 
+                  ? Math.min(1, Math.max(0, classification.confidence)) 
+                  : null;
+                
+                console.log(`📁 Raw Knowledge Group (no KB): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                
+                // ========== Similarity Check with Existing Groups ==========
+                if (rawPredictedGroup) {
+                  const similarGroup = await findSimilarKnowledgeGroup(rawPredictedGroup, 0.75);
+                  
+                  if (similarGroup && similarGroup !== rawPredictedGroup) {
+                    console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                    predictedGroup = similarGroup;
+                  } else {
+                    predictedGroup = rawPredictedGroup;
+                  }
+                }
+                // ========== END Similarity Check ==========
+                
+                console.log(`📁 Final Knowledge Group (no KB): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+              } catch (parseErr) {
+                console.warn('Could not parse classification JSON:', parseErr);
+              }
+            }
+          }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
           
 //           // Auto-reject since no knowledge available
 //           await updateAISuggestionDecision(
@@ -6158,6 +9557,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
             
 //             console.log('✅ Auto-verification record created, LLM Judge will run now...');
             
+<<<<<<< HEAD
 //             // Now run LLM Judge analysis (copy the logic from submit-verification)
 //             const aiSuggestion = await getAISuggestion(parseInt(verifiedAnswerId));
 //             if (aiSuggestion && aiSuggestion.decision === 'pending') {
@@ -6178,6 +9578,31 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //               try {
 //                 const classificationPrompt = `
 // Classify this Q&A into one of the predefined categories. If none fit well, create a new category.
+=======
+            // Now run LLM Judge analysis (copy the logic from submit-verification)
+            const aiSuggestion = await getAISuggestion(parseInt(verifiedAnswerId));
+            // Note: decision is already 'accepted' from IMMEDIATE auto-accept above, so check both
+            if (aiSuggestion && (aiSuggestion.decision === 'pending' || aiSuggestion.decision === 'accepted')) {
+              // Get question data
+              const questionResult = await pool.query(
+                `SELECT question, answer FROM verified_answers WHERE id = $1`,
+                [verifiedAnswerId]
+              );
+              const questionData = questionResult.rows[0];
+              const originalQuestion = questionData?.question || '';
+              const humanAnswer = questionData?.answer || '';
+              const aiAnswer = aiSuggestion.ai_generated_answer || '';
+              
+              // ========== AI Knowledge Group Classification for Self-Verified ==========
+              // Uses same fallback chain as regular questions: IFXGPT → Google AI → Ollama
+              let predictedGroup: string | null = null;
+              let groupConfidence: number | null = null;
+              
+              try {
+                const classificationPrompt = `
+You are a topic classifier for a SEMICONDUCTOR MANUFACTURING FACTORY.
+Your job is to classify Q&A into SPECIFIC technical categories.
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // **Question:**
 // ${originalQuestion}
@@ -6185,6 +9610,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // **Answer:**
 // ${humanAnswer.substring(0, 600)}
 
+<<<<<<< HEAD
 // **Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
 // - Die Attach & Bonding
 // - Wire Bonding
@@ -6205,11 +9631,43 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 // 3. ONLY if none of the predefined categories fit, create a NEW category (1-2 words, broad topic)
 // 4. New categories should be at the same level of generality as predefined ones
 // 5. Do NOT create overly specific categories
+=======
+**Predefined Categories for Semiconductor Factory (use these FIRST if applicable):**
+- Wafer Processing (wafer fabrication, lithography, etching, deposition, cleaning)
+- Die Processing (die attach, die bonding, die cutting, singulation)
+- Wire Bonding (gold wire, copper wire, wedge bonding, ball bonding)
+- Pad & Metallization (bond pad, metal layer, RDL, bump)
+- Defect Analysis (defect types, failure analysis, root cause, SEM)
+- Molding & Encapsulation (mold compound, underfill, encapsulation)
+- Testing & Inspection (electrical test, optical inspection, probe)
+- Equipment Maintenance (machine, tool, PM, breakdown)
+- Quality Control (SPC, CPK, yield, spec)
+- Yield Improvement (yield loss, optimization, improvement)
+- Safety & Environment (EHS, chemical, safety, clean room)
+- IT & Computer (software, network, system, programming)
+- HR & Training (employee, training, HR policy)
+- Finance & Procurement (cost, purchase, vendor, budget)
+- Health & Wellness (health, exercise, mental health, work-life balance)
+
+**⛔ BANNED CATEGORIES - DO NOT USE THESE:**
+- General Knowledge
+- General
+- Miscellaneous
+- Other/Others
+- ทั่วไป/อื่นๆ
+
+**Instructions:**
+1. Read the Q&A and determine which predefined category fits BEST
+2. If about semiconductor components (pad, die, wafer, wire, mold), use that specific category
+3. ONLY if none fit, create a NEW specific category
+4. NEVER use "General Knowledge" or any banned category
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 // Return ONLY this JSON format (no markdown, no extra text):
 // {"group": "Wire Bonding", "confidence": 0.9}
 // `;
 
+<<<<<<< HEAD
 //                 const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
 //                 console.log('🔍 Calling Ollama for knowledge group classification (self-verified)...');
 //                 console.log('🔍 Ollama URL:', ollamaUrl);
@@ -6289,6 +9747,218 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         }
 //       });
 //     }
+=======
+                console.log('🏷️ Starting knowledge group classification (self-verified)...');
+                console.log('🔍 Question:', originalQuestion.substring(0, 100));
+                
+                let classificationSucceeded = false;
+                
+                // ========== Try IFXGPT first (gpt-5.2) ==========
+                if (ifxClientAvailable) {
+                  console.log('🔍 Calling IFXGPT (gpt-5.2) for knowledge group classification (self-verified)...');
+                  try {
+                    const ifxResponse = await ifxClient.chat.completions.create({
+                      model: 'gpt-5.2',
+                      messages: [
+                        { role: 'system', content: 'Classify and return JSON only: {"group":"Category","confidence":0.9}' },
+                        { role: 'user', content: classificationPrompt }
+                      ],
+                      max_completion_tokens: 150,
+                      temperature: 0.2,
+                    });
+                  
+                    const classifyText = ifxResponse.choices[0]?.message?.content || '';
+                    console.log('🔍 IFXGPT classification response (self-verified):', classifyText.substring(0, 200));
+                  
+                    if (!classifyText.trim()) {
+                      console.warn('⚠️ IFXGPT returned empty response, will try fallback...');
+                      throw new Error('Empty response from IFXGPT');
+                    }
+                  
+                    const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                    if (jsonMatch) {
+                      const classification = JSON.parse(jsonMatch[0]);
+                      const rawPredictedGroup = classification.group || null;
+                      groupConfidence = typeof classification.confidence === 'number' 
+                        ? Math.min(1, Math.max(0, classification.confidence)) 
+                        : null;
+                    
+                      console.log(`📁 Raw Knowledge Group from IFXGPT (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                    
+                      if (rawPredictedGroup) {
+                      const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                      
+                      if (normalizedGroup) {
+                        const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                        if (similarGroup && similarGroup !== normalizedGroup) {
+                          console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                          predictedGroup = similarGroup;
+                        } else {
+                          predictedGroup = normalizedGroup;
+                        }
+                        classificationSucceeded = true;
+                        console.log(`✅ Classification succeeded with IFXGPT (self-verified): ${predictedGroup}`);
+                      } else {
+                        console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try fallback`);
+                      }
+                    }
+                    } else {
+                      console.warn('⚠️ IFXGPT response does not contain valid JSON, will try fallback...');
+                    }
+                  } catch (ifxError) {
+                    console.warn('❌ IFXGPT classification failed (self-verified):', ifxError);
+                    console.warn('  Will try Google AI fallback...');
+                  }
+                } else {
+                  console.log('⚠️ IFXGPT not available (self-verified), skipping to Google AI fallback...');
+                }
+                
+                // ========== Fallback to Google AI ==========
+                if (!classificationSucceeded) {
+                  console.log('🔍 Calling Google AI (gemma-3-4b-it) for knowledge group classification (self-verified, fallback 1)...');
+                  try {
+                    const geminiResult = await ai.models.generateContent({
+                      model: 'gemma-3-4b-it',
+                      contents: classificationPrompt,
+                      config: {
+                        maxOutputTokens: 100,
+                        temperature: 0.2,
+                      },
+                    });
+                    
+                    const classifyText = geminiResult.text || '';
+                    console.log('🔍 Google AI classification response (self-verified):', classifyText.substring(0, 200));
+                    
+                    const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                    if (jsonMatch) {
+                      const classification = JSON.parse(jsonMatch[0]);
+                      const rawPredictedGroup = classification.group || null;
+                      groupConfidence = typeof classification.confidence === 'number' 
+                        ? Math.min(1, Math.max(0, classification.confidence)) 
+                        : null;
+                      
+                      console.log(`📁 Raw Knowledge Group from Google AI (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                      
+                      if (rawPredictedGroup) {
+                        const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                        
+                        if (normalizedGroup) {
+                          const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                          if (similarGroup && similarGroup !== normalizedGroup) {
+                            console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                            predictedGroup = similarGroup;
+                          } else {
+                            predictedGroup = normalizedGroup;
+                          }
+                          classificationSucceeded = true;
+                          console.log(`✅ Classification succeeded with Google AI (self-verified): ${predictedGroup}`);
+                        } else {
+                          console.log(`  ⚠️ Group "${rawPredictedGroup}" is banned, will try Ollama fallback`);
+                        }
+                      }
+                    }
+                  } catch (googleError) {
+                    console.warn('❌ Google AI classification failed (self-verified):', googleError);
+                    console.warn('  Will try Ollama fallback...');
+                  }
+                }
+                
+                // ========== Fallback to Ollama ==========
+                if (!classificationSucceeded) {
+                  const ollamaUrl = process.env.API_OLLAMA || 'http://localhost:11434/api/generate';
+                  console.log('🔍 Calling Ollama for knowledge group classification (self-verified, fallback 2)...');
+                  console.log('🔍 Ollama URL:', ollamaUrl);
+                  
+                  try {
+                    const classifyResponse = await fetch(ollamaUrl, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        model: 'gemma3:1b', // Use gemma3:1b like the regular classification
+                        prompt: classificationPrompt,
+                        stream: false,
+                        options: { 
+                          temperature: 0.2,
+                          num_predict: 100
+                        }
+                      })
+                    });
+                    
+                    console.log('🔍 Ollama response status:', classifyResponse.status, classifyResponse.ok);
+                    
+                    if (classifyResponse.ok) {
+                      const classifyData = await classifyResponse.json() as { response?: string };
+                      const classifyText = classifyData.response || '';
+                      
+                      console.log('🔍 Ollama classification response:', classifyText.substring(0, 200));
+                      
+                      const jsonMatch = classifyText.match(/\{[\s\S]*?\}/);
+                      if (jsonMatch) {
+                        const classification = JSON.parse(jsonMatch[0]);
+                        const rawPredictedGroup = classification.group || null;
+                        groupConfidence = typeof classification.confidence === 'number' 
+                          ? Math.min(1, Math.max(0, classification.confidence)) 
+                          : null;
+                        
+                        console.log(`📁 Raw Knowledge Group from Ollama (self-verified): ${rawPredictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+                        
+                        if (rawPredictedGroup) {
+                          const normalizedGroup = getStandardGroupName(rawPredictedGroup);
+                          
+                          if (normalizedGroup) {
+                            const similarGroup = await findSimilarKnowledgeGroup(normalizedGroup, 0.75);
+                            if (similarGroup && similarGroup !== normalizedGroup) {
+                              console.log(`  🔄 Mapped "${rawPredictedGroup}" → "${similarGroup}"`);
+                              predictedGroup = similarGroup;
+                            } else {
+                              predictedGroup = normalizedGroup;
+                            }
+                            classificationSucceeded = true;
+                          } else {
+                            console.log(`  ⚠️ Ollama also returned banned group "${rawPredictedGroup}", using Unclassified`);
+                            predictedGroup = 'Unclassified';
+                          }
+                        }
+                      }
+                    }
+                  } catch (ollamaError) {
+                    console.warn('❌ Ollama classification failed (self-verified):', ollamaError);
+                  }
+                }
+                
+                console.log(`📁 Final Knowledge Group (self-verified): ${predictedGroup} (${(groupConfidence || 0) * 100}% confidence)`);
+              } catch (classifyError) {
+                console.warn('Knowledge group classification failed (non-critical):', classifyError);
+              }
+              // ========== END AI Knowledge Group Classification ==========
+              
+              // Decision already set to 'accepted' in IMMEDIATE auto-accept above, no need to update again
+              
+              await saveAILearningAnalysis(aiSuggestion.id, {
+                conflictType: 'none',
+                conflictDetails: 'Self-verified question - accepted with LLM group classification',
+                severity: undefined,
+                similarityScore: 1.0,
+                keyDifferences: [],
+                suggestedPromptFix: '',
+                suggestedRouting: 'none',
+                errorTags: [],
+                analyzedBy: 'llm-judge',
+                predictedGroup: predictedGroup || undefined,
+                groupConfidence: groupConfidence || undefined
+              });
+              
+              console.log('✅ LLM Judge group classification completed for self-verified question');
+            }
+          } else {
+            console.log('ℹ️ Verification record already exists, skipping');
+          }
+        } catch (err) {
+          console.warn('Auto-verification failed (non-critical):', err);
+        }
+      });
+    }
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     res.json({
 //       success: true,
@@ -6518,6 +10188,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //   }
 // });
 
+<<<<<<< HEAD
 // /**
 //  * Get Knowledge Group Analytics
 //  * GET /api/knowledge-group-analytics
@@ -6537,6 +10208,40 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         FROM ai_suggestions
 //       `)
 //     ]);
+=======
+/**
+ * Get Knowledge Group Analytics
+ * GET /api/knowledge-group-analytics
+ */
+router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
+  try {
+    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts, allQuestionsCounts] = await Promise.all([
+      getKnowledgeGroupAnalytics(),
+      getConfidenceDistribution(),
+      // Get direct counts from ai_suggestions table
+      // 🔄 FIXED: Only count pending for questions that are NOT yet fully verified
+      pool.query(`
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN ais.decision = 'pending' 
+                AND (va.verification_type IS NULL OR va.verification_type = 'request') 
+                THEN 1 END) as pending_count,
+          COUNT(CASE WHEN ais.decision = 'accepted' THEN 1 END) as accepted_count,
+          COUNT(CASE WHEN ais.decision = 'rejected' THEN 1 END) as rejected_count
+        FROM ai_suggestions ais
+        LEFT JOIN verified_answers va ON ais.verified_answer_id = va.id
+      `),
+      // 🆕 NEW: Get total questions count from verified_answers (all questions, not just those with AI suggestions)
+      pool.query(`
+        SELECT 
+          COUNT(*) as total_all_questions,
+          COUNT(CASE WHEN va.id NOT IN (SELECT verified_answer_id FROM ai_suggestions WHERE decision != 'pending') 
+                     AND (va.verification_type IS NULL OR va.verification_type = 'request')
+                THEN 1 END) as pending_verification
+        FROM verified_answers va
+      `)
+    ]);
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //     // Calculate summary stats from groupAnalytics (for group distribution)
 //     const totalQuestions = groupAnalytics.reduce((sum: number, g: any) => sum + parseInt(g.total_questions || 0), 0);
@@ -6550,6 +10255,7 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //     const totalRejected = parseInt(aiCounts.rejected_count) || 0;
 //     const totalDecisions = totalRejected + totalAccepted;
     
+<<<<<<< HEAD
 //     res.json({
 //       success: true,
 //       data: {
@@ -6567,6 +10273,31 @@ router.get('/storage/*', async (req: Request, res: Response) => {
 //         }
 //       }
 //     });
+=======
+    // 🆕 Get actual total questions from verified_answers
+    const allQuestionsCount = allQuestionsCounts.rows[0] || {};
+    const actualTotalQuestions = parseInt(allQuestionsCount.total_all_questions) || 0;
+    const actualPendingVerification = parseInt(allQuestionsCount.pending_verification) || 0;
+    
+    res.json({
+      success: true,
+      data: {
+        groupDistribution: groupAnalytics,
+        confidenceDistribution,
+        summary: {
+          // 🔧 Use actual count from verified_answers instead of ai_suggestions
+          totalQuestions: actualTotalQuestions,
+          totalPending: actualPendingVerification,
+          totalRejected,
+          totalAccepted,
+          rejectionRate: totalDecisions > 0 ? Math.round(100 * totalRejected / totalDecisions) : 0,
+          highConfidenceCount: totalHighConf,
+          lowConfidenceCount: totalLowConf,
+          uniqueGroups: groupAnalytics.length
+        }
+      }
+    });
+>>>>>>> 23e32d38aaf031df35e16d3627c546b6a3bb0a32
 
 //   } catch (error) {
 //     console.error('Error getting knowledge group analytics:', error);
