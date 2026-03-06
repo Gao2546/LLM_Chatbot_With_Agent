@@ -357,6 +357,7 @@ async function showPreprocessDialog() {
             const response = await fetch('/api/chat/-1/files'); 
             console.log("pass1");
             
+            
             if (!response.ok) throw new Error("Failed to load files");
             console.log(response);
             console.log("pass2");
