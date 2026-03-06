@@ -50,6 +50,8 @@ router.post('/login', async (req, res) => {
 
     // Check if the user exists
     const user = await getUserByUsername(username);
+    console.log(`Auth: Attempting login for username: ${username}`);
+    console.log(user)
     if (!user) {
       // User not found
       return res.status(401).json({ error: 'invalid_credentials' }); // Use 401 Unauthorized
@@ -78,6 +80,7 @@ router.post('/login', async (req, res) => {
     // Create a session
     req.session.user = { id: user.id, username: user.username, socketId: socketId, isGuest: false };
     console.log(`Auth: Session created for user ${user.username} (ID: ${user.id})`)
+    console.log(req.session.user)
 
     // await createUserFolder(user.id); // comment it in new patch
 
@@ -114,6 +117,7 @@ router.post('/login', async (req, res) => {
       (req.session.user as any).currentChatMode = null;
       (req.session.user as any).currentChatModel = null;
     }
+    console.log('Auth: Final session user object after login setup:', req.session.user);
 
     // Login successful, send success response
     res.status(200).json({ success: true, userId: user.id, username: user.username });
