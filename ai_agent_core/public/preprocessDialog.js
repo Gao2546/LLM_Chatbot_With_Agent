@@ -355,16 +355,20 @@ async function showPreprocessDialog() {
 
             // 2. Fetch files
             const response = await fetch('/api/chat/-1/files'); 
+            console.log("pass1")
             
             if (!response.ok) throw new Error("Failed to load files");
+            console.log("pass2")
             
             const files = await response.json();
             docList.innerHTML = ''; // Clear loading message
+            console.log("pass3")
 
             if (files.length === 0) {
                 docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">No documents found.</div>';
                 return;
             }
+            console.log(files)
 
             files.forEach((fileObj) => {
                 const fileName = fileObj.file_name || fileObj.name || "Unknown File";
