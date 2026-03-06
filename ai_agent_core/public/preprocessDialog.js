@@ -498,11 +498,12 @@ async function showPreprocessDialog() {
             });
 
         } catch (error) {
-            console.error("Error fetching docs:", error);
+            console.log("Error fetching docs:");
+            console.log(JSON.stringify(error));
             docList.innerHTML = '<div style="padding:10px; color:#ff6b6b; font-size:12px;">Error loading list.</div>';
         }
     };
-
+    console.log("preview data...")
     // Initial Load
     fetchAndRenderDocuments();
 
