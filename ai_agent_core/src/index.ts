@@ -242,7 +242,7 @@ io.on('connection', (socket) => {
 
   socket.on('register', async (data) => { //for update socket if when reload page
     const userId = typeof data === 'object' && data?.userId ? data.userId : data;
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       console.log("no data")
       return;
     }

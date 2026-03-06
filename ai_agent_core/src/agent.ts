@@ -1022,7 +1022,7 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     const userId = req.session.user?.id;
     const chatId = req.session.user?.currentChatId;
 
-    if (!userId || !chatId) {
+    if (userId === undefined || chatId === undefined || userId === null || chatId === null) {
         return res.status(401).send("User session not found or no active chat.");
     }
 
@@ -1128,7 +1128,7 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
   // 1. Validate Session
   const userId = req.session.user?.id;
   const role = req.session.user?.role;
-  // if (!userId) {
+  // if (userId === undefined || userId === null) {
   //     return res.status(401).json({ error: "Unauthorized: User session not found." });
   // }
 
@@ -2136,7 +2136,7 @@ router.post('/edit-message', async (req, res) => {
   const controller = new AbortController();
   runningRequests.set(requestId, controller);
   const socket = io.sockets.sockets.get(socketId);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (userId === undefined || userId === null) return res.status(401).json({ error: 'Unauthorized' });
   // Read current history
   const rows = await readChatHistory(chatId);
   if (rows.length === 0) return res.status(404).json({ error: 'Chat not found' });
@@ -2981,7 +2981,7 @@ router.get('/chat-history', async (req: express.Request, res: express.Response) 
     const chatId = req.query.chatId as string;
     const userId = req.session?.user?.id;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userId === undefined || userId === null) return res.status(401).json({ error: 'Unauthorized' });
     if (!chatId) return res.status(400).json({ error: 'ChatId is required' });
     
     req.session.user!.currentChatId = parseInt(chatId);
@@ -3062,7 +3062,7 @@ router.get('/ClearChat', async (req, res) => {
 router.get('/get_current_user', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     res.json({ userId: userId });
@@ -3075,7 +3075,7 @@ router.get('/get_current_user', async (req, res) => {
 router.get('/isGuest', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     else {
@@ -3103,7 +3103,7 @@ router.get('/reload-page', async (req, res) => {
       return res.status(400).json({ error: 'Bypass mode not supported anymore' });
     }
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3152,7 +3152,7 @@ router.get('/load-chat-data', async (req, res) => {
     const chatId = (req.session?.user as any)?.currentChatId;
     const userId = req.session?.user?.id;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3205,7 +3205,7 @@ router.post('/set-model', async (req, res) => {
     const currentChatId = (req.session.user as any)?.currentChatId;
     const { model } = req.body; // Expect 'model' in the body
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (!currentChatId) {
@@ -3238,7 +3238,7 @@ router.post('/set-mode', async (req, res) => {
     const currentChatId = (req.session.user as any)?.currentChatId;
     const { mode } = req.body;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (!currentChatId) {
@@ -3893,7 +3893,7 @@ router.get('/get-notifications', async (req: Request, res: Response) => {
   try {
     const userId = req.session.user?.id;
     
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.json({ success: true, notifications: [], unreadCount: 0 });
     }
 
@@ -3937,7 +3937,7 @@ router.post('/mark-notification-read', async (req: Request, res: Response) => {
     const { notificationId } = req.body;
     const userId = req.session.user?.id;
 
-    if (!userId || !notificationId) {
+    if (userId === undefined || userId === null || !notificationId) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
@@ -4142,7 +4142,7 @@ router.post('/vote-question/:questionId', async (req: Request, res: Response) =>
     const { vote } = req.body; // vote: 1 (upvote), -1 (downvote), 0 (remove vote)
     const userId = req.session.user?.id;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ success: false, error: 'Login required' });
     }
 
@@ -5448,7 +5448,7 @@ router.post('/file/:fileId/active', async (req: Request, res: Response) => {
     if (isNaN(fileId)) {
         return res.status(400).json({ error: 'Invalid File ID' });
     }
-    if (!userId) {
+    if (userId === undefined || userId === null) {
         return res.status(401).json({ error: 'Unauthorized: User ID required' });
     }
 
@@ -5474,7 +5474,7 @@ router.delete('/file/:fileId/active', async (req: Request, res: Response) => {
     if (isNaN(fileId)) {
         return res.status(400).json({ error: 'Invalid File ID' });
     }
-    if (!userId) {
+    if (userId === undefined || userId === null) {
         return res.status(401).json({ error: 'Unauthorized: User ID required' });
     }
 

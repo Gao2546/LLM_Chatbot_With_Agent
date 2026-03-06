@@ -46,7 +46,7 @@ router.post('/register', async (req, res) => {
 // Login endpoint
 router.post('/login', async (req, res) => {
   try {
-    const { username, password,socketId } = req.body;
+    const { username, password, socketId } = req.body;
 
     // Check if the user exists
     const user = await getUserByUsername(username);
@@ -146,7 +146,7 @@ router.get('/register', (req, res) => {
 // Logout endpoint
 router.get('/logout', async (req, res) => {
   const userId = req.session.user?.id;
-  if (!userId){
+  if (userId === undefined || userId === null){
     res.redirect('/')
     // res.status(400).json({ error: 'No session please login' });
   }
@@ -169,7 +169,7 @@ router.get('/logout', async (req, res) => {
 router.get('/endsession', async (req, res) => {
   const userId = req.session.user?.id;
   const is_guest = req.session.user?.isGuest;
-  if (!userId){
+  if (userId === undefined || userId === null){
     res.status(400).json({ error: 'No session please login' });
   }
   else{
@@ -194,7 +194,7 @@ router.get('/endsession', async (req, res) => {
 
 router.get('/session', (req, res) => {
   const userId = req.session.user?.id;
-  if (!userId){
+  if (userId === undefined || userId === null) {
     // res.status(500).json({ error: 'No session please login' });
     console.log('Auth: No session please login')
     res.status(200).json({ error: 'No session please login' });
