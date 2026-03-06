@@ -1,4 +1,5 @@
 let socket = io({ serveClient: false });
+export { socket }; // Export the socket instance for use in other modules
 const userId = null; // Replace with the actual user ID
 // socket.emit('pong');
 

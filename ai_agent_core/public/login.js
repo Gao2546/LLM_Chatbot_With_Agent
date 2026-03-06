@@ -1,3 +1,4 @@
+import { socket } from './script.js'; // Import the socket instance
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.querySelector('form'); // Select the form
     const errorMessageDiv = document.getElementById('error-message');
@@ -47,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ username, password }),
+                    body: JSON.stringify({ username, password, socketId: socket.id }), // Include the socket ID in the request body
                 });
 
                 if (response.ok) {

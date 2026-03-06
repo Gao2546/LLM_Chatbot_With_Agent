@@ -787,7 +787,7 @@ async function showPreprocessDialog() {
                 // alert('Processing complete!');
             }
             else {
-                alert(`Processing failed: ${result.message || 'Unknown error'}`);;
+                alert(`Processing failed: ${result.message || result.error || 'Unknown error'}`);;
             }
 
         } catch (error) {
