@@ -347,11 +347,11 @@ async function showPreprocessDialog() {
         
         try {
             // 1. Ensure we have the user ID first
-            if (!currentUserId) await getCurrentUser();
-            if (!currentUserId) {
-                docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
-                return;
-            }
+            // if (!currentUserId) await getCurrentUser();
+            // if (!currentUserId) {
+            //     docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
+            //     return;
+            // }
 
             // 2. Fetch files
             const response = await fetch('/api/chat/-1/files'); 

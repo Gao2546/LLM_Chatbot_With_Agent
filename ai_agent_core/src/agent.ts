@@ -1127,8 +1127,13 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
   
   // 1. Validate Session
   const userId = req.session.user?.id;
-  if (!userId) {
-      return res.status(401).json({ error: "Unauthorized: User session not found." });
+  const role = req.session.user?.role;
+  // if (!userId) {
+  //     return res.status(401).json({ error: "Unauthorized: User session not found." });
+  // }
+
+  if (role != 'admin') {
+    return res.status(401).json({ error: "Unauthorized: User session not found." });
   }
 
   try {
