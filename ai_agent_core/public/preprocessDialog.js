@@ -347,8 +347,8 @@ async function showPreprocessDialog() {
         
         try {
             // 1. Ensure we have the user ID first
-            // if (!currentUserId) await getCurrentUser();
-            // if (!currentUserId) {
+            // if (currentUserId === undefined || currentUserId === null) await getCurrentUser();
+            // if (currentUserId === undefined || currentUserId === null) {
             //     docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
             //     return;
             // }
@@ -458,7 +458,7 @@ async function showPreprocessDialog() {
                 
                 // ⭐ CLICK HANDLER: Toggle Active Status via API
                 docItem.onclick = async () => {
-                    if (!currentUserId) {
+                    if (currentUserId === undefined || currentUserId === null) {
                         alert("Session error: Cannot identify user.");
                         return;
                     }
