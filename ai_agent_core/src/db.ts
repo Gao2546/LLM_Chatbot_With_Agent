@@ -397,7 +397,8 @@ async function initializeDummyData() {
         // 1. Insert System User (ID 0) if not exists
         // We use ID 0 to avoid conflicts with auto-incrementing regular users (starting at 1)
         // Hash the password
-        const hashedPassword = await bcrypt.hash("hicpadmin", 10);
+        const hashedPassword = await bcrypt.hash("hicpadmin", 10) as string;
+        console.log(hashedPassword)
         await pool.query(`
             INSERT INTO users (id, username, password, email, role, is_active, is_guest)
             VALUES (0, 'system_placeholder', ${hashedPassword}, 'system@local', 'admin', TRUE, FALSE)
