@@ -78,7 +78,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Create a session
-    req.session.user = { id: user.id, username: user.username, socketId: socketId, isGuest: false };
+    req.session.user = { id: user.id, username: user.username, role: user.role, socketId: socketId, isGuest: false };
     console.log(`Auth: Session created for user ${user.username} (ID: ${user.id})`)
     console.log(req.session.user)
 

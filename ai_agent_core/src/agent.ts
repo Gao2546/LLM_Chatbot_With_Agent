@@ -1128,13 +1128,13 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
   // 1. Validate Session
   const userId = req.session.user?.id;
   const role = req.session.user?.role;
-  // if (userId === undefined || userId === null) {
-  //     return res.status(401).json({ error: "Unauthorized: User session not found." });
-  // }
-
-  if (role != 'admin') {
-    return res.status(401).json({ error: "Unauthorized: User session not found." });
+  if (userId === undefined || userId === null || role != 'admin') {
+      return res.status(401).json({ error: "Unauthorized: User session not admin." });
   }
+
+  // if (role != 'admin') {
+  //   return res.status(401).json({ error: "Unauthorized: User session not found." });
+  // }
 
   try {
       // 2. Prepare FormData for Python Server
