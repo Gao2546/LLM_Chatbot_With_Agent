@@ -111,7 +111,7 @@ const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoi
 // Session timeout cleanup middleware
 app.use(async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Bypass session check for public API endpoints and non-api routes
-  const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications", "/api/related-questions", "/api/related-questions-all"];
+  const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications", "/api/related-questions", "/api/related-questions-all", "/api/chat/:chatId/files"];
   
   if (publicPaths.includes(req.path) || req.path.startsWith('/api/get-') || req.path.startsWith('/api/search-') || req.path.startsWith('/api/submit-')) {
     return next();

@@ -5398,6 +5398,7 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
 // =================================================================================
 router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
     const chatId = parseInt(req.params.chatId, 10);
+    console.log("passN1");
     
     if (isNaN(chatId)) {
         return res.status(400).json({ error: 'Invalid Chat ID' });
