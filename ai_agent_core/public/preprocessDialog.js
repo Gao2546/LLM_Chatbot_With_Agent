@@ -365,6 +365,7 @@ async function showPreprocessDialog() {
             const files = await response.json();
             docList.innerHTML = ''; // Clear loading message
             console.log("pass3");
+            console.log(files);
 
             if (files.length === 0) {
                 docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">No documents found.</div>';

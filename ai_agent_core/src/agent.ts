@@ -5406,6 +5406,7 @@ router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
 
     try {
         const files = await getFilesByChatId(chatId);
+        console.log(`Fetched ${files} files for chat ID ${chatId}`);
         res.json(files);
     } catch (error) {
         console.error('Error fetching files:', error);
