@@ -398,12 +398,14 @@ async function initializeDummyData() {
         // We use ID 0 to avoid conflicts with auto-incrementing regular users (starting at 1)
         // Hash the password
         const hashedPassword = await bcrypt.hash("hicpadmin", 10) as string;
-        console.log(hashedPassword)
-        await pool.query(`
-            INSERT INTO users (id, username, password, email, role, is_active, is_guest)
-            VALUES (0, 'system_placeholder', ${hashedPassword}, 'system@local', 'admin', TRUE, FALSE)
-            ON CONFLICT (id) DO NOTHING;
-        `);
+        await pool.query(
+          `
+          INSERT INTO users (id, username, password, email, role, is_active, is_guest)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (id) DO NOTHING;
+          `,
+          [0, 'system_placeholder', hashedPassword, 'system@local', 'admin', true, false]
+        );
         console.log('DB: System user (ID 0) ensured.');
 
         // 2. Insert Dummy Chat History (ID -1) if not exists
