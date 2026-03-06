@@ -199,8 +199,8 @@ FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PATH="/home/chatllm/.local/bin:${PATH}"\
-    LOCAL=True
+    PATH="/home/chatllm/.local/bin:${PATH}"
+
 
 # 1. Install system dependencies as ROOT
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -294,7 +294,7 @@ ENV MPLCONFIGDIR=/home/chatllm/.config/matplotlib \
     MINIO_BUCKET=user-files \
     MINIO_USE_SSL=false \
     IS_DOCKER=true \
-    LOCAL=False \
+    LOCAL=True \
     IFXGPT=True \
     IFXGPT_CERT_PATH=/app/ca-bundle.crt \
     NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt \
