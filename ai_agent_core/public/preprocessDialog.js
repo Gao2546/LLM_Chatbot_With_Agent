@@ -514,6 +514,7 @@ async function showPreprocessDialog() {
                                 docItem.classList.remove('active');
                             }
                         } else {
+                            console.error(res.error || "Unknown error");
                             console.error("Failed to toggle status");
                         }
                     } catch (error) {
