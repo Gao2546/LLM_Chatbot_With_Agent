@@ -1497,6 +1497,7 @@ async function displayChatList(chatIds) {
     chatListDiv.innerHTML = ''; // Clear existing list
 
     chatIds.forEach(chatId => {
+        if (chatId < 0) return; // Skip invalid chat IDs
         const chatElement = document.createElement('div');
         chatElement.classList.add('chat-item');
 
