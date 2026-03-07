@@ -4282,7 +4282,7 @@ router.get('/reload-page', async (req: Request, res: Response) => {
     
     res.json({ 
       success: true, 
-      userId: userId || null,
+      userId: userId ?? null,
       username: username 
     });
   } catch (error) {
@@ -5496,7 +5496,7 @@ router.delete('/file/:fileId', async (req: Request, res: Response) => {
 router.post('/file/:fileId/active', async (req: Request, res: Response) => {
     const fileId = parseInt(req.params.fileId, 10);
     // Use session ID by default, or allow body override if needed
-    const userId = req.session.user?.id || req.body.userId;
+    const userId = req.session.user?.id ?? req.body.userId;
     console.log(`Adding active user: fileId=${fileId}, userId=${userId}`);
     console.log('Session user:', req.session.user);
 
@@ -5524,7 +5524,7 @@ router.post('/file/:fileId/active', async (req: Request, res: Response) => {
 router.delete('/file/:fileId/active', async (req: Request, res: Response) => {
     const fileId = parseInt(req.params.fileId, 10);
     // Use session ID by default, or allow body override if needed
-    const userId = req.session.user?.id || req.body.userId;
+    const userId = req.session.user?.id ?? req.body.userId;
 
     if (isNaN(fileId)) {
         return res.status(400).json({ error: 'Invalid File ID' });
