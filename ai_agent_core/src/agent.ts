@@ -1271,15 +1271,15 @@ router.post("/create_guest_user", async (req: Request, res: Response) => {
     const guestUser = await createGuestUser(guestName);
 
     // 2) Create chat history for the guest
-    const chat_history_id = await newChatHistory(guestUser.id, docSearchMethod);
+    // const chat_history_id = await newChatHistory(guestUser.id, docSearchMethod);
 
     // 3) Initialize session
     req.session.user = {
       id: guestUser.id,
       username: guestUser.username,
       isGuest: true,
-      chatIds: [chat_history_id],
-      currentChatId: chat_history_id,
+      chatIds: [],
+      currentChatId: null,
       currentDocSearchMethod: docSearchMethod,
       currentChatMode: initialMode,
       currentChatModel: initialModel,
@@ -1288,9 +1288,9 @@ router.post("/create_guest_user", async (req: Request, res: Response) => {
 
     // 4) Persist user/chat settings
     await setUserActiveStatus(guestUser.id, true);
-    await setChatMode(chat_history_id, initialMode);
-    await setChatModel(chat_history_id, initialModel);
-    await setCurrentChatId(guestUser.id, chat_history_id);
+    // await setChatMode(chat_history_id, initialMode);
+    // await setChatModel(chat_history_id, initialModel);
+    // await setCurrentChatId(guestUser.id, chat_history_id);
 
     return res.status(201).json({
       ok: true,

@@ -783,27 +783,27 @@ async function showPreprocessDialog() {
             processBtn.disabled = false;
             dropdown.disabled = false;
             
-            // const res = await fetch("/api/processDocument", {
-            //     method: "POST",
-            //     body: formData
-            // });
+            const res = await fetch("/api/processDocument", {
+                method: "POST",
+                body: formData
+            });
 
-            async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), timeoutMs);
+            // async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
+            // const controller = new AbortController();
+            // const id = setTimeout(() => controller.abort(), timeoutMs);
 
-            try {
-                return await fetch(url, { ...options, signal: controller.signal });
-            } finally {
-                clearTimeout(id);
-            }
-            }
+            // try {
+            //     return await fetch(url, { ...options, signal: controller.signal });
+            // } finally {
+            //     clearTimeout(id);
+            // }
+            // }
 
-            // usage
-            const res = await fetchWithTimeout("/api/processDocument", {
-            method: "POST",
-            body: formData,
-            }, 86400000);
+            // // usage
+            // const res = await fetchWithTimeout("/api/processDocument", {
+            // method: "POST",
+            // body: formData,
+            // }, 86400000);
 
             // if (!res.ok) throw new Error("Server failed to process document");
 
