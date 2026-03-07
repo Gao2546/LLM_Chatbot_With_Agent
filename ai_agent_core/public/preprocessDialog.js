@@ -459,10 +459,10 @@ async function showPreprocessDialog() {
                 
                 // ⭐ CLICK HANDLER: Toggle Active Status via API
                 docItem.onclick = async () => {
-                    if (currentUserId === undefined || currentUserId === null) {
-                        alert("Session error: Cannot identify user.");
-                        return;
-                    }
+                    // if (currentUserId === undefined || currentUserId === null) {
+                    //     alert("Session error: Cannot identify user.");
+                    //     return;
+                    // }
 
                     // Determine intended action based on current UI state
                     const isCurrentlyActive = docItem.classList.contains('active');
