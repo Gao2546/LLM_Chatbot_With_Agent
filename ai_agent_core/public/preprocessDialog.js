@@ -322,9 +322,44 @@ async function showPreprocessDialog() {
     // ⭐ NEW: STATE MANAGEMENT
     // =========================================================
     let currentUserId = null;
+    try {
+        // Using /reload-page as it returns session info including userId
+        // const response = await fetch('/api/isGuest'); 
+        const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
+        if (response.ok) {
+            const data = await response.json();
+            currentUserId = data.userId;
+            console.log("Current User ID:", currentUserId);
+        }
+    } catch (e) {
+        console.error("Failed to fetch user session", e);
+    }
 
     // Helper to get current user ID from session
-    const getCurrentUser = async () => {
+    // const getCurrentUser = async () => {
+    //     try {
+    //         // Using /reload-page as it returns session info including userId
+    //         // const response = await fetch('/api/isGuest'); 
+    //         const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
+    //         if (response.ok) {
+    //             const data = await response.json();
+    //             currentUserId = data.userId;
+    //             console.log("Current User ID:", currentUserId);
+    //         }
+    //     } catch (e) {
+    //         console.error("Failed to fetch user session", e);
+    //     }
+    // };
+    // getCurrentUser(); // Initial call to set user ID
+
+    // =========================================================
+    // ⭐ UPDATED: DOCUMENT LIST LOGIC
+    // =========================================================
+    
+    const fetchAndRenderDocuments = async () => {
+        docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
+        
+        let currentUserId = null;
         try {
             // Using /reload-page as it returns session info including userId
             // const response = await fetch('/api/isGuest'); 
@@ -337,15 +372,6 @@ async function showPreprocessDialog() {
         } catch (e) {
             console.error("Failed to fetch user session", e);
         }
-    };
-    getCurrentUser(); // Initial call to set user ID
-
-    // =========================================================
-    // ⭐ UPDATED: DOCUMENT LIST LOGIC
-    // =========================================================
-    
-    const fetchAndRenderDocuments = async () => {
-        docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
         
         try {
             // 1. Ensure we have the user ID first
