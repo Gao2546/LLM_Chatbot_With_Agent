@@ -337,6 +337,7 @@ async function showPreprocessDialog() {
             console.error("Failed to fetch user session", e);
         }
     };
+    getCurrentUser(); // Initial call to set user ID
 
     // =========================================================
     // ⭐ UPDATED: DOCUMENT LIST LOGIC
@@ -348,10 +349,10 @@ async function showPreprocessDialog() {
         try {
             // 1. Ensure we have the user ID first
             // if (currentUserId === undefined || currentUserId === null) await getCurrentUser();
-            // if (currentUserId === undefined || currentUserId === null) {
-            //     docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
-            //     return;
-            // }
+            if (currentUserId === undefined || currentUserId === null) {
+                docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
+                return;
+            }
 
             // 2. Fetch files
             const response = await fetch('/api/chat/-1/files'); 
@@ -365,7 +366,6 @@ async function showPreprocessDialog() {
             const files = await response.json();
             docList.innerHTML = ''; // Clear loading message
             console.log("pass3");
-            console.log(files);
 
             if (files.length === 0) {
                 docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">No documents found.</div>';
@@ -456,14 +456,13 @@ async function showPreprocessDialog() {
                 docItem.appendChild(docName);
                 docItem.appendChild(statusSpan); 
                 docItem.appendChild(delBtn);
-                console.log("pass4");
+                
                 // ⭐ CLICK HANDLER: Toggle Active Status via API
                 docItem.onclick = async () => {
-                    console.log(`Toggling active status for file ID ${fileId} by user ${currentUserId}`);
-                    // if (currentUserId === undefined || currentUserId === null) {
-                    //     alert("Session error: Cannot identify user.");
-                    //     return;
-                    // }
+                    if (currentUserId === undefined || currentUserId === null) {
+                        alert("Session error: Cannot identify user.");
+                        return;
+                    }
 
                     // Determine intended action based on current UI state
                     const isCurrentlyActive = docItem.classList.contains('active');
@@ -496,13 +495,11 @@ async function showPreprocessDialog() {
                         statusSpan.classList.remove('pp-loading');
                     }
                 };
-                console.log("pass5");
 
                 docItem.ondblclick = () => {
                     // Pass the objectName to the preview function
                     handleFilePreview(fileName, objectName, previewView, mainFormView);
                 };
-                console.log("pass6");
 
                 docList.appendChild(docItem);
             });

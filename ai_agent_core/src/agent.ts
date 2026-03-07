@@ -1251,6 +1251,58 @@ router.post('/create_record', async (req : Request, res : Response) => {
 });
 
 
+
+router.post("/create_guest_user", async (req: Request, res: Response) => {
+  const { model: selectedModel, mode: selectedMode, docSearchMethod: selectedDocSearchMethod, socket: socketId } =
+    req.body;
+
+  const initialMode = selectedMode ?? "ask";
+  const initialModel = selectedModel ?? "gemma3:1b";
+  const docSearchMethod = selectedDocSearchMethod ?? "none";
+
+  try {
+    // If a user already exists in session, just return it (optional behavior)
+    if (req.session.user) {
+      return res.status(200).json({ ok: true, user: req.session.user });
+    }
+
+    // 1) Create guest user
+    const guestName = `guest_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const guestUser = await createGuestUser(guestName);
+
+    // 2) Create chat history for the guest
+    const chat_history_id = await newChatHistory(guestUser.id, docSearchMethod);
+
+    // 3) Initialize session
+    req.session.user = {
+      id: guestUser.id,
+      username: guestUser.username,
+      isGuest: true,
+      chatIds: [chat_history_id],
+      currentChatId: chat_history_id,
+      currentDocSearchMethod: docSearchMethod,
+      currentChatMode: initialMode,
+      currentChatModel: initialModel,
+      socketId: socketId,
+    };
+
+    // 4) Persist user/chat settings
+    await setUserActiveStatus(guestUser.id, true);
+    await setChatMode(chat_history_id, initialMode);
+    await setChatModel(chat_history_id, initialModel);
+    await setCurrentChatId(guestUser.id, chat_history_id);
+
+    return res.status(201).json({
+      ok: true,
+      user: req.session.user,
+    });
+  } catch (err) {
+    console.error("Error creating guest user/session:", err);
+    return res.status(500).json({ error: "Failed to create guest session" });
+  }
+});
+
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -1305,7 +1357,7 @@ router.post('/message', async (req : Request, res : Response) => {
     // const documentSearchMethod = docSearchMethod || "none";
 
     let chatContent = "";
-    if (currentChatId) {
+    if (currentChatId != null || currentChatId != undefined) {
       const rows = await readChatHistory(currentChatId);
       // REMOVED: await createChatFolder(userId, currentChatId);
       if (rows.length > 0) {
@@ -1322,7 +1374,7 @@ router.post('/message', async (req : Request, res : Response) => {
       req.session.user!.socketId = socketId;
     }
 
-    if (currentChatId){
+    if (currentChatId !== null && currentChatId !== undefined) {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
         method: 'POST',
