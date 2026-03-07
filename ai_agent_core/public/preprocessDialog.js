@@ -327,7 +327,8 @@ async function showPreprocessDialog() {
     const getCurrentUser = async () => {
         try {
             // Using /reload-page as it returns session info including userId
-            const response = await fetch('/api/isGuest'); 
+            // const response = await fetch('/api/isGuest'); 
+            const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
             if (response.ok) {
                 const data = await response.json();
                 currentUserId = data.userId;

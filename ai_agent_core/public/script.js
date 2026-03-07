@@ -522,12 +522,27 @@ function applyTheme(theme) {
     updateThemeButton(theme);
 }
 
+function createGuestUser() {
+    fetch('/api/create_guest_user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Guest user created:', data);
+    })
+    .catch(error => {
+        console.error('Error creating guest user:', error);
+    });
+}
+
 
 // Fetch chat history when the page loads
 document.addEventListener('DOMContentLoaded', async (event) => {
     // socket.emit('pong');
     console.log('reload-page')
     initTheme(); // Initialize theme on page load
+    createGuestUser(); // Create a guest user on page load (if needed)
     // Add this check: Collapse sidebar on load if screen is small
     if (window.innerWidth < 868) {
         const chatList = document.getElementById('chatList');
@@ -574,7 +589,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             console.error("Failed to fetch session info for doc search button", e);
         }
 
-        if (isGuest || isGuest == undefined) {
+        if (isGuest == undefined) { // If we couldn't determine guest status, default to disabling the button for safety
             docSearchBtn.title = "Login required to use document search";
             docSearchBtn.classList.add('disabled');
             docSearchBtn.style.pointerEvents = 'none';
