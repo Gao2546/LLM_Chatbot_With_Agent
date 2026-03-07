@@ -456,9 +456,10 @@ async function showPreprocessDialog() {
                 docItem.appendChild(docName);
                 docItem.appendChild(statusSpan); 
                 docItem.appendChild(delBtn);
-                
+                console.log("pass4");
                 // ⭐ CLICK HANDLER: Toggle Active Status via API
                 docItem.onclick = async () => {
+                    console.log(`Toggling active status for file ID ${fileId} by user ${currentUserId}`);
                     // if (currentUserId === undefined || currentUserId === null) {
                     //     alert("Session error: Cannot identify user.");
                     //     return;
@@ -495,11 +496,13 @@ async function showPreprocessDialog() {
                         statusSpan.classList.remove('pp-loading');
                     }
                 };
+                console.log("pass5");
 
                 docItem.ondblclick = () => {
                     // Pass the objectName to the preview function
                     handleFilePreview(fileName, objectName, previewView, mainFormView);
                 };
+                console.log("pass6");
 
                 docList.appendChild(docItem);
             });
