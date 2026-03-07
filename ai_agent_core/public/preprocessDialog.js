@@ -816,6 +816,7 @@ async function showPreprocessDialog() {
                 // alert('Processing complete!');
             }
             else {
+                fetchAndRenderDocuments(); // Refresh to remove temp item
                 alert(`Processing failed: ${result.message || result.error || 'Unknown error'}`);;
             }
 
