@@ -1174,6 +1174,85 @@ async function getTextPageFromURL(url: string): Promise<string> {
   }
 }
 
+/**
+ * Reuse your existing function as-is (shown in your snippet):
+ *   async function getTextPageFromURL(url: string): Promise<string>
+ * It returns markdown (string).
+ */
+
+/**
+ * POST /upload_url
+ * Body: { url: string, file_name?: string, user_id?: string|number, chat_id?: string|number, text?: string }
+ *
+ * - Fetch URL -> extract markdown via getTextPageFromURL()
+ * - Create a "virtual file" markdown buffer
+ * - Forward to Python /process like your /upload endpoint
+ */
+router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
+  const { url, file_name, user_id, chat_id, text } = req.body as {
+    url: string;
+    file_name?: string;
+    user_id?: string | number;
+    chat_id?: string | number;
+    text?: string;
+  };
+
+  // Prefer explicit user/chat passed in body; fallback to session (optional)
+  const userId = user_id ?? req.session.user?.id;
+  const chatId = chat_id ?? req.session.user?.currentChatId;
+
+  if (!url) return res.status(400).send('Missing "url".');
+  if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
+    return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
+  }
+
+  try {
+    // 1) Extract markdown text from the URL
+    const markdown = await getTextPageFromURL(url);
+
+    // 2) Turn markdown into an in-memory "file" (like multer would)
+    const safeName = (file_name?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
+    const mdBuffer = Buffer.from(markdown, 'utf8');
+
+    const fileMetadata = [
+      {
+        originalName: safeName,
+        mimeType: 'text/markdown',
+        size: mdBuffer.length,
+        fileType: 'document',
+        isImage: false,
+        isTable: false,
+        isDocument: true,
+        sourceUrl: url
+      }
+    ];
+
+    // 3) Forward to Python processing server (same structure as /upload)
+    const form = new FormData();
+    form.append('user_id', String(userId));
+    form.append('chat_history_id', String(chatId));
+    form.append('text', text ?? ''); // optional user message
+    form.append('processing_mode', 'legacy_text'); // or 'new_page_image'
+    form.append('file_metadata', JSON.stringify(fileMetadata));
+
+    // Organized "document" field + backward compatible "files"
+    form.append('document_0', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+    form.append('files', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+
+    const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+    const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
+      headers: form.getHeaders(),
+      maxBodyLength: Infinity
+    });
+
+    return res.json(flaskRes.data.reply);
+  } catch (err) {
+    console.error('Error during /upload_url:', err);
+    return res.status(500).send('Failed to fetch URL, create markdown, or process.');
+  }
+});
+
+
 router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
   const { text, method, url, url_filename } = req.body;
   const files = req.files as Express.Multer.File[];

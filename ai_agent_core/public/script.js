@@ -318,6 +318,33 @@ const fileInput = document.getElementById('fileInput');
 const selectedFilesDiv = document.getElementById('selectedFiles');
 const fileDialogButton = document.getElementById('fileDialogButton');
 const changeDirButton = document.getElementById('changeDirButton');
+const urlInput = document.getElementById('urlInput')
+
+
+urlInput.addEventListener('click', async () => {
+    // Show the native browser dialog
+    const enteredUrl = prompt("Please enter the URL:");
+
+    // Check if the user entered something (and didn't click Cancel)
+    if (enteredUrl !== null && enteredUrl.trim() !== '') {
+        console.log("URL entered:", enteredUrl);
+        // Add your logic here to handle the URL
+    } else {
+        console.log("User cancelled or entered an empty string.");
+    }
+
+    const formData = new FormData()
+
+    const fileName = enteredUrl.split('/').pop() || "URL Content";
+    formData.append('url',enteredUrl)
+    formData.append('file_name',fileName)
+
+    const res = await fetch("api/upload_url", {
+                method: "POST",
+                body: formData
+            });
+
+});
 
 // 1. Create a global DataTransfer object to hold the accumulated files
 const dt = new DataTransfer();

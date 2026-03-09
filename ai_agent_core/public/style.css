@@ -960,6 +960,33 @@ strong {
     color: inherit;
 }
 
+#urlInput {
+    order: 2; 
+    position: static;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: transparent;
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: auto; 
+    transition: all 0.2s;
+}
+
+#urlInput:hover {
+    background-color: rgba(128, 128, 128, 0.1);
+    color: var(--text-color);
+}
+
+#urlInput i {
+    color: var(--text-color);
+    font-size: 16px;
+}
+
 /* File Input Label Styles */
 .file-input-label {
     order: 2; 
@@ -975,6 +1002,7 @@ strong {
     cursor: pointer;
     flex-shrink: 0;
     margin-right: auto; 
+    margin-right: 10px;
     transition: all 0.2s;
 }
 
