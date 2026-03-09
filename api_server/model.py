@@ -1257,6 +1257,18 @@ User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
+    
+    conn = get_db_connection()
+    # Check DB for Legacy Data
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+    has_legacy = cur.fetchone()
+    
+    # Check DB for New Page Data
+    cur.execute("SELECT 1 FROM document_page_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+    has_pages = cur.fetchone()
+    cur.close()
+
     # Try to get embedding with fallback
     try:
         if IFXGPT:
@@ -1267,7 +1279,7 @@ Output only the simulated excerpt.
         print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
         query_embeddingT = encode_text_for_embedding(queryT)
     
-    if (document_search_method != 'none'):
+    if ((document_search_method != 'none') or (has_legacy != None) or (has_pages != None)):
         if not LOCAL:
             if IFXGPT:
                 try:
