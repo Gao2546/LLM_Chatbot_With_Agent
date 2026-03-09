@@ -563,6 +563,60 @@ async function showPreprocessDialog() {
     fileUploadDiv.appendChild(fileInput); 
     inputSection.appendChild(fileUploadDiv);
 
+    const orUrl = document.createElement('div');
+    orUrl.className = 'pp-separator';
+    orUrl.textContent = 'OR PASTE URL';
+    inputSection.appendChild(orUrl);
+
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.placeholder = 'Paste URL here...';
+    urlInput.className = 'pp-input';
+    inputSection.appendChild(urlInput);
+
+    urlInput.oninput = () => {
+        const hasValue = urlInput.value.trim() !== '';
+
+        // 1. Disable/Enable Text Area
+        textArea.disabled = hasValue;
+        if (hasValue) {
+            textArea.value = ''; // Clear text if URL is being used
+        }
+
+        // 2. Disable/Enable File Upload
+        uploadBtn.disabled = hasValue;
+        uploadBtn.style.opacity = hasValue ? '0.5' : '1';
+        uploadBtn.style.cursor = hasValue ? 'not-allowed' : 'pointer';
+        
+        if (hasValue) {
+            fileInput.value = '';       // Clear selected file
+            fileNameInput.value = '';   // Clear displayed filename
+        }
+
+        // 3. Handle Encoding Dropdown
+        // Most URL processing is "Text" based (scraping)
+        if (hasValue) {
+            dropdown.value = 'text';
+            dropdown.disabled = true;
+        } else {
+            // Re-enable only if the other fields are also empty
+            if (textArea.value === '' && fileInput.files.length === 0) {
+                dropdown.disabled = false;
+            }
+        }
+
+        // 4. Auto-fill Output Name from URL (Optional but helpful)
+        if (hasValue && !outputInput.value) {
+            try {
+                const url = new URL(urlInput.value);
+                const pathName = url.pathname.split('/').pop();
+                if (pathName) outputInput.value = pathName;
+            } catch (e) {
+                // Not a valid URL yet, ignore
+            }
+        }
+    };
+
     const orText = document.createElement('div');
     orText.className = 'pp-separator';
     orText.textContent = 'OR PASTE TEXT';
@@ -655,11 +709,12 @@ async function showPreprocessDialog() {
         const fileCount = fileInput.files.length;
         const textContent = textArea.value;
         const outputNameVal = outputInput.value.trim();
+        const urlValue = urlInput.value.trim();
 
         // 1. Validation
-        if (fileCount === 0 && textContent.trim() === ''){
-            alert("Please select a file or paste text content to process.");
-            return;   
+        if (fileCount === 0 && textContent.trim() === '' && urlValue === '') {
+            alert("Please select a file, paste text content, or provide a URL to process.");
+            return;
         }
 
         // 2. Lock UI & Visual Feedback
@@ -680,6 +735,8 @@ async function showPreprocessDialog() {
             tempDisplayName = outputNameVal || file.name;
         } else if (outputNameVal) {
             tempDisplayName = outputNameVal;
+        } else if (urlValue) {
+            tempDisplayName = outputNameVal || urlValue.split('/').pop() || "URL Content";
         } else {
             tempDisplayName = "Text Content";
         }
@@ -729,6 +786,14 @@ async function showPreprocessDialog() {
             
             const textFile = new File([textContent], finalName, { type: 'text/plain' });
             formData.append('files', textFile);
+        }
+
+        else if (urlValue.trim() !== '') {
+            let finalName = tempDisplayName
+            if (finalName.indexOf('.') === -1) finalName += '.txt';
+
+            formData.append('url', urlValue);
+            formData.append('url_filename', finalName);
         }
 
         formData.append("text", "Please describe the image in detail in a text format.");
@@ -927,7 +992,7 @@ async function handleFilePreview(filename, objectName, previewContainer, formCon
         contentArea.appendChild(embed);
     }
     // 5. TEXT / CODE FILES (Fetch content)
-    else if (['txt', 'md', 'js', 'json', 'py', 'html', 'css', 'xml', 'yaml', 'yml', 'sh', 'sql', 'java', 'c', 'cpp'].includes(ext)) {
+    else if (['js', 'json', 'py', 'html', 'css', 'xml', 'yaml', 'yml', 'sh', 'sql', 'java', 'c', 'cpp'].includes(ext)) {
         contentArea.style.alignItems = 'flex-start';
         
         const pre = document.createElement('pre');
@@ -976,7 +1041,51 @@ async function handleFilePreview(filename, objectName, previewContainer, formCon
         }
     }
 
-    // 7. FALLBACK
+    // 7. Markdown
+
+    else if (['txt', 'md'].includes(ext)) {
+        contentArea.style.alignItems = 'flex-start';
+        
+        const container = document.createElement('div');
+        container.style.cssText = 'width:100%; padding:20px; overflow:auto;';
+        container.className = 'markdown-content'; // Added class for easier CSS styling later
+        
+        try {
+            const response = await fetch(fileUrl);
+            if (response.ok) {
+                const markdown = await response.text();
+                
+                // Use the Marked.js library to convert markdown to HTML safely
+                const html = marked.parse(markdown);
+                
+                container.innerHTML = html;
+                
+                // Apply dark theme styling
+                container.querySelectorAll('h1, h2, h3').forEach(el => {
+                    el.style.color = '#e0e0e0';
+                    el.style.marginTop = '15px';
+                });
+                container.querySelectorAll('p, li').forEach(el => { // Added 'li' to style lists too
+                    el.style.color = '#d4d4d4';
+                    el.style.lineHeight = '1.6';
+                });
+                // Optional: Style code blocks if your markdown contains them
+                container.querySelectorAll('pre, code').forEach(el => {
+                    el.style.backgroundColor = '#2d2d2d';
+                    el.style.borderRadius = '4px';
+                });
+            
+            } else {
+                container.innerHTML = `<p style="color:#ff6b6b;">Error loading markdown: ${response.statusText}</p>`;
+            }
+        } catch (e) {
+            container.innerHTML = '<p style="color:#ff6b6b;">Failed to load file content.</p>';
+        }
+    
+        contentArea.appendChild(container);
+    }
+
+    // 8. FALLBACK
     else {
         const fallback = document.createElement('div');
         fallback.style.textAlign = 'center';

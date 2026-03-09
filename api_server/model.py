@@ -1163,7 +1163,7 @@ def process_document_api():
                     file_text = extract_txt_file(file_stream)
 
                 if file_text and file_text.strip():
-                    data_vector = encode_text_for_embedding(file_text)
+                    data_vector = encode_text_for_embedding(search_text=file_text)
                     save_vector_to_db(
                         user_id=user_id,
                         chat_history_id=chat_history_id,
@@ -1976,6 +1976,32 @@ def encode_embedding():
             'embedding': embedding,
             'dimensions': actual_dimensions,
             'requested_dimensions': dimensions
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/llm_inference', methods=['POST'])
+def llm_inference():
+    """ทดสอบ LLM inference ผ่าน API นี้ได้เลย (เช่น Ollama หรือ DeepInfra)"""
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt', 'Hello, how are you?')
+        model_name = data.get('model', 'llava' if LOCAL else 'qwen/qwen3-235b-a22b-2507')
+        system_prompt = data.get('system_prompt', 'You are a html content analyzer.\n Help me to convert html to markdown')  # Optional system prompt for DeepInfra
+        
+        if LOCAL:
+            response = ollama_generate_text(prompt=prompt, model=model_name)
+        else:
+            response = OpenRouterInference(prompt=prompt, system_prompt=system_prompt, model_name=model_name)
+        print("Model output:")
+        print(response)
+        return jsonify({
+            'success': True,
+            'response': response
         })
     except Exception as e:
         return jsonify({
