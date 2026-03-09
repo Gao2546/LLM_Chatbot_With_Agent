@@ -675,6 +675,7 @@ def process():
     
     processed_files = []
     n_pages = 0
+    start_process = time.time()
     
     for file in files:
         filename = file.filename
@@ -813,6 +814,7 @@ def process():
 
         # elif (processing_mode == 'new_page_image') or (n_pages > 25):
         elif (n_pages > 5):
+            start_process = time.time()
             # --- NEW IMAGE-PER-PAGE PROCESSING (BATCHED) ---
             if not filename.lower().endswith('.pdf'):
                 print(f"Skipped file: 'new_page_image' mode only supports PDF. File: {filename}")
