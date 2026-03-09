@@ -335,31 +335,41 @@ urlInput.addEventListener('click', async () => {
 
     const fileName = enteredUrl.split('/').pop() || "URL Content";
 
-    // สร้าง Object ธรรมดา แทน FormData
-    const payload = {
-        url: enteredUrl,
-        file_name: fileName
-    };
-
-    try {
-        const res = await fetch("api/upload_url", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
-            },
-            body: JSON.stringify(payload) // แปลง Object เป็น JSON String
-        });
-
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-        }
-
-        const data = await res.json();
-        console.log("Success:", data);
-
-    } catch (error) {
-        console.error("Error uploading URL:", error);
+    // Store URL and filename in global object
+    if (!window.urlList) {
+        window.urlList = [];
     }
+    window.urlList.push({
+        url: enteredUrl,
+        filename: fileName
+    });
+    console.log("URL list stored:", window.urlList);
+
+    // สร้าง Object ธรรมดา แทน FormData
+    // const payload = {
+    //     url: enteredUrl,
+    //     file_name: fileName
+    // };
+
+    // try {
+    //     const res = await fetch("api/upload_url", {
+    //         method: "POST",
+    //         headers: {
+    //             "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
+    //         },
+    //         body: JSON.stringify(payload) // แปลง Object เป็น JSON String
+    //     });
+
+    //     if (!res.ok) {
+    //         throw new Error(`HTTP error! status: ${res.status}`);
+    //     }
+
+    //     const data = await res.json();
+    //     console.log("Success:", data);
+
+    // } catch (error) {
+    //     console.error("Error uploading URL:", error);
+    // }
 
 });
 
@@ -1202,6 +1212,31 @@ async function sendMessage() {
         resetButtonState(); // Reset button state on error
         clearSelectedFiles();
     }
+
+    try {
+        if (window.urlList && window.urlList.length > 0) {
+            for (let URLpayload of window.urlList) {
+                const res = await fetch("api/upload_url", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
+                    },
+                    body: JSON.stringify(URLpayload) // แปลง Object เป็น JSON String
+                });
+
+
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+
+                const data = await res.json();
+                console.log("Success:", data);
+            }
+        }
+    } catch (error) {
+        console.error("Error uploading URL:", error);
+    } 
+
 
     try {
         const sessionResponse = await fetch('/auth/session');
