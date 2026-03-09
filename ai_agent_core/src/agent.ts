@@ -1123,13 +1123,19 @@ router.post('/upload', upload.array('files'), async (req, res) => {
 
 async function getTextPageFromURL(url: string): Promise<string> {
   try {
-      const response = await fetch(url,{
+      let response
+      if (url.includes("https://confluencewikiprod.intra.infineon.com")){
+        response = await fetch(url,{
           method: 'GET',
           headers: {
                     "Authorization": `Bearer ${process.env.ConfluencePAT}`,
                     'Content-Type': "application/json",
                     }
         });
+      }
+      else{
+        response = await fetch(url);
+      }
       if (!response.ok) {
           throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
       }
