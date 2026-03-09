@@ -18,6 +18,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { GoogleGenAI } from "@google/genai";
 import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
 
 import { 
     setChatMode, 
@@ -1120,9 +1121,55 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     }
 });
 
+async function getTextPageFromURL(url: string): Promise<string> {
+  try {
+      const response = await fetch(url,{
+          method: 'GET',
+          headers: {
+                    "Authorization": `Bearer ${process.env.ConfluencePAT}`,
+                    'Content-Type': "application/json",
+                    }
+        });
+      if (!response.ok) {
+          throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+      const html = await response.text();
+      const $ = cheerio.load(html);
+
+      // Remove all script and style tags completely
+      $('script, style').remove();
+
+      // Get the cleaned body content
+      const cleanHtml = $('body').html() || "";
+
+      // OR: Get just the clean text (no HTML tags at all)
+      const cleanText = $('body').text().replace(/\s+/g, ' ').trim() || "";
+
+      console.log(cleanText);
+
+      console.log(`HTML content fetched from ${url} (length: ${cleanText.length} characters). Sending to LLM for text extraction...`);
+      const llm_response = await fetch(`${process.env.API_SERVER_URL || 'http://localhost:5000'}/llm_inference`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: cleanText ,
+                                 system_prompt: "Extract the main textual content from the given HTML page. Remove all HTML tags, scripts, styles, and non-text elements. Return only markdown that a user would read on the page. Keep all data in english",
+                                 model: 'gpt-5-mini',
+
+                                })
+      });
+      if (!llm_response.ok) {
+          throw new Error(`Failed to extract text from HTML: ${llm_response.status} ${llm_response.statusText}`);
+      }
+      const llm_data = await llm_response.json() as {response:string,success:boolean};
+      return llm_data.response;
+  } catch (error) {
+      console.error(`Error fetching URL (${url}):`, error);
+      throw error;
+  }
+}
 
 router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
-  const { text, method } = req.body;
+  const { text, method, url, url_filename } = req.body;
   const files = req.files as Express.Multer.File[];
   
   // 1. Validate Session
@@ -1137,6 +1184,21 @@ router.post('/processDocument', upload.array('files'), async (req: Request, res:
   // }
 
   try {
+    if (url) {
+          console.log(`Fetching content from URL: ${url}...`);
+          const urlText = await getTextPageFromURL(url);
+          // Create a virtual file for the URL content
+          const virtualFile: Partial<Express.Multer.File> = {
+              fieldname: 'files',
+              originalname: url_filename || `url_content_${Date.now()}.txt`,
+              encoding: 'utf-8',
+              mimetype: 'text/plain',
+              buffer: Buffer.from(urlText, 'utf-8'),
+              size: Buffer.byteLength(urlText, 'utf-8')
+          };
+          files.push(virtualFile as Express.Multer.File);
+      }
+
       // 2. Prepare FormData for Python Server
       const form = new FormData();
       

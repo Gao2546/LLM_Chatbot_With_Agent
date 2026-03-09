@@ -1131,7 +1131,7 @@ def process_document_api():
                                 if IFXGPT:
                                     data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
                                 else:
-                                    data_vector = encode_text_for_embedding(chunk_text)
+                                    data_vector = encode_text_for_embedding(search_text=file_text)
                     
                                 save_vector_to_db(
                                     user_id=user_id,
@@ -2007,48 +2007,72 @@ def encode_embedding():
 
 
 # === LLM INFERENCE ENDPOINT (for AI Judge) ===
+# @app.route('/llm_inference', methods=['POST'])
+# def llm_inference():
+#     """เรียกใช้ LLM เพื่อ generate text
+    
+#     Request body:
+#     {
+#         "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
+#         "model": "llama3:latest",  # optional (default: llama3:latest)
+#         "system_prompt": ""  # optional
+#     }
+    
+#     Used for: AI Judge to analyze AI vs Human answers
+#     """
+#     try:
+#         data = request.json
+#         prompt = data.get('prompt', '')
+#         model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
+#         system_prompt = data.get('system_prompt', '')
+        
+#         if not prompt:
+#             return jsonify({'error': 'No prompt provided'}), 400
+        
+#         # Use ollama_generate_text from utils
+#         response = ollama_generate_text(
+#             prompt=prompt,
+#             model=model,
+#             system_prompt=system_prompt
+#         )
+        
+#         return jsonify({
+#             'success': True,
+#             'response': response,
+#             'model': model
+#         })
+#     except Exception as e:
+#         print(f"LLM inference error: {e}")
+#         return jsonify({
+#             'success': False,
+#             'error': str(e),
+#             'response': ''
+#         }), 500
+
 @app.route('/llm_inference', methods=['POST'])
 def llm_inference():
-    """เรียกใช้ LLM เพื่อ generate text
-    
-    Request body:
-    {
-        "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
-        "model": "llama3:latest",  # optional (default: llama3:latest)
-        "system_prompt": ""  # optional
-    }
-    
-    Used for: AI Judge to analyze AI vs Human answers
-    """
+    """ทดสอบ LLM inference ผ่าน API นี้ได้เลย (เช่น Ollama หรือ DeepInfra)"""
     try:
-        data = request.json
-        prompt = data.get('prompt', '')
-        model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
-        system_prompt = data.get('system_prompt', '')
+        data = request.get_json()
+        prompt = data.get('prompt', 'Hello, how are you?')
+        model_name = data.get('model', 'llava' if LOCAL else 'gpt-5-mini')
+        system_prompt = data.get('system_prompt', 'You are a html content analyzer.\n Help me to convert html to markdown')  # Optional system prompt for DeepInfra
         
-        if not prompt:
-            return jsonify({'error': 'No prompt provided'}), 400
-        
-        # Use ollama_generate_text from utils
-        response = ollama_generate_text(
-            prompt=prompt,
-            model=model,
-            system_prompt=system_prompt
-        )
-        
+        if LOCAL:
+            response = ollama_generate_text(prompt=prompt, model=model_name)
+        else:
+            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name=model_name)
+        print("Model output:")
+        print(response)
         return jsonify({
             'success': True,
-            'response': response,
-            'model': model
+            'response': response
         })
     except Exception as e:
-        print(f"LLM inference error: {e}")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'response': ''
+            'error': str(e)
         }), 500
-
 
 if __name__ == '__main__':
     # path_keys = os.popen("find ../ -name '.key'").read().split("\n")[0]
