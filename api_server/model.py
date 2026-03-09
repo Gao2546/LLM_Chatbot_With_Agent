@@ -727,47 +727,89 @@ def process():
             else:
                 file_text = extract_txt_file(file_stream)
 
-            if not file_text.strip():
-                print(f"❌ Skipped file (empty or unsupported text): {filename}")
-                continue
-            
-            print(f"✅ Text extracted: {len(file_text)} characters")
-            
-            try:
-                if IFXGPT:
-                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+            if file_text and file_text.strip():
+                # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=3072,  # Conservative chunk size to stay under 8164 tokens
+                    chunk_overlap=614,
+                    separators=["\n\n", "\n", "。", "!", "?", " ", ""] # Added common punctuation
+                )
+                text_chunks = text_splitter.split_text(file_text)
+                print("size of chunck : ",len(text_chunks))
+                for c in text_chunks:
+                    print(c)
+                
+                if not text_chunks:
+                    print(f"No text chunks extracted from {filename}")
+                    continue
+                
+                print(f"Processing {len(text_chunks)} chunks from {filename}")
+                
+                # # Process each chunk
+                # chunk_count = 0
+                # for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                #     try:
+                #         # Generate embedding for this chunk
+                #         if IFXGPT:
+                #             data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                #         else:
+                #             data_vector = encode_text_for_embedding(chunk_text)
+                        
+                #         # Save chunk to database
+                #         save_vector_to_db(
+                #             user_id=user_id,
+                #             chat_history_id=chat_history_id,
+                #             uploaded_file_id=uploaded_file_id,
+                #             file_name=filename,
+                #             text=chunk_text,
+                #             embedding=data_vector,
+                #             page_number=chunk_idx  # Use chunk index as page number
+                #         )
+                #         chunk_count += 1
+                #     except Exception as chunk_err:
+                #         print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                #         continue
+
+                chunk_count = 0
+                for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+                    for attempt in range(1, MAX_RETRIES + 1):
+                        try:
+                            if IFXGPT:
+                                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
+                            else:
+                                data_vector = encode_text_for_embedding(search_text=file_text)
+                
+                            save_vector_to_db(
+                                user_id=user_id,
+                                chat_history_id=chat_history_id,
+                                uploaded_file_id=uploaded_file_id,
+                                file_name=filename,
+                                text=chunk_text,
+                                embedding=data_vector,
+                                page_number=chunk_idx
+                            )
+                            chunk_count += 1
+                            break  # success
+                        except Exception as chunk_err:
+                            if is_rate_limit_error(chunk_err) and attempt < MAX_RETRIES:
+                                print(f"Rate limit on chunk {chunk_idx}. Sleeping {RATE_LIMIT_SLEEP}s then retrying...")
+                                time.sleep(RATE_LIMIT_SLEEP)
+                                continue
+
+                            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
+                            break
+                
+                if chunk_count > 0:
+                    processed_files.append({
+                        "name": filename,
+                        "status": "indexed_as_text",
+                        "chunks": chunk_count
+                    })
+                    print(f"Successfully saved {chunk_count} chunks from {filename}")
                 else:
-                    data_vector = encode_text_for_embedding(chunk_text)
-                print(f"✅ Vector created: {len(data_vector)} dimensions")
-                
-                save_vector_to_db(
-                    user_id=user_id,
-                    chat_history_id=chat_history_id,
-                    uploaded_file_id=uploaded_file_id,
-                    file_name=filename,
-                    text=file_text,
-                    embedding=data_vector,
-                    page_number=-1
-                )
-                
-                conn = get_db_connection()
-                # ✅ Verify save to DB
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT COUNT(*) FROM document_embeddings WHERE user_id = %s AND chat_history_id = %s AND uploaded_file_id = %s",
-                    (user_id, chat_history_id, uploaded_file_id)
-                )
-                count = cur.fetchone()[0]
-                cur.close()
-                print(f"✅ Verification: {count} record(s) saved in DB for '{filename}'")
-                
-                processed_files.append(filename)
-                
-            except Exception as e:
-                print(f"❌ Error saving to DB: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
+                    print(f"Failed to process any chunks from {filename}")
+            else:
+                print(f"No text extracted from {filename}")
 
         # elif (processing_mode == 'new_page_image') or (n_pages > 25):
         elif (n_pages > 5):
