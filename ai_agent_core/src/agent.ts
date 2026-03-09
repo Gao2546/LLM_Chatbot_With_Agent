@@ -701,7 +701,85 @@ async function getTextPageFromURL(url: string): Promise<string> {
   }
 }
 
+/**
 
+* POST /upload_url
+* Body: { url: string, file_name?: string, user_id?: string|number, chat_id?: string|number, text?: string }
+* 
+* 
+   * Fetch URL -> extract markdown via getTextPageFromURL()
+
+* 
+   * Create a "virtual file" markdown buffer
+
+* 
+   * Forward to Python /process like your /upload endpoint
+*/
+router.post('/upload_url', express.json({ limit: '10mb' }), async (req, res) => {
+  const { url, file_name, user_id, chat_id, text } = req.body as {
+    url: string;
+    file_name?: string;
+    user_id?: string | number;
+    chat_id?: string | number;
+    text?: string;
+  };
+
+
+  // Prefer explicit user/chat passed in body; fallback to session (optional)
+  const userId = user_id ?? req.session.user?.id;
+  const chatId = chat_id ?? req.session.user?.currentChatId;
+
+  if (!url) return res.status(400).send('Missing "url".');
+  if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
+    return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
+  }
+
+  try {
+    // 1) Extract markdown text from the URL
+    const markdown = await getTextPageFromURL(url);
+
+    // 2) Turn markdown into an in-memory "file" (like multer would)
+    const safeName = (file_name?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
+    const mdBuffer = Buffer.from(markdown, 'utf8');
+
+    const fileMetadata = [
+      {
+        originalName: safeName,
+        mimeType: 'text/markdown',
+        size: mdBuffer.length,
+        fileType: 'document',
+        isImage: false,
+        isTable: false,
+        isDocument: true,
+        sourceUrl: url
+      }
+    ];
+
+    // 3) Forward to Python processing server (same structure as /upload)
+    const form = new FormData();
+    form.append('user_id', String(userId));
+    form.append('chat_history_id', String(chatId));
+    form.append('text', text ?? ''); // optional user message
+    form.append('processing_mode', 'legacy_text'); // or 'new_page_image'
+    form.append('file_metadata', JSON.stringify(fileMetadata));
+
+    // Organized "document" field + backward compatible "files"
+    form.append('document_0', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+    form.append('files', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+
+    const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+    const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
+      headers: form.getHeaders(),
+      maxBodyLength: Infinity
+    });
+
+    return res.json(flaskRes.data.reply);
+
+  } catch (err) {
+    console.error('Error during /upload_url:', err);
+    return res.status(500).send('Failed to fetch URL, create markdown, or process.');
+  }
+});
 
 // Process files extract information and save it to database, this endpoint is designed for the "Process File" dialog where users can upload files with an optional text input and specify a processing method (e.g., 'text' for text extraction or 'image' for VLM embedding). The endpoint validates the user session, organizes the uploaded files, and forwards everything to the Python server for processing. After processing, it updates the file status in the database and returns the response to the client.
 router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
@@ -896,6 +974,24 @@ router.post('/message', async (req : Request, res : Response) => {
     let serch_doc = ""
     // const documentSearchMethod = docSearchMethod || "none";
 
+    let chatContent = "";
+    if (currentChatId) {
+      const rows = await readChatHistory(currentChatId);
+      // REMOVED: await createChatFolder(userId, currentChatId);
+      if (rows.length > 0) {
+        chatContent = rows[0].message;
+        if (!currentChatMode) {
+           currentChatMode = rows[0].chat_mode ?? initialMode;
+           req.session.user!.currentChatMode = currentChatMode;
+        }
+        if (!currentChatModel) {
+           currentChatModel = rows[0].chat_model ?? initialModel;
+           req.session.user!.currentChatModel = currentChatModel;
+        }
+      }
+      req.session.user!.socketId = socketId;
+    }
+
     if (currentChatId){
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
@@ -905,6 +1001,7 @@ router.post('/message', async (req : Request, res : Response) => {
           query: userMessage,
           user_id: userId,
           chat_history_id: currentChatId,
+          chat_history_messages: chatContent,
           top_k: 20,
           top_k_pages: 5,
           top_k_text: 5,
@@ -939,24 +1036,6 @@ router.post('/message', async (req : Request, res : Response) => {
     }
     console.log(serch_doc);
     console.log("*-*--*--*-*-*--*-*--*-*-*-*--**--")
-
-    let chatContent = "";
-    if (currentChatId) {
-      const rows = await readChatHistory(currentChatId);
-      // REMOVED: await createChatFolder(userId, currentChatId);
-      if (rows.length > 0) {
-        chatContent = rows[0].message;
-        if (!currentChatMode) {
-           currentChatMode = rows[0].chat_mode ?? initialMode;
-           req.session.user!.currentChatMode = currentChatMode;
-        }
-        if (!currentChatModel) {
-           currentChatModel = rows[0].chat_model ?? initialModel;
-           req.session.user!.currentChatModel = currentChatModel;
-        }
-      }
-      req.session.user!.socketId = socketId;
-    }
 
     if (selectedRole == "user"){
       chatContent += (chatContent ? "\n<DATA_SECTION>\n" : "") + "user" + ": " + userMessage + "\n";

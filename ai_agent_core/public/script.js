@@ -410,17 +410,56 @@ const changeDirButton = document.getElementById('changeDirButton');
 const urlInput = document.getElementById('urlInput')
 
 
-urlInput.addEventListener('click', () => {
+urlInput.addEventListener('click', async () => {
     // Show the native browser dialog
     const enteredUrl = prompt("Please enter the URL:");
-
+    
     // Check if the user entered something (and didn't click Cancel)
     if (enteredUrl !== null && enteredUrl.trim() !== '') {
         console.log("URL entered:", enteredUrl);
-        // Add your logic here to handle the URL
     } else {
         console.log("User cancelled or entered an empty string.");
+        return; // เพิ่ม return ตรงนี้ เพื่อไม่ให้มันยิง API ถ้า user กด Cancel
     }
+
+    const fileName = enteredUrl.split('/').pop() || "URL Content";
+
+    // สร้าง Object ธรรมดา แทน FormData
+    const payload = {
+        url: enteredUrl,
+        file_name: fileName
+    };
+
+    // Store URL and filename in global object
+    if (!window.urlList) {
+        window.urlList = [];
+    }
+    window.urlList.push({
+        url: enteredUrl,
+        filename: fileName
+    });
+    console.log("URL list stored:", window.urlList);
+    
+
+    // try {
+    //     const res = await fetch("api/upload_url", {
+    //         method: "POST",
+    //         headers: {
+    //             "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
+    //         },
+    //         body: JSON.stringify(payload) // แปลง Object เป็น JSON String
+    //     });
+
+    //     if (!res.ok) {
+    //         throw new Error(`HTTP error! status: ${res.status}`);
+    //     }
+
+    //     const data = await res.json();
+    //     console.log("Success:", data);
+
+    // } catch (error) {
+    //     console.error("Error uploading URL:", error);
+    // }
 });
 
 
@@ -1246,6 +1285,29 @@ async function sendMessage() {
         console.log("Error sending message")
         resetButtonState(); // Reset button state on error
         clearSelectedFiles();
+    }
+
+    try {
+        if (window.urlList && window.urlList.length > 0) {
+            for (let URLpayload of window.urlList) {
+                const res = await fetch("api/upload_url", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
+                    },
+                    body: JSON.stringify(URLpayload) // แปลง Object เป็น JSON String
+                });
+
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+
+                const data = await res.json();
+                console.log("Success:", data);
+            }
+        }
+    } catch (error) {
+        console.error("Error uploading URL:", error);
     }
 
     try {

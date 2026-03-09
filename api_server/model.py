@@ -1236,6 +1236,7 @@ def search_similar_api_unified():
         queryT = data.get('query')
         user_id = int(data.get('user_id'))
         chat_history_id = int(data.get('chat_history_id'))
+        chat_history_messages = data.get('chat_history_messages',[])
         
         top_k_text = int(data.get('top_k_text', 5))
         top_k_pages = int(data.get('top_k_pages', 5))
@@ -1269,7 +1270,17 @@ def search_similar_api_unified():
     Output only the simulated excerpt.
     """ #*****************
 
-    if (document_search_method != 'none'):
+    # Check DB for Legacy Data
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+    has_legacy = cur.fetchone()
+    
+    # Check DB for New Page Data
+    cur.execute("SELECT 1 FROM document_page_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
+    has_pages = cur.fetchone()
+    cur.close()
+
+    if ((document_search_method != 'none') or (has_legacy != None) or (has_pages != None)):
         if not LOCAL:
                 search_text = DeepInfraInference(
                     prompt=create_search_prompt,
