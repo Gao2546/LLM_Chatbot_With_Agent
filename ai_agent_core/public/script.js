@@ -328,21 +328,38 @@ urlInput.addEventListener('click', async () => {
     // Check if the user entered something (and didn't click Cancel)
     if (enteredUrl !== null && enteredUrl.trim() !== '') {
         console.log("URL entered:", enteredUrl);
-        // Add your logic here to handle the URL
     } else {
         console.log("User cancelled or entered an empty string.");
+        return; // เพิ่ม return ตรงนี้ เพื่อไม่ให้มันยิง API ถ้า user กด Cancel
     }
 
-    const formData = new FormData()
-
     const fileName = enteredUrl.split('/').pop() || "URL Content";
-    formData.append('url',enteredUrl)
-    formData.append('file_name',fileName)
 
-    const res = await fetch("api/upload_url", {
-                method: "POST",
-                body: formData
-            });
+    // สร้าง Object ธรรมดา แทน FormData
+    const payload = {
+        url: enteredUrl,
+        file_name: fileName
+    };
+
+    try {
+        const res = await fetch("api/upload_url", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
+            },
+            body: JSON.stringify(payload) // แปลง Object เป็น JSON String
+        });
+
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const data = await res.json();
+        console.log("Success:", data);
+
+    } catch (error) {
+        console.error("Error uploading URL:", error);
+    }
 
 });
 
