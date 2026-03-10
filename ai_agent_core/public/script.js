@@ -1256,6 +1256,7 @@ async function sendMessage() {
 
     if (res !== "ok"){
         console.log(res);
+        
         console.log("error upload url");
     }
 
