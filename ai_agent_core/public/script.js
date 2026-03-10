@@ -1302,13 +1302,14 @@ async function sendMessage() {
                     
             // 1. Create an AbortController instance
             const controller = new AbortController();
-            const signal = controller.signal;
                     
             // 2. Set up the timeout
             const timeoutId = setTimeout(() => {
                 console.log('Request timed out!');
                 controller.abort(); // This will cancel the fetch request
             }, TIMEOUT_DURATION);
+
+            const signal = controller.signal;
 
             // Send message to the backend
             const response = await fetch('/api/message', {
