@@ -1546,14 +1546,14 @@ router.post('/message', async (req : Request, res : Response) => {
           threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
-        // signal: controller.signal,
+        signal: controller.signal,
       });
-      // clearTimeout(timeoutId);
       console.log("pp7")
 
       const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
       console.log("----- Search Similar Documents Results -----")
       console.log(result_similar_TopK)
+      clearTimeout(timeoutId);
       if (result_similar_TopK && result_similar_TopK.results){
         result_similar_TopK.results.forEach(doc => {
           try {
