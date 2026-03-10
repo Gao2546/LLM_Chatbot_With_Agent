@@ -1123,9 +1123,11 @@ async function uploadUrl() {
             }
 
             window.urlList = [];
+            return "ok"
         }
         } catch (error) {
         console.error("Error uploading URL:", error);
+        return "error"
     }
 }
 
@@ -1252,7 +1254,7 @@ async function sendMessage() {
 
     const res = await uploadUrl();
 
-    if (!res.ok){
+    if (res !== "ok"){
         console.log("error upload url")
     }
 
