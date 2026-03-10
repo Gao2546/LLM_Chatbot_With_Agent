@@ -1459,7 +1459,9 @@ router.post('/message', async (req : Request, res : Response) => {
   try {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
-    // runningRequests.set(requestId, controller);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
+    runningRequests.set(requestId, controller);
     console.log("pp1")
     const socket = io.sockets.sockets.get(socketId);
     console.log("pp2")
@@ -1526,8 +1528,6 @@ router.post('/message', async (req : Request, res : Response) => {
     }
     console.log("pp6")
 
-    // const controller = new AbortController();
-    // const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
 
     if (currentChatId !== null && currentChatId !== undefined) {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
