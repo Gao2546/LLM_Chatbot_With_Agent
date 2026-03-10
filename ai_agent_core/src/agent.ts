@@ -1242,7 +1242,10 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
     const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
     const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
       headers: form.getHeaders(),
-      maxBodyLength: Infinity
+      timeout: 60 * 60 * 1000,          // 10 นาที (ปรับตามจริง)
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      validateStatus: () => true,
     });
 
     return res.json(flaskRes.data.reply);
@@ -1546,7 +1549,7 @@ router.post('/message', async (req : Request, res : Response) => {
           threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
-        // signal: controller.signal,
+        signal: controller.signal,
       });
       console.log("pp7")
 
