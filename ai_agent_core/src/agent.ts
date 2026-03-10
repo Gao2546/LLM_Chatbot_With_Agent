@@ -1526,8 +1526,8 @@ router.post('/message', async (req : Request, res : Response) => {
     }
     console.log("pp6")
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
+    // const controller = new AbortController();
+    // const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
 
     if (currentChatId !== null && currentChatId !== undefined) {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
@@ -1546,9 +1546,9 @@ router.post('/message', async (req : Request, res : Response) => {
           threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
-        signal: controller.signal,
+        // signal: controller.signal,
       });
-      clearTimeout(timeoutId);
+      // clearTimeout(timeoutId);
       console.log("pp7")
 
       const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
