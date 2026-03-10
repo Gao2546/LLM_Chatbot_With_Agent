@@ -1459,8 +1459,6 @@ router.post('/message', async (req : Request, res : Response) => {
   try {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
     runningRequests.set(requestId, controller);
     const socket = io.sockets.sockets.get(socketId);
     
@@ -1522,6 +1520,9 @@ router.post('/message', async (req : Request, res : Response) => {
       req.session.user!.socketId = socketId;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
+
     if (currentChatId !== null && currentChatId !== undefined) {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
@@ -1541,6 +1542,7 @@ router.post('/message', async (req : Request, res : Response) => {
         }),
         signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
       console.log("----- Search Similar Documents Results -----")
