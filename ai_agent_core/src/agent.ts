@@ -1510,7 +1510,7 @@ router.post('/message', async (req : Request, res : Response) => {
     console.log("pp5")
 
     let chatContent = "";
-    if (currentChatId != null || currentChatId != undefined) {
+    if (currentChatId !== null || currentChatId !== undefined) {
       const rows = await readChatHistory(currentChatId);
       // REMOVED: await createChatFolder(userId, currentChatId);
       if (rows.length > 0) {
