@@ -1096,7 +1096,7 @@ userInput.addEventListener('input', function() {
 async function uploadUrl() {
     try {
         if (window.urlList?.length) {
-            const TIMEOUT_DURATION = 1000 * 60 * 10; // ตัวอย่าง 10 นาทีพอ
+            const TIMEOUT_DURATION = 1000 * 60 * 60; // ตัวอย่าง 10 นาทีพอ
 
             for (const URLpayload of window.urlList) {
             const controller = new AbortController();
@@ -1255,7 +1255,8 @@ async function sendMessage() {
     const res = await uploadUrl();
 
     if (res !== "ok"){
-        console.log("error upload url")
+        console.log(res);
+        console.log("error upload url");
     }
 
 
