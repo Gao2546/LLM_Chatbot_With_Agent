@@ -1246,6 +1246,7 @@ async function sendMessage() {
 
                 const data = await res.json();
                 console.log("Success:", data);
+                window.urlList = []
             }
         }
     } catch (error) {
