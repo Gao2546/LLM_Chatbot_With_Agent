@@ -1459,7 +1459,7 @@ router.post('/message', async (req : Request, res : Response) => {
   try {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
-    runningRequests.set(requestId, controller);
+    // runningRequests.set(requestId, controller);
     const socket = io.sockets.sockets.get(socketId);
     
     // Get system information with timeout and fallback
