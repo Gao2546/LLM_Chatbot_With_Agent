@@ -1546,7 +1546,7 @@ router.post('/message', async (req : Request, res : Response) => {
           threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
-        signal: controller.signal,
+        // signal: controller.signal,
       });
       console.log("pp7")
 
