@@ -1460,6 +1460,7 @@ router.post('/message', async (req : Request, res : Response) => {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
     const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
     runningRequests.set(requestId, controller);
     const socket = io.sockets.sockets.get(socketId);
     
