@@ -1460,7 +1460,9 @@ router.post('/message', async (req : Request, res : Response) => {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
     // runningRequests.set(requestId, controller);
+    console.log("pp1")
     const socket = io.sockets.sockets.get(socketId);
+    console.log("pp2")
     
     // Get system information with timeout and fallback
     let systemInformation : resultsT = { content: [{ type: 'text', text: '{"os":"Unknown","system_hardware":"Unknown","current_directory":"Unknown","time":"' + new Date().toISOString() + '"}' }] };
@@ -1477,6 +1479,7 @@ router.post('/message', async (req : Request, res : Response) => {
       console.warn('Could not get system information, using defaults:', e);
       // Continue with default system information
     }
+    console.log("pp3")
     
     // Safe parsing with fallback
     let systemInformationJSON: any = { os: 'Unknown', system_hardware: 'Unknown', current_directory: 'Unknown', time: new Date().toISOString() };
@@ -1487,6 +1490,7 @@ router.post('/message', async (req : Request, res : Response) => {
     } catch (e) {
         console.warn('Could not parse system information, using defaults');
     }
+    console.log("pp4")
     
     let setting_prompt;
     setting_prompt = setting_prompts + "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n`
@@ -1501,6 +1505,7 @@ router.post('/message', async (req : Request, res : Response) => {
     let documentSearchMethod = req.session.user?.currentDocSearchMethod ?? 'none';
     let serch_doc = ""
     // const documentSearchMethod = docSearchMethod || "none";
+    console.log("pp5")
 
     let chatContent = "";
     if (currentChatId != null || currentChatId != undefined) {
@@ -1519,6 +1524,7 @@ router.post('/message', async (req : Request, res : Response) => {
       }
       req.session.user!.socketId = socketId;
     }
+    console.log("pp6")
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
@@ -1543,6 +1549,7 @@ router.post('/message', async (req : Request, res : Response) => {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      console.log("pp7")
 
       const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
       console.log("----- Search Similar Documents Results -----")
@@ -1629,6 +1636,7 @@ router.post('/message', async (req : Request, res : Response) => {
     }
 
     let response: { text: string } | null = null;
+    console.log("pp8")
     
     // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
     if (modeToUse === 'ai_suggests') {
@@ -2133,6 +2141,7 @@ router.post('/message', async (req : Request, res : Response) => {
    else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
     try {
       console.log("Calling IFX GPT API (internal OpenAI)...");
+      console.log("pp9")
       
       const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
       
@@ -2165,7 +2174,7 @@ router.post('/message', async (req : Request, res : Response) => {
     }
   }
 
-
+    console.log("pp10")
     if (!response){
       console.error("No response received from AI model");
       return res.status(500).json({ error: "No response received from AI model" });
