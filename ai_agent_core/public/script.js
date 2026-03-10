@@ -1216,29 +1216,29 @@ async function sendMessage() {
 
     try {
         if (window.urlList && window.urlList.length > 0) {
-            const TIMEOUT_DURATION = 1000*60*60*2;
+            // const TIMEOUT_DURATION = 1000*60*60*2;
                     
-            // 1. Create an AbortController instance
-            const controller = new AbortController();
+            // // 1. Create an AbortController instance
+            // const controller = new AbortController();
                     
-            // 2. Set up the timeout
-            const timeoutId = setTimeout(() => {
-                console.log('Request timed out!');
-                controller.abort(); // This will cancel the fetch request
-            }, TIMEOUT_DURATION);
+            // // 2. Set up the timeout
+            // const timeoutId = setTimeout(() => {
+            //     console.log('Request timed out!');
+            //     controller.abort(); // This will cancel the fetch request
+            // }, TIMEOUT_DURATION);
 
-            const signal = controller.signal;
+            // const signal = controller.signal;
             for (let URLpayload of window.urlList) {
-                const res = await fetch("api/upload_url", {
+                const res = await fetch("/api/upload_url", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
                     },
                     body: JSON.stringify(URLpayload), // แปลง Object เป็น JSON String
-                    signal: signal
+                    // signal: signal
                 });
 
-                clearTimeout(timeoutId);
+                // clearTimeout(timeoutId);
 
                 if (!res.ok) {
                     throw new Error(`HTTP error! status: ${res.status}`);
