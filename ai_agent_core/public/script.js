@@ -1237,6 +1237,7 @@ async function sendMessage() {
                     signal: signal
                 });
 
+                clearTimeout(timeoutId);
 
                 if (!res.ok) {
                     throw new Error(`HTTP error! status: ${res.status}`);
@@ -1322,8 +1323,6 @@ async function sendMessage() {
                 controller.abort(); // This will cancel the fetch request
             }, TIMEOUT_DURATION);
 
-            const signal = controller.signal;
-
             // Send message to the backend
             const response = await fetch('/api/message', {
             method: 'POST',
@@ -1338,8 +1337,10 @@ async function sendMessage() {
                 docSearchMethod: globalThis.docSearchState,
                 requestId: socket.id + sessionData.currChatId
             }),
-            signal: signal
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
 
 
