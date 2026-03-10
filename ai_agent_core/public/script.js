@@ -1215,43 +1215,38 @@ async function sendMessage() {
     }
 
     try {
-        if (window.urlList && window.urlList.length > 0) {
-            // const TIMEOUT_DURATION = 1000*60*60*2;
-                    
-            // // 1. Create an AbortController instance
-            // const controller = new AbortController();
-                    
-            // // 2. Set up the timeout
-            // const timeoutId = setTimeout(() => {
-            //     console.log('Request timed out!');
-            //     controller.abort(); // This will cancel the fetch request
-            // }, TIMEOUT_DURATION);
+        if (window.urlList?.length) {
+            const TIMEOUT_DURATION = 1000 * 60 * 10; // ตัวอย่าง 10 นาทีพอ
 
-            // const signal = controller.signal;
-            for (let URLpayload of window.urlList) {
+            for (const URLpayload of window.urlList) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_DURATION);
+
+            try {
                 const res = await fetch("/api/upload_url", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
-                    },
-                    body: JSON.stringify(URLpayload), // แปลง Object เป็น JSON String
-                    // signal: signal
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(URLpayload),
+                signal: controller.signal,
                 });
 
-                // clearTimeout(timeoutId);
-
                 if (!res.ok) {
-                    throw new Error(`HTTP error! status: ${res.status}`);
+                const t = await res.text().catch(() => "");
+                throw new Error(`upload_url HTTP ${res.status}: ${t}`);
                 }
 
                 const data = await res.json();
                 console.log("Success:", data);
-                window.urlList = []
+            } finally {
+                clearTimeout(timeoutId);
             }
+            }
+
+            window.urlList = [];
         }
-    } catch (error) {
+        } catch (error) {
         console.error("Error uploading URL:", error);
-    } 
+    }
 
 
     try {
@@ -1342,14 +1337,6 @@ async function sendMessage() {
             signal: controller.signal
         });
 
-        clearTimeout(timeoutId);
-
-
-
-
-
-
-
 
 
 
@@ -1384,6 +1371,7 @@ async function sendMessage() {
 
 
             const data = await response.json();
+            clearTimeout(timeoutId);
 
             if (data.response) {
                 agentResponse = data.response; // Store the FULL response
