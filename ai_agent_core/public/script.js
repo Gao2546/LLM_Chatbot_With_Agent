@@ -1093,6 +1093,42 @@ userInput.addEventListener('input', function() {
 });
 
 
+async function uploadUrl() {
+    try {
+        if (window.urlList?.length) {
+            const TIMEOUT_DURATION = 1000 * 60 * 10; // ตัวอย่าง 10 นาทีพอ
+
+            for (const URLpayload of window.urlList) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_DURATION);
+
+            try {
+                const res = await fetch("/api/upload_url", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(URLpayload),
+                signal: controller.signal,
+                });
+
+                if (!res.ok) {
+                const t = await res.text().catch(() => "");
+                throw new Error(`upload_url HTTP ${res.status}: ${t}`);
+                }
+
+                const data = await res.json();
+                console.log("Success:", data);
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            }
+
+            window.urlList = [];
+        }
+        } catch (error) {
+        console.error("Error uploading URL:", error);
+    }
+}
+
 async function sendMessage() {
     const defaultMode = populateModes(true); // Get default without modifying DOM yet
     const defaultModel = populateModels(true); // Get default without modifying DOM yet
@@ -1214,38 +1250,10 @@ async function sendMessage() {
         clearSelectedFiles();
     }
 
-    try {
-        if (window.urlList?.length) {
-            const TIMEOUT_DURATION = 1000 * 60 * 10; // ตัวอย่าง 10 นาทีพอ
+    const res = await uploadUrl();
 
-            for (const URLpayload of window.urlList) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_DURATION);
-
-            try {
-                const res = await fetch("/api/upload_url", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(URLpayload),
-                signal: controller.signal,
-                });
-
-                if (!res.ok) {
-                const t = await res.text().catch(() => "");
-                throw new Error(`upload_url HTTP ${res.status}: ${t}`);
-                }
-
-                const data = await res.json();
-                console.log("Success:", data);
-            } finally {
-                clearTimeout(timeoutId);
-            }
-            }
-
-            window.urlList = [];
-        }
-        } catch (error) {
-        console.error("Error uploading URL:", error);
+    if (!res.ok){
+        console.log("error upload url")
     }
 
 
