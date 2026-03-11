@@ -3316,7 +3316,7 @@ router.delete('/chat-history/:chatId', async (req, res) => {
 
 router.get('/ClearChat', async (req, res) => {
   const userId = req.session.user?.id;
-  if (userId) {
+  if (userId !== undefined && userId !== null) {
     await setCurrentChatId(userId, null);
     if (req.session.user) {
       req.session.user.currentChatId = null;
