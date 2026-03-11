@@ -786,7 +786,6 @@ function formatFileSize(bytes) {
 
 function clearSelectedFiles() {
     dt.items.clear();
-    // ลบ fileInput.files = dt.files; ออก เพราะไม่ทำงาน
     updateFileList();
     updateUrlList();
     selectedFilesDiv.style.display = 'none';
