@@ -1332,6 +1332,10 @@ async function sendMessage() {
                 controller.abort(); // This will cancel the fetch request
             }, TIMEOUT_DURATION);
 
+            setTimeout(() => {
+                console.log("wating 3 sec...")
+            }, 3*1000);
+
             // Send message to the backend
             const response = await fetch('/api/message', {
             method: 'POST',
