@@ -1002,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             const defaultMode = populateModes();
             const defaultModel = populateModels();
 
-            if (data.userId) {
+            if (data.userId !== undefined && data.userId !== null) {
                 socket.emit('register', { userId: data.userId });
                 messagesDiv.innerHTML = ''; // Clear existing messages
                 let lastUserMsg = null; // Track user message for pairing with next agent response
@@ -1599,7 +1599,7 @@ async function sendMessage() {
                     }
                 }
             }
-            if (sessionData.userId) {
+            if (sessionData.userId !== undefined && sessionData.userId !== null) {
                 socket.emit('register', { userId: sessionData.userId });
             }
         }
@@ -1792,7 +1792,7 @@ async function sendMessage() {
                         }
                     }
                 }
-                if (sessionData.userId) {
+                if (sessionData.userId !== undefined && sessionData.userId !== null) {
                     socket.emit('register', { userId: sessionData.userId });
                 }
             }
