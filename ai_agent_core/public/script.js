@@ -322,56 +322,113 @@ const changeDirButton = document.getElementById('changeDirButton');
 const urlInput = document.getElementById('urlInput')
 
 
-urlInput.addEventListener('click', async () => {
-    // Show the native browser dialog
-    const enteredUrl = prompt("Please enter the URL:");
+// Call this wherever you want (e.g., inside your click handler)
+function showUrlDialog() {
+  return new Promise((resolve) => {
+    // Backdrop
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
+    `;
 
-    // Check if the user entered something (and didn't click Cancel)
-    if (enteredUrl !== null && enteredUrl.trim() !== '') {
-        console.log("URL entered:", enteredUrl);
-    } else {
-        console.log("User cancelled or entered an empty string.");
-        return; // เพิ่ม return ตรงนี้ เพื่อไม่ให้มันยิง API ถ้า user กด Cancel
-    }
+    // Dialog
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: #fff; width: min(520px, 92vw); border-radius: 12px;
+      padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    `;
 
-    const fileName = enteredUrl.split('/').pop() || "URL Content";
+    dialog.innerHTML = `
+      <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">Enter URL</div>
+      <input id="urlDialogInput" type="url" placeholder="https://example.com"
+             style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; outline: none;" />
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+        <button id="urlDialogCancel" type="button"
+                style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; background:#fff; cursor:pointer;">
+          Cancel
+        </button>
+        <button id="urlDialogSubmit" type="button"
+                style="padding: 8px 12px; border-radius: 8px; border: 1px solid #0b5; background:#0b5; color:#fff; cursor:pointer;">
+          Submit
+        </button>
+      </div>
+      <div id="urlDialogError" style="color:#c00; font-size:12px; margin-top:8px; display:none;"></div>
+    `;
 
-    // Store URL and filename in global object
-    if (!window.urlList) {
-        window.urlList = [];
-    }
-    window.urlList.push({
-        url: enteredUrl,
-        filename: fileName
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    const input = dialog.querySelector("#urlDialogInput");
+    const btnCancel = dialog.querySelector("#urlDialogCancel");
+    const btnSubmit = dialog.querySelector("#urlDialogSubmit");
+    const err = dialog.querySelector("#urlDialogError");
+
+    const cleanup = () => {
+      document.removeEventListener("keydown", onKeyDown);
+      backdrop.remove();
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+        resolve(null); // cancelled
+      }
+      if (e.key === "Enter") {
+        btnSubmit.click();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+
+    btnCancel.addEventListener("click", () => {
+      cleanup();
+      resolve(null); // cancelled
     });
-    console.log("URL list stored:", window.urlList);
 
-    // สร้าง Object ธรรมดา แทน FormData
-    // const payload = {
-    //     url: enteredUrl,
-    //     file_name: fileName
-    // };
+    btnSubmit.addEventListener("click", () => {
+      const value = input.value.trim();
+      if (!value) {
+        err.style.display = "block";
+        err.textContent = "Please enter a URL.";
+        return;
+      }
+      cleanup();
+      resolve(value);
+    });
 
-    // try {
-    //     const res = await fetch("api/upload_url", {
-    //         method: "POST",
-    //         headers: {
-    //             "Content-Type": "application/json" // บอก Backend ว่านี่คือ JSON นะ
-    //         },
-    //         body: JSON.stringify(payload) // แปลง Object เป็น JSON String
-    //     });
+    // click outside = cancel
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) {
+        cleanup();
+        resolve(null);
+      }
+    });
 
-    //     if (!res.ok) {
-    //         throw new Error(`HTTP error! status: ${res.status}`);
-    //     }
+    setTimeout(() => input.focus(), 0);
+  });
+}
 
-    //     const data = await res.json();
-    //     console.log("Success:", data);
+urlInput.addEventListener("click", async () => {
+  const enteredUrl = await showUrlDialog();
 
-    // } catch (error) {
-    //     console.error("Error uploading URL:", error);
-    // }
+  if (enteredUrl === null) {
+    console.log("User cancelled.");
+    return;
+  }
 
+  console.log("URL entered:", enteredUrl);
+
+  const fileName = enteredUrl.split("/").filter(Boolean).pop() || "URL Content";
+
+  if (!window.urlList) window.urlList = [];
+  window.urlList.push({ url: enteredUrl, filename: fileName });
+
+  console.log("URL list stored:", window.urlList);
+
+  // If you want to call API later, do it here.
 });
 
 // 1. Create a global DataTransfer object to hold the accumulated files
