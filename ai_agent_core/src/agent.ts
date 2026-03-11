@@ -1107,13 +1107,25 @@ router.post('/upload', upload.array('files'), async (req, res) => {
             form.append('files', file.buffer, file.originalname);
         }
 
-        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
-        const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
-            headers: form.getHeaders()
-        });
-        
-        res.json(flaskRes.data.reply);
+      const API_SERVER_URL = process.env.API_SERVER_URL || "http://localhost:5000";
+
+      console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
+
+      const flaskRes = await fetch(`${API_SERVER_URL}/process`, {
+        method: "POST",
+        headers: {
+          ...form.getHeaders(), // includes multipart boundary
+        },
+        body: form as any, // FormData from `form-data` package (Node)
+      });
+
+      if (!flaskRes.ok) {
+        const errText = await flaskRes.text();
+        throw new Error(`Flask server error ${flaskRes.status}: ${errText}`);
+      }
+
+      const data = await flaskRes.json() as {reply:string,processed_files:string[]};
+      res.json(data.reply);
 
     } catch (err) {
         console.error("Error during the upload process:", err);
