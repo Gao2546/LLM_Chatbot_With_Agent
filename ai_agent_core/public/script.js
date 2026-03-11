@@ -441,7 +441,7 @@ function updateUrlList() {
   // ทางที่ถูกคือแยก container หรือทำ render รวม
 
   if (!window.urlList || window.urlList.length === 0) return;
-
+  selectedFilesDiv.style.display = 'flex';
   for (let i = 0; i < window.urlList.length; i++) {
     const file = window.urlList[i];
 
