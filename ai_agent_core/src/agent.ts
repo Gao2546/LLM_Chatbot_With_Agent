@@ -2376,7 +2376,7 @@ router.post('/message', async (req : Request, res : Response) => {
     chatContent = chatContent.replace("assistance: assistance:", "assistance:");
     all_response = all_response.replace("assistance:", "");
     
-    if (userId) {
+    if (userId !== undefined && userId !== null) {
       await storeChatHistory(currentChatId, chatContent);
     }
     
