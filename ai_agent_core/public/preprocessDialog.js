@@ -842,6 +842,7 @@ async function showPreprocessDialog() {
             fileNameInput.value = '';
             outputInput.value = '';
             textArea.value = '';
+            urlInput.value = '';
             textArea.disabled = false;
             
             processBtn.textContent = 'Process Document';
