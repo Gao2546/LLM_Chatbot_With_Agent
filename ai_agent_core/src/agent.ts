@@ -1201,9 +1201,9 @@ async function getTextPageFromURL(url: string): Promise<string> {
  * - Forward to Python /process like your /upload endpoint
  */
 router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
-  const { url, file_name, user_id, chat_id, text } = req.body as {
+  const { url, filename, user_id, chat_id, text } = req.body as {
     url: string;
-    file_name?: string;
+    filename?: string;
     user_id?: string | number;
     chat_id?: string | number;
     text?: string;
@@ -1223,7 +1223,7 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
     markdown = await getTextPageFromURL(url);
 
     // 2) Turn markdown into an in-memory "file" (like multer would)
-    const safeName = (file_name?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
+    const safeName = (filename?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
     const mdBuffer = Buffer.from(markdown, 'utf8');
 
     const fileMetadata = [
