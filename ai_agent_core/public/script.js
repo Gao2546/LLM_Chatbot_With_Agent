@@ -1096,7 +1096,7 @@ userInput.addEventListener('input', function() {
 async function uploadUrl() {
     try {
         if (window.urlList?.length) {
-            const TIMEOUT_DURATION = 1000 * 60 * 60; // ตัวอย่าง 10 นาทีพอ
+            const TIMEOUT_DURATION = 1000 * 60 * 60;
 
             for (const URLpayload of window.urlList) {
             const controller = new AbortController();
@@ -1256,7 +1256,6 @@ async function sendMessage() {
 
     if (res !== "ok"){
         console.log(res);
-        
         console.log("error upload url");
     }
 
@@ -1331,10 +1330,6 @@ async function sendMessage() {
                 console.log('Request timed out!');
                 controller.abort(); // This will cancel the fetch request
             }, TIMEOUT_DURATION);
-
-            setTimeout(() => {
-                console.log("wating 3 sec...")
-            }, 3*1000);
 
             // Send message to the backend
             const response = await fetch('/api/message', {
