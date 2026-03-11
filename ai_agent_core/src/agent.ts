@@ -1253,7 +1253,7 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
   //   console.error('Error during /upload_url:', err);
   //   return res.status(500).send('Failed to fetch URL, create markdown, or process.');
   // }
-  return "0"
+  return res.json({'ok':true})
 });
 
 
