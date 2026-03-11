@@ -322,95 +322,89 @@ const changeDirButton = document.getElementById('changeDirButton');
 const urlInput = document.getElementById('urlInput')
 
 
-// Call this wherever you want (e.g., inside your click handler)
+// Themed URL dialog (uses CSS classes from my previous message)
 function showUrlDialog() {
   return new Promise((resolve) => {
-    // Backdrop
-    const backdrop = document.createElement("div");
-    backdrop.style.cssText = `
-      position: fixed; inset: 0; background: rgba(0,0,0,.45);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 9999;
-    `;
+    const overlay = document.createElement("div");
+    overlay.className = "url-dialog-overlay";
+    overlay.innerHTML = `
+      <div class="url-dialog" role="dialog" aria-modal="true" aria-labelledby="urlDialogTitle">
+        <div class="url-dialog-header">
+          <div class="url-dialog-title" id="urlDialogTitle">Enter URL</div>
+          <button class="url-dialog-close" type="button" aria-label="Close">&times;</button>
+        </div>
 
-    // Dialog
-    const dialog = document.createElement("div");
-    dialog.style.cssText = `
-      background: #fff; width: min(520px, 92vw); border-radius: 12px;
-      padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    `;
+        <div class="url-dialog-body">
+          <label class="url-dialog-label" for="urlDialogInput">URL</label>
+          <input class="url-dialog-input" id="urlDialogInput" type="url"
+                 placeholder="https://example.com" autocomplete="off" />
 
-    dialog.innerHTML = `
-      <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">Enter URL</div>
-      <input id="urlDialogInput" type="url" placeholder="https://example.com"
-             style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; outline: none;" />
-      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
-        <button id="urlDialogCancel" type="button"
-                style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; background:#fff; cursor:pointer;">
-          Cancel
-        </button>
-        <button id="urlDialogSubmit" type="button"
-                style="padding: 8px 12px; border-radius: 8px; border: 1px solid #0b5; background:#0b5; color:#fff; cursor:pointer;">
-          Submit
-        </button>
+          <div class="url-dialog-error" id="urlDialogError"></div>
+        </div>
+
+        <div class="url-dialog-footer">
+          <button class="url-dialog-btn" type="button" data-action="cancel">Cancel</button>
+          <button class="url-dialog-btn url-dialog-btn-primary" type="button" data-action="submit">Submit</button>
+        </div>
       </div>
-      <div id="urlDialogError" style="color:#c00; font-size:12px; margin-top:8px; display:none;"></div>
     `;
 
-    backdrop.appendChild(dialog);
-    document.body.appendChild(backdrop);
+    document.body.appendChild(overlay);
 
-    const input = dialog.querySelector("#urlDialogInput");
-    const btnCancel = dialog.querySelector("#urlDialogCancel");
-    const btnSubmit = dialog.querySelector("#urlDialogSubmit");
-    const err = dialog.querySelector("#urlDialogError");
+    const dialog = overlay.querySelector(".url-dialog");
+    const input = overlay.querySelector("#urlDialogInput");
+    const err = overlay.querySelector("#urlDialogError");
+    const btnClose = overlay.querySelector(".url-dialog-close");
+    const btnCancel = overlay.querySelector('[data-action="cancel"]');
+    const btnSubmit = overlay.querySelector('[data-action="submit"]');
 
-    const cleanup = () => {
+    const showError = (msg) => {
+      err.textContent = msg;
+      err.style.display = "block";
+    };
+
+    const close = (value) => {
       document.removeEventListener("keydown", onKeyDown);
-      backdrop.remove();
+      overlay.classList.remove("show");
+      // wait transition then remove
+      setTimeout(() => overlay.remove(), 150);
+      resolve(value); // value: string | null
     };
 
     const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        cleanup();
-        resolve(null); // cancelled
-      }
-      if (e.key === "Enter") {
-        btnSubmit.click();
-      }
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter") btnSubmit.click();
     };
-
-    document.addEventListener("keydown", onKeyDown);
-
-    btnCancel.addEventListener("click", () => {
-      cleanup();
-      resolve(null); // cancelled
-    });
 
     btnSubmit.addEventListener("click", () => {
       const value = input.value.trim();
-      if (!value) {
-        err.style.display = "block";
-        err.textContent = "Please enter a URL.";
-        return;
+      if (!value) return showError("Please enter a URL.");
+      // Optional: basic URL validation
+      try {
+        new URL(value);
+      } catch {
+        return showError("Invalid URL format.");
       }
-      cleanup();
-      resolve(value);
+      close(value);
     });
 
-    // click outside = cancel
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) {
-        cleanup();
-        resolve(null);
-      }
+    btnCancel.addEventListener("click", () => close(null));
+    btnClose.addEventListener("click", () => close(null));
+
+    // click outside dialog = cancel
+    overlay.addEventListener("mousedown", (e) => {
+      if (!dialog.contains(e.target)) close(null);
     });
 
+    document.addEventListener("keydown", onKeyDown);
+
+    // animate in + focus
+    requestAnimationFrame(() => overlay.classList.add("show"));
     setTimeout(() => input.focus(), 0);
   });
 }
 
+// Your existing click handler updated to use the themed dialog
 urlInput.addEventListener("click", async () => {
   const enteredUrl = await showUrlDialog();
 
@@ -428,7 +422,7 @@ urlInput.addEventListener("click", async () => {
 
   console.log("URL list stored:", window.urlList);
 
-  // If you want to call API later, do it here.
+  // If you want to call API, do it here (optional)
 });
 
 // 1. Create a global DataTransfer object to hold the accumulated files
