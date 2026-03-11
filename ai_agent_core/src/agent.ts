@@ -1205,10 +1205,10 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
   if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
     return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
   }
-
+  let markdown : string = "";
   try {
     // 1) Extract markdown text from the URL
-    const markdown = await getTextPageFromURL(url);
+    markdown = await getTextPageFromURL(url);
 
   //   // 2) Turn markdown into an in-memory "file" (like multer would)
   //   const safeName = (file_name?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
@@ -1249,11 +1249,11 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
   //   });
 
   //   return res.json(flaskRes.data.reply);
-  // } catch (err) {
-  //   console.error('Error during /upload_url:', err);
-  //   return res.status(500).send('Failed to fetch URL, create markdown, or process.');
-  // }
-  return res.json({'ok': true,'message': markdown})
+  } catch (err) {
+    console.error('Error during /upload_url:', err);
+    return res.status(500).send('Failed to fetch URL, create markdown, or process.');
+  }
+  return res.json({'ok': true,'message': markdown || null})
 });
 
 
