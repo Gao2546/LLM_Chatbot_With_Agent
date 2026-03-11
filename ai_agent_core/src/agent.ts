@@ -3375,7 +3375,7 @@ router.get('/reload-page', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    if (!chatId) {
+    if (chatId === undefined || chatId === null) {
       return res.status(400).json({ error: 'ChatId is required' });
     }
 
@@ -4491,25 +4491,25 @@ router.post('/increment-view', async (req: Request, res: Response) => {
 });
 
 // GET /api/reload-page - Get current user info
-router.get('/reload-page', async (req: Request, res: Response) => {
-  try {
-    const userId = req.session.user?.id;
-    const username = req.session.user?.username || 'Guest';
+// router.get('/reload-page', async (req: Request, res: Response) => {
+//   try {
+//     const userId = req.session.user?.id;
+//     const username = req.session.user?.username || 'Guest';
     
-    res.json({ 
-      success: true, 
-      userId: userId ?? null,
-      username: username 
-    });
-  } catch (error) {
-    console.error('Error reloading page:', error);
-    res.json({ 
-      success: false, 
-      userId: null, 
-      username: 'Guest' 
-    });
-  }
-});
+//     res.json({ 
+//       success: true, 
+//       userId: userId ?? null,
+//       username: username 
+//     });
+//   } catch (error) {
+//     console.error('Error reloading page:', error);
+//     res.json({ 
+//       success: false, 
+//       userId: null, 
+//       username: 'Guest' 
+//     });
+//   }
+// });
 
 // GET /api/get-verification-status/:questionId - Get verification timeline for a question
 router.get('/get-verification-status/:questionId', async (req: Request, res: Response) => {
