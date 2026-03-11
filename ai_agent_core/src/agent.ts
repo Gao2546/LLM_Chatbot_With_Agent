@@ -1197,18 +1197,18 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
     text?: string;
   };
 
-  // // Prefer explicit user/chat passed in body; fallback to session (optional)
-  // const userId = user_id ?? req.session.user?.id;
-  // const chatId = chat_id ?? req.session.user?.currentChatId;
+  // Prefer explicit user/chat passed in body; fallback to session (optional)
+  const userId = user_id ?? req.session.user?.id;
+  const chatId = chat_id ?? req.session.user?.currentChatId;
 
-  // if (!url) return res.status(400).send('Missing "url".');
-  // if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
-  //   return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
-  // }
+  if (!url) return res.status(400).send('Missing "url".');
+  if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
+    return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
+  }
 
-  // try {
-  //   // 1) Extract markdown text from the URL
-  //   const markdown = await getTextPageFromURL(url);
+  try {
+    // 1) Extract markdown text from the URL
+    const markdown = await getTextPageFromURL(url);
 
   //   // 2) Turn markdown into an in-memory "file" (like multer would)
   //   const safeName = (file_name?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
@@ -1253,7 +1253,7 @@ router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
   //   console.error('Error during /upload_url:', err);
   //   return res.status(500).send('Failed to fetch URL, create markdown, or process.');
   // }
-  return res.json({'ok':true})
+  return res.json({'ok': true,'message': markdown})
 });
 
 
