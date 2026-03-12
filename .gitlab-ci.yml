@@ -74,7 +74,7 @@ default:
 
 deploy_hicp:
   stage: deploy
-  image: widerin/openshift-cli:4.13
+  image: widerin/openshift-cli
   script:
     - echo 'Build docker image using HICP Build configs'
     - oc login --token=${HICP_TOKEN} --server=${HICP_PROJECT_URL} --insecure-skip-tls-verify
