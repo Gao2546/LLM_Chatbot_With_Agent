@@ -230,28 +230,6 @@
 
 
 
-function cleanFileName(name, fallback = "Untitled") {
-  if (!name) return fallback;
-
-  // drop any path
-  name = name.split(/[/\\]/).pop();
-
-  // normalize spaces + remove common illegal filename chars
-  name = name
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "");
-
-  // avoid reserved Windows names
-  const base = name.replace(/\.[^/.]+$/, "");
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) name = "_" + name;
-
-  // avoid trailing dot/space (Windows)
-  name = name.replace(/[. ]+$/g, "");
-
-  return name || fallback;
-}
-
 // preprocessDialog.js
 // Function to create and show the preprocess file dialog modal
 
@@ -344,48 +322,12 @@ async function showPreprocessDialog() {
     // ⭐ NEW: STATE MANAGEMENT
     // =========================================================
     let currentUserId = null;
-    try {
-        // Using /reload-page as it returns session info including userId
-        // const response = await fetch('/api/isGuest'); 
-        const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
-        if (response.ok) {
-            const data = await response.json();
-            currentUserId = data.userId;
-            console.log("Current User ID:", currentUserId);
-        }
-    } catch (e) {
-        console.error("Failed to fetch user session", e);
-    }
 
     // Helper to get current user ID from session
-    // const getCurrentUser = async () => {
-    //     try {
-    //         // Using /reload-page as it returns session info including userId
-    //         // const response = await fetch('/api/isGuest'); 
-    //         const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
-    //         if (response.ok) {
-    //             const data = await response.json();
-    //             currentUserId = data.userId;
-    //             console.log("Current User ID:", currentUserId);
-    //         }
-    //     } catch (e) {
-    //         console.error("Failed to fetch user session", e);
-    //     }
-    // };
-    // getCurrentUser(); // Initial call to set user ID
-
-    // =========================================================
-    // ⭐ UPDATED: DOCUMENT LIST LOGIC
-    // =========================================================
-    
-    const fetchAndRenderDocuments = async () => {
-        docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
-        
-        let currentUserId = null;
+    const getCurrentUser = async () => {
         try {
             // Using /reload-page as it returns session info including userId
-            // const response = await fetch('/api/isGuest'); 
-            const response = await fetch('/auth/session'); // Adjusted endpoint to get session info
+            const response = await fetch('/api/isGuest'); 
             if (response.ok) {
                 const data = await response.json();
                 currentUserId = data.userId;
@@ -394,33 +336,35 @@ async function showPreprocessDialog() {
         } catch (e) {
             console.error("Failed to fetch user session", e);
         }
+    };
+
+    // =========================================================
+    // ⭐ UPDATED: DOCUMENT LIST LOGIC
+    // =========================================================
+    
+    const fetchAndRenderDocuments = async () => {
+        docList.innerHTML = '<div style="padding:10px; color:#888; text-align:center; font-size:12px;">Loading files...</div>';
         
         try {
             // 1. Ensure we have the user ID first
-            // if (currentUserId === undefined || currentUserId === null) await getCurrentUser();
-            if (currentUserId === undefined || currentUserId === null) {
+            if (!currentUserId) await getCurrentUser();
+            if (!currentUserId) {
                 docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">User not logged in.</div>';
                 return;
             }
 
             // 2. Fetch files
             const response = await fetch('/api/chat/-1/files'); 
-            console.log("pass1");
-            
             
             if (!response.ok) throw new Error("Failed to load files");
-            console.log(response);
-            console.log("pass2");
             
             const files = await response.json();
             docList.innerHTML = ''; // Clear loading message
-            console.log("pass3");
 
             if (files.length === 0) {
                 docList.innerHTML = '<div style="padding:10px; color:#666; font-style:italic; font-size:12px;">No documents found.</div>';
                 return;
             }
-            console.log(files)
 
             files.forEach((fileObj) => {
                 const fileName = fileObj.file_name || fileObj.name || "Unknown File";
@@ -508,7 +452,7 @@ async function showPreprocessDialog() {
                 
                 // ⭐ CLICK HANDLER: Toggle Active Status via API
                 docItem.onclick = async () => {
-                    if (currentUserId === undefined || currentUserId === null) {
+                    if (!currentUserId) {
                         alert("Session error: Cannot identify user.");
                         return;
                     }
@@ -536,7 +480,6 @@ async function showPreprocessDialog() {
                                 docItem.classList.remove('active');
                             }
                         } else {
-                            console.error(res.error || "Unknown error");
                             console.error("Failed to toggle status");
                         }
                     } catch (error) {
@@ -555,12 +498,11 @@ async function showPreprocessDialog() {
             });
 
         } catch (error) {
-            console.log("Error fetching docs:");
-            console.log(JSON.stringify(error));
+            console.error("Error fetching docs:", error);
             docList.innerHTML = '<div style="padding:10px; color:#ff6b6b; font-size:12px;">Error loading list.</div>';
         }
     };
-    console.log("preview data...")
+
     // Initial Load
     fetchAndRenderDocuments();
 
@@ -620,60 +562,6 @@ async function showPreprocessDialog() {
     fileUploadDiv.appendChild(fileNameInput);
     fileUploadDiv.appendChild(fileInput); 
     inputSection.appendChild(fileUploadDiv);
-
-    const orUrl = document.createElement('div');
-    orUrl.className = 'pp-separator';
-    orUrl.textContent = 'OR PASTE URL';
-    inputSection.appendChild(orUrl);
-
-    const urlInput = document.createElement('input');
-    urlInput.type = 'text';
-    urlInput.placeholder = 'Paste URL here...';
-    urlInput.className = 'pp-input';
-    inputSection.appendChild(urlInput);
-
-    urlInput.oninput = () => {
-        const hasValue = urlInput.value.trim() !== '';
-
-        // 1. Disable/Enable Text Area
-        textArea.disabled = hasValue;
-        if (hasValue) {
-            textArea.value = ''; // Clear text if URL is being used
-        }
-
-        // 2. Disable/Enable File Upload
-        uploadBtn.disabled = hasValue;
-        uploadBtn.style.opacity = hasValue ? '0.5' : '1';
-        uploadBtn.style.cursor = hasValue ? 'not-allowed' : 'pointer';
-        
-        if (hasValue) {
-            fileInput.value = '';       // Clear selected file
-            fileNameInput.value = '';   // Clear displayed filename
-        }
-
-        // 3. Handle Encoding Dropdown
-        // Most URL processing is "Text" based (scraping)
-        if (hasValue) {
-            dropdown.value = 'text';
-            dropdown.disabled = true;
-        } else {
-            // Re-enable only if the other fields are also empty
-            if (textArea.value === '' && fileInput.files.length === 0) {
-                dropdown.disabled = false;
-            }
-        }
-
-        // 4. Auto-fill Output Name from URL (Optional but helpful)
-        if (hasValue && !outputInput.value) {
-            try {
-                const url = new URL(urlInput.value);
-                const pathName = url.pathname.split('/').pop();
-                if (pathName) outputInput.value = pathName;
-            } catch (e) {
-                // Not a valid URL yet, ignore
-            }
-        }
-    };
 
     const orText = document.createElement('div');
     orText.className = 'pp-separator';
@@ -767,11 +655,10 @@ async function showPreprocessDialog() {
         const fileCount = fileInput.files.length;
         const textContent = textArea.value;
         const outputNameVal = outputInput.value.trim();
-        const urlValue = urlInput.value.trim();
 
         // 1. Validation
-        if (fileCount === 0 && textContent.trim() === '' && urlValue === '') {
-            alert("Please select a file, paste text content, or provide a URL to process.");
+        if (fileCount === 0 && textContent.trim() === ''){
+            alert("Please select a file or paste text content to process.");
             return;   
         }
 
@@ -789,15 +676,12 @@ async function showPreprocessDialog() {
         // Determine Display Name
         let tempDisplayName = "Processing...";
         if (fileCount > 0) {
-        const file = fileInput.files[0];
-        tempDisplayName = cleanFileName(outputNameVal || file.name, "File");
+            const file = fileInput.files[0];
+            tempDisplayName = outputNameVal || file.name;
         } else if (outputNameVal) {
-        tempDisplayName = cleanFileName(outputNameVal, "Text Content");
-        } else if (urlValue) {
-        const urlName = urlValue.split("/").pop() || "URL Content";
-        tempDisplayName = cleanFileName(outputNameVal || urlName, "URL Content");
+            tempDisplayName = outputNameVal;
         } else {
-        tempDisplayName = "Text Content";
+            tempDisplayName = "Text Content";
         }
 
         // Build Inner HTML for Temp Item
@@ -847,14 +731,6 @@ async function showPreprocessDialog() {
             formData.append('files', textFile);
         }
 
-        else if (urlValue.trim() !== '') {
-            let finalName = tempDisplayName
-            if (finalName.indexOf('.') === -1) finalName += '.txt';
-
-            formData.append('url', urlValue);
-            formData.append('url_filename', finalName);
-        }
-
         formData.append("text", "Please describe the image in detail in a text format.");
         formData.append('method', methodValue);
 
@@ -865,7 +741,6 @@ async function showPreprocessDialog() {
             fileNameInput.value = '';
             outputInput.value = '';
             textArea.value = '';
-            urlInput.value = '';
             textArea.disabled = false;
             
             processBtn.textContent = 'Process Document';
@@ -873,27 +748,27 @@ async function showPreprocessDialog() {
             processBtn.disabled = false;
             dropdown.disabled = false;
             
-            const res = await fetch("/api/processDocument", {
-                method: "POST",
-                body: formData
-            });
+            // const res = await fetch("/api/processDocument", {
+            //     method: "POST",
+            //     body: formData
+            // });
 
-            // async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
-            // const controller = new AbortController();
-            // const id = setTimeout(() => controller.abort(), timeoutMs);
+            async function fetchWithTimeout(url, options = {}, timeoutMs = 86400000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
 
-            // try {
-            //     return await fetch(url, { ...options, signal: controller.signal });
-            // } finally {
-            //     clearTimeout(id);
-            // }
-            // }
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(id);
+            }
+            }
 
-            // // usage
-            // const res = await fetchWithTimeout("/api/processDocument", {
-            // method: "POST",
-            // body: formData,
-            // }, 86400000);
+            // usage
+            const res = await fetchWithTimeout("/api/processDocument", {
+            method: "POST",
+            body: formData,
+            }, 86400000);
 
             // if (!res.ok) throw new Error("Server failed to process document");
 
@@ -905,8 +780,7 @@ async function showPreprocessDialog() {
                 // alert('Processing complete!');
             }
             else {
-                fetchAndRenderDocuments(); // Refresh to remove temp item
-                alert(`Processing failed: ${result.message || result.error || 'Unknown error'}`);;
+                alert(`Processing failed: ${result.message || 'Unknown error'}`);;
             }
 
         } catch (error) {
@@ -1070,7 +944,7 @@ async function handleFilePreview(filename, objectName, previewContainer, formCon
         contentArea.appendChild(embed);
     }
     // 5. TEXT / CODE FILES (Fetch content)
-    else if (['js', 'json', 'py', 'html', 'css', 'xml', 'yaml', 'yml', 'sh', 'sql', 'java', 'c', 'cpp'].includes(ext)) {
+    else if (['txt', 'md', 'js', 'json', 'py', 'html', 'css', 'xml', 'yaml', 'yml', 'sh', 'sql', 'java', 'c', 'cpp'].includes(ext)) {
         contentArea.style.alignItems = 'flex-start';
         
         const pre = document.createElement('pre');
@@ -1119,51 +993,7 @@ async function handleFilePreview(filename, objectName, previewContainer, formCon
         }
     }
 
-    // 7. Markdown
-
-    else if (['txt', 'md'].includes(ext)) {
-        contentArea.style.alignItems = 'flex-start';
-        
-        const container = document.createElement('div');
-        container.style.cssText = 'width:100%; padding:20px; overflow:auto;';
-        container.className = 'markdown-content'; // Added class for easier CSS styling later
-        
-        try {
-            const response = await fetch(fileUrl);
-            if (response.ok) {
-                const markdown = await response.text();
-                
-                // Use the Marked.js library to convert markdown to HTML safely
-                const html = marked.parse(markdown);
-                
-                container.innerHTML = html;
-                
-                // Apply dark theme styling
-                container.querySelectorAll('h1, h2, h3').forEach(el => {
-                    el.style.color = '#e0e0e0';
-                    el.style.marginTop = '15px';
-                });
-                container.querySelectorAll('p, li').forEach(el => { // Added 'li' to style lists too
-                    el.style.color = '#d4d4d4';
-                    el.style.lineHeight = '1.6';
-                });
-                // Optional: Style code blocks if your markdown contains them
-                container.querySelectorAll('pre, code').forEach(el => {
-                    el.style.backgroundColor = '#2d2d2d';
-                    el.style.borderRadius = '4px';
-                });
-            
-            } else {
-                container.innerHTML = `<p style="color:#ff6b6b;">Error loading markdown: ${response.statusText}</p>`;
-            }
-        } catch (e) {
-            container.innerHTML = '<p style="color:#ff6b6b;">Failed to load file content.</p>';
-        }
-    
-        contentArea.appendChild(container);
-    }
-
-    // 8. FALLBACK
+    // 7. FALLBACK
     else {
         const fallback = document.createElement('div');
         fallback.style.textAlign = 'center';

@@ -675,7 +675,6 @@ def process():
     
     processed_files = []
     n_pages = 0
-    start_process = time.time()
     
     for file in files:
         filename = file.filename
@@ -728,93 +727,50 @@ def process():
             else:
                 file_text = extract_txt_file(file_stream)
 
-            if file_text and file_text.strip():
-                # Split text into chunks (max 8164 tokens for IFXGPTEmbedding)
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=3072,  # Conservative chunk size to stay under 8164 tokens
-                    chunk_overlap=614,
-                    separators=["\n\n", "\n", "。", "!", "?", " ", ""] # Added common punctuation
-                )
-                text_chunks = text_splitter.split_text(file_text)
-                print("size of chunck : ",len(text_chunks))
-                for c in text_chunks:
-                    print(c)
-                
-                if not text_chunks:
-                    print(f"No text chunks extracted from {filename}")
-                    continue
-                
-                print(f"Processing {len(text_chunks)} chunks from {filename}")
-                
-                # # Process each chunk
-                # chunk_count = 0
-                # for chunk_idx, chunk_text in enumerate(text_chunks, 1):
-                #     try:
-                #         # Generate embedding for this chunk
-                #         if IFXGPT:
-                #             data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
-                #         else:
-                #             data_vector = encode_text_for_embedding(chunk_text)
-                        
-                #         # Save chunk to database
-                #         save_vector_to_db(
-                #             user_id=user_id,
-                #             chat_history_id=chat_history_id,
-                #             uploaded_file_id=uploaded_file_id,
-                #             file_name=filename,
-                #             text=chunk_text,
-                #             embedding=data_vector,
-                #             page_number=chunk_idx  # Use chunk index as page number
-                #         )
-                #         chunk_count += 1
-                #     except Exception as chunk_err:
-                #         print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
-                #         continue
-
-                chunk_count = 0
-                for chunk_idx, chunk_text in enumerate(text_chunks, 1):
-                    for attempt in range(1, MAX_RETRIES + 1):
-                        try:
-                            if IFXGPT:
-                                data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
-                            else:
-                                data_vector = encode_text_for_embedding(search_text=file_text)
-                
-                            save_vector_to_db(
-                                user_id=user_id,
-                                chat_history_id=chat_history_id,
-                                uploaded_file_id=uploaded_file_id,
-                                file_name=filename,
-                                text=chunk_text,
-                                embedding=data_vector,
-                                page_number=chunk_idx
-                            )
-                            chunk_count += 1
-                            break  # success
-                        except Exception as chunk_err:
-                            if is_rate_limit_error(chunk_err) and attempt < MAX_RETRIES:
-                                print(f"Rate limit on chunk {chunk_idx}. Sleeping {RATE_LIMIT_SLEEP}s then retrying...")
-                                time.sleep(RATE_LIMIT_SLEEP)
-                                continue
-
-                            print(f"Error processing chunk {chunk_idx} from {filename}: {chunk_err}")
-                            break
-                
-                if chunk_count > 0:
-                    processed_files.append({
-                        "name": filename,
-                        "status": "indexed_as_text",
-                        "chunks": chunk_count
-                    })
-                    print(f"Successfully saved {chunk_count} chunks from {filename}")
+            if not file_text.strip():
+                print(f"❌ Skipped file (empty or unsupported text): {filename}")
+                continue
+            
+            print(f"✅ Text extracted: {len(file_text)} characters")
+            
+            try:
+                if IFXGPT:
+                    data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
                 else:
-                    print(f"Failed to process any chunks from {filename}")
-            else:
-                print(f"No text extracted from {filename}")
+                    data_vector = encode_text_for_embedding(chunk_text)
+                print(f"✅ Vector created: {len(data_vector)} dimensions")
+                
+                save_vector_to_db(
+                    user_id=user_id,
+                    chat_history_id=chat_history_id,
+                    uploaded_file_id=uploaded_file_id,
+                    file_name=filename,
+                    text=file_text,
+                    embedding=data_vector,
+                    page_number=-1
+                )
+                
+                conn = get_db_connection()
+                # ✅ Verify save to DB
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) FROM document_embeddings WHERE user_id = %s AND chat_history_id = %s AND uploaded_file_id = %s",
+                    (user_id, chat_history_id, uploaded_file_id)
+                )
+                count = cur.fetchone()[0]
+                cur.close()
+                print(f"✅ Verification: {count} record(s) saved in DB for '{filename}'")
+                
+                processed_files.append(filename)
+                
+            except Exception as e:
+                print(f"❌ Error saving to DB: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
 
         # elif (processing_mode == 'new_page_image') or (n_pages > 25):
         elif (n_pages > 5):
-            start_process = time.time()
             # --- NEW IMAGE-PER-PAGE PROCESSING (BATCHED) ---
             if not filename.lower().endswith('.pdf'):
                 print(f"Skipped file: 'new_page_image' mode only supports PDF. File: {filename}")
@@ -1175,7 +1131,7 @@ def process_document_api():
                                 if IFXGPT:
                                     data_vector = IFXGPTEmbedding(inputs=[chunk_text])[0]
                                 else:
-                                    data_vector = encode_text_for_embedding(search_text=file_text)
+                                    data_vector = encode_text_for_embedding(chunk_text)
                     
                                 save_vector_to_db(
                                     user_id=user_id,
@@ -1301,18 +1257,6 @@ User Chat History Context: {chat_history_messages}
 
 Output only the simulated excerpt.
 """ #*****************
-    
-    conn = get_db_connection()
-    # Check DB for Legacy Data
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM document_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
-    has_legacy = cur.fetchone()
-    
-    # Check DB for New Page Data
-    cur.execute("SELECT 1 FROM document_page_embeddings WHERE user_id=%s AND chat_history_id=%s LIMIT 1", (user_id, chat_history_id))
-    has_pages = cur.fetchone()
-    cur.close()
-
     # Try to get embedding with fallback
     try:
         if IFXGPT:
@@ -1323,42 +1267,41 @@ Output only the simulated excerpt.
         print(f"⚠️ IFXGPT embedding failed ({e}), falling back to local encoding...")
         query_embeddingT = encode_text_for_embedding(queryT)
     
-    if ((document_search_method != 'none') or (has_legacy != None) or (has_pages != None)):
-        if not LOCAL:
-            if IFXGPT:
-                try:
-                    search_text = IFXGPTInference(
-                        prompt=create_search_prompt,
-                        # system_prompt=system_prompt,
-                        # image_bytes_list=image_bytes_list,
-                        model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-                    )
-                    query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
-                except Exception as e:
-                    print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
-                    search_text = queryT
-                    query_embeddingS = query_embeddingT
-            else:
-                try:
-                    search_text = DeepInfraInference(
-                        prompt=create_search_prompt,
-                        # system_prompt=system_prompt,
-                        # image_bytes_list=image_bytes_list,
-                        model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
-                    )
-                    query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
-                except Exception as e:
-                    print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
-                    search_text = queryT
-                    query_embeddingS = query_embeddingT
-
+    if not LOCAL:
+        if IFXGPT:
+            try:
+                search_text = IFXGPTInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name= 'gpt-5-mini'#'Qwen/Qwen3-VL-8B-Instruct'#'qwen/qwen3-vl-8b-instruct'#'Qwen/Qwen2.5-VL-32B-Instruct'#'deepseek-ai/DeepSeek-OCR'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#'deepseek-ai/DeepSeek-V3.2'#'Qwen/Qwen3-VL-30B-A3B-Instruct'#"Qwen/Qwen2.5-VL-32B-Instruct" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = IFXGPTEmbedding(inputs=[search_text])[0]
+            except Exception as e:
+                print(f"⚠️ IFXGPT inference failed ({e}), using original query instead...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
         else:
-            search_text = ollama_generate_text(
-                prompt=create_search_prompt,
-                model="gemma3:4b"
-            )
-            query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
-        print(f"Search prompt: {search_text}")
+            try:
+                search_text = DeepInfraInference(
+                    prompt=create_search_prompt,
+                    # system_prompt=system_prompt,
+                    # image_bytes_list=image_bytes_list,
+                    model_name="Qwen/Qwen3-235B-A22B-Instruct-2507" #'x-ai/grok-4-fast'#"Qwen/Qwen2.5-VL-32B-Instruct" # Use a strong VLM
+                )
+                query_embeddingS = get_image_embedding_jinna_api(search_text=search_text)
+            except Exception as e:
+                print(f"⚠️ DeepInfra/Image embedding failed ({e}), using original query...")
+                search_text = queryT
+                query_embeddingS = query_embeddingT
+
+    else :
+        search_text = ollama_generate_text(
+            prompt=create_search_prompt,
+            model="gemma3:4b"
+        )
+        query_embeddingS = get_image_embedding_jinna_api_local(search_text=search_text)
+    print(f"Search prompt: {search_text}")
 
     # =========================================================
     # METHOD 1: searchDoc (Search by active_users permission)
@@ -2063,72 +2006,48 @@ def encode_embedding():
 
 
 # === LLM INFERENCE ENDPOINT (for AI Judge) ===
-# @app.route('/llm_inference', methods=['POST'])
-# def llm_inference():
-#     """เรียกใช้ LLM เพื่อ generate text
-    
-#     Request body:
-#     {
-#         "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
-#         "model": "llama3:latest",  # optional (default: llama3:latest)
-#         "system_prompt": ""  # optional
-#     }
-    
-#     Used for: AI Judge to analyze AI vs Human answers
-#     """
-#     try:
-#         data = request.json
-#         prompt = data.get('prompt', '')
-#         model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
-#         system_prompt = data.get('system_prompt', '')
-        
-#         if not prompt:
-#             return jsonify({'error': 'No prompt provided'}), 400
-        
-#         # Use ollama_generate_text from utils
-#         response = ollama_generate_text(
-#             prompt=prompt,
-#             model=model,
-#             system_prompt=system_prompt
-#         )
-        
-#         return jsonify({
-#             'success': True,
-#             'response': response,
-#             'model': model
-#         })
-#     except Exception as e:
-#         print(f"LLM inference error: {e}")
-#         return jsonify({
-#             'success': False,
-#             'error': str(e),
-#             'response': ''
-#         }), 500
-
 @app.route('/llm_inference', methods=['POST'])
 def llm_inference():
-    """ทดสอบ LLM inference ผ่าน API นี้ได้เลย (เช่น Ollama หรือ DeepInfra)"""
+    """เรียกใช้ LLM เพื่อ generate text
+    
+    Request body:
+    {
+        "prompt": "คำถามหรือ prompt ที่ต้องการให้ LLM ตอบ",
+        "model": "llama3:latest",  # optional (default: llama3:latest)
+        "system_prompt": ""  # optional
+    }
+    
+    Used for: AI Judge to analyze AI vs Human answers
+    """
     try:
-        data = request.get_json()
-        prompt = data.get('prompt', 'Hello, how are you?')
-        model_name = data.get('model', 'llava' if LOCAL else 'gpt-5-mini')
-        system_prompt = data.get('system_prompt', 'You are a html content analyzer.\n Help me to convert html to markdown')  # Optional system prompt for DeepInfra
+        data = request.json
+        prompt = data.get('prompt', '')
+        model = data.get('model', 'llama3:latest')  # Use llama3 as default (available locally)
+        system_prompt = data.get('system_prompt', '')
         
-        if LOCAL:
-            response = ollama_generate_text(prompt=prompt, model=model_name)
-        else:
-            response = IFXGPTInference(prompt=prompt, system_prompt=system_prompt, model_name=model_name)
-        print("Model output:")
-        print(response)
+        if not prompt:
+            return jsonify({'error': 'No prompt provided'}), 400
+        
+        # Use ollama_generate_text from utils
+        response = ollama_generate_text(
+            prompt=prompt,
+            model=model,
+            system_prompt=system_prompt
+        )
+        
         return jsonify({
             'success': True,
-            'response': response
+            'response': response,
+            'model': model
         })
     except Exception as e:
+        print(f"LLM inference error: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'response': ''
         }), 500
+
 
 if __name__ == '__main__':
     # path_keys = os.popen("find ../ -name '.key'").read().split("\n")[0]
