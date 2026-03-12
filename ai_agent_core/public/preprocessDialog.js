@@ -230,6 +230,28 @@
 
 
 
+function cleanFileName(name, fallback = "Untitled") {
+  if (!name) return fallback;
+
+  // drop any path
+  name = name.split(/[/\\]/).pop();
+
+  // normalize spaces + remove common illegal filename chars
+  name = name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "");
+
+  // avoid reserved Windows names
+  const base = name.replace(/\.[^/.]+$/, "");
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) name = "_" + name;
+
+  // avoid trailing dot/space (Windows)
+  name = name.replace(/[. ]+$/g, "");
+
+  return name || fallback;
+}
+
 // preprocessDialog.js
 // Function to create and show the preprocess file dialog modal
 
@@ -767,14 +789,15 @@ async function showPreprocessDialog() {
         // Determine Display Name
         let tempDisplayName = "Processing...";
         if (fileCount > 0) {
-            const file = fileInput.files[0];
-            tempDisplayName = outputNameVal || file.name;
+        const file = fileInput.files[0];
+        tempDisplayName = cleanFileName(outputNameVal || file.name, "File");
         } else if (outputNameVal) {
-            tempDisplayName = outputNameVal;
+        tempDisplayName = cleanFileName(outputNameVal, "Text Content");
         } else if (urlValue) {
-            tempDisplayName = outputNameVal || urlValue.split('/').pop() || "URL Content";
+        const urlName = urlValue.split("/").pop() || "URL Content";
+        tempDisplayName = cleanFileName(outputNameVal || urlName, "URL Content");
         } else {
-            tempDisplayName = "Text Content";
+        tempDisplayName = "Text Content";
         }
 
         // Build Inner HTML for Temp Item

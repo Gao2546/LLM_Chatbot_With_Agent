@@ -322,6 +322,29 @@ const changeDirButton = document.getElementById('changeDirButton');
 const urlInput = document.getElementById('urlInput')
 
 
+function cleanFileName(name, fallback = "Untitled") {
+  if (!name) return fallback;
+
+  // drop any path
+  name = name.split(/[/\\]/).pop();
+
+  // normalize spaces + remove common illegal filename chars
+  name = name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "");
+
+  // avoid reserved Windows names
+  const base = name.replace(/\.[^/.]+$/, "");
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) name = "_" + name;
+
+  // avoid trailing dot/space (Windows)
+  name = name.replace(/[. ]+$/g, "");
+
+  return name || fallback;
+}
+
+
 // Themed URL dialog (uses CSS classes from my previous message)
 function showUrlDialog() {
   return new Promise((resolve) => {
@@ -409,7 +432,7 @@ urlInput.addEventListener("click", async () => {
   const enteredUrl = await showUrlDialog();
   if (enteredUrl === null) return;
 
-  const fileName = enteredUrl.split("/").filter(Boolean).pop() || "URL Content";
+  const fileName = cleanFileName(enteredUrl.split("/").filter(Boolean).pop() || "URL Content", "Infineon Webpage");
 
   if (!window.urlList) window.urlList = [];
 
