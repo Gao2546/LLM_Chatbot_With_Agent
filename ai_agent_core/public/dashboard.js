@@ -79,7 +79,8 @@ async function loadDashboard() {
             loadSummaryMetrics(),
             loadKnowledgeGapHeatmap(),
             loadRetrainingZone(),
-            loadDepartmentChart()
+            loadDepartmentChart(),
+            loadConflictQuestions()
         ]);
     } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -121,6 +122,13 @@ async function loadSummaryMetrics() {
         document.getElementById('acceptedAnswers').textContent = totalAccepted;
         document.getElementById('rejectedAnswers').textContent = totalRejected;
         
+        // Conflicts KPI
+        const activeConflicts = summary.activeConflicts || 0;
+        const conflictsEl = document.getElementById('activeConflicts');
+        if (conflictsEl) {
+            conflictsEl.textContent = activeConflicts;
+        }
+        
         // Render knowledge coverage progress
         renderKnowledgeCoverage(groups);
         
@@ -130,6 +138,8 @@ async function loadSummaryMetrics() {
         document.getElementById('pendingQuestions').textContent = '-';
         document.getElementById('acceptedAnswers').textContent = '-';
         document.getElementById('rejectedAnswers').textContent = '-';
+        const conflictsEl = document.getElementById('activeConflicts');
+        if (conflictsEl) conflictsEl.textContent = '-';
     }
 }
 
@@ -414,7 +424,7 @@ function renderRetrainingZone(data) {
     const acceptedPercent = Math.round((accepted / total) * 100);
     const rejectedPercent = Math.round((rejected / total) * 100);
     // เปลี่ยนสีแดงเป็นน้ำเงิน RGB (38,123,189)
-    const blueRGB = 'rgb(38,123,189)';
+    const blueRGB = 'rgb(214,48,49)';
     // Create donut chart using conic-gradient
     const acceptedDeg = (accepted / total) * 360;
     const html = `
@@ -712,4 +722,86 @@ function renderDepartmentChart(data) {
         </div>
     `;
     container.innerHTML = chartHtml;
+}
+
+// ===== Load Conflict Questions =====
+async function loadConflictQuestions() {
+    const tbody = document.getElementById('conflictTableBody');
+    const badge = document.getElementById('conflictCountBadge');
+    if (!tbody) return;
+
+    try {
+        const response = await fetch('/api/conflict-questions');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const result = await response.json();
+
+        if (!result.success || !result.data || result.data.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="conflict-empty-state">
+                <div><i class="fas fa-check-circle" style="color: #009374;"></i></div>
+                <div style="margin-top: 8px; font-size: 0.95rem;">ไม่มี Conflict ในขณะนี้</div>
+                <div style="font-size: 0.82rem; margin-top: 4px;">คำตอบจากผู้เชี่ยวชาญทุกข้อสอดคล้องกัน</div>
+            </td></tr>`;
+            if (badge) badge.style.display = 'none';
+            return;
+        }
+
+        const conflicts = result.data;
+        const detectedCount = conflicts.filter(c => c.conflict_status === 'detected').length;
+
+        // Show badge count
+        if (badge) {
+            if (detectedCount > 0) {
+                badge.textContent = detectedCount;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        let html = '';
+        conflicts.forEach((item, index) => {
+            const isDetected = item.conflict_status === 'detected';
+            const statusClass = isDetected ? 'detected' : 'resolved';
+            const statusIcon = isDetected ? 'fa-exclamation-circle' : 'fa-check-circle';
+            const statusText = isDetected ? 'Conflict' : 'Resolved';
+            const conflictDetails = item.conflict_details || {};
+            const summaryText = conflictDetails.conflictSummary || conflictDetails.suggestedResolution || '-';
+            const expertCount = parseInt(item.expert_count) || 0;
+            const tags = item.tags || [];
+            const createdDate = item.created_at ? new Date(item.created_at).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' }) : '-';
+            const questionText = (item.question || '').length > 80 ? item.question.substring(0, 80) + '...' : (item.question || '-');
+
+            html += `<tr onclick="window.location.href='comment.html?id=${encodeURIComponent(item.id)}'" title="คลิกเพื่อไปแก้ไข">
+                <td style="color: #999; font-size: 0.82rem;">${index + 1}</td>
+                <td><div class="conflict-question-text">${escapeHtml(questionText)}</div></td>
+                <td><span class="conflict-badge ${statusClass}"><i class="fas ${statusIcon}"></i> ${statusText}</span></td>
+                <td><span class="conflict-experts"><i class="fas fa-user-tie"></i> ${expertCount}</span></td>
+                <td><div class="conflict-summary-text" title="${escapeHtml(summaryText)}">${escapeHtml(summaryText)}</div></td>
+                <td>${tags.slice(0, 2).map(t => `<span class="conflict-tag">${escapeHtml(t)}</span>`).join('')}</td>
+                <td><span class="conflict-date">${createdDate}</span></td>
+                <td><button class="conflict-action-btn ${isDetected ? 'resolve' : 'view'}" onclick="event.stopPropagation(); window.location.href='comment.html?id=${encodeURIComponent(item.id)}'">
+                    <i class="fas ${isDetected ? 'fa-gavel' : 'fa-eye'}"></i> ${isDetected ? 'แก้ไข' : 'ดู'}
+                </button></td>
+            </tr>`;
+        });
+
+        tbody.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading conflict questions:', error);
+        tbody.innerHTML = `<tr><td colspan="8" class="conflict-empty-state">
+            <div><i class="fas fa-exclamation-triangle" style="color: #e67e22;"></i></div>
+            <div style="margin-top: 8px;">ไม่สามารถโหลดข้อมูล Conflict ได้</div>
+        </td></tr>`;
+    }
+}
+
+// Helper: escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
 }

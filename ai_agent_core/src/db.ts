@@ -683,6 +683,186 @@ async function initializeDatabase() {
     await pool.query(alterAnswerVerificationsAddUniqueConstraint);
     console.log('DB: UNIQUE constraint added to answer_verifications table');
 
+    // === CONFLICT TRACKING COLUMNS ===
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='conflict_status'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN conflict_status VARCHAR(50) DEFAULT 'none';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='conflict_details'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN conflict_details JSONB DEFAULT '{}'::jsonb;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='final_consensus_answer'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN final_consensus_answer TEXT;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='final_consensus_by'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN final_consensus_by VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='verified_answers' AND column_name='final_consensus_at'
+        ) THEN
+          ALTER TABLE verified_answers ADD COLUMN final_consensus_at TIMESTAMP;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: Conflict tracking columns added to verified_answers table');
+
+    // === DETECT_NA ERROR DETECTION TABLES ===
+    await pool.query(createMachinesTableQuery);
+    console.log('DB: [Detect_NA] machines table created or already exists');
+
+    await pool.query(createErrorCodesTableQuery);
+    console.log('DB: [Detect_NA] error_codes table created or already exists');
+
+    // Migrate: add keywords column to error_codes if not exists, then drop old keywords table
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='error_codes' AND column_name='keywords') THEN
+          ALTER TABLE error_codes ADD COLUMN keywords TEXT DEFAULT '';
+          -- Migrate data from old keywords table if it exists
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='error_code_keywords') THEN
+            UPDATE error_codes ec SET keywords = COALESCE(
+              (SELECT STRING_AGG(ek.keyword_pattern, '|' ORDER BY ek.priority)
+               FROM error_code_keywords ek WHERE ek.error_id = ec.error_id), '');
+          END IF;
+        END IF;
+        -- Drop old table if exists
+        DROP TABLE IF EXISTS error_code_keywords;
+      END $$;
+    `);
+    console.log('DB: [Detect_NA] error_codes.keywords column ensured (old table dropped)');
+
+    // --- Fail codes / fail events (separate from error_codes) ---
+    await pool.query(createFailCodesTableQuery);
+    console.log('DB: [Detect_NA] fail_codes table created or already exists');
+
+    await pool.query(createErrorEventsTableQuery);
+    console.log('DB: [Detect_NA] error_events table created or already exists');
+
+    await pool.query(createErrorEventsIndexQuery);
+    console.log('DB: [Detect_NA] error_events indexes created');
+
+    await pool.query(createDetectNaTriggersQuery);
+    console.log('DB: [Detect_NA] auto-update triggers created');
+
+    // Add evidence_path column to error_events if not exists (for migration)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='error_events' AND column_name='evidence_path'
+        ) THEN
+          ALTER TABLE error_events ADD COLUMN evidence_path TEXT;
+        END IF;
+      END
+      $$;
+    `);
+    console.log('DB: [Detect_NA] evidence_path column ensured');
+
+    // --- Fail events table + indexes ---
+    await pool.query(createFailEventsTableQuery);
+    console.log('DB: [Detect_NA] fail_events table created or already exists');
+
+    await pool.query(createFailEventsIndexQuery);
+    console.log('DB: [Detect_NA] fail_events indexes created');
+
+    // --- Widen detection_method column if it's still VARCHAR(20) ---
+    await pool.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='error_events' AND column_name='detection_method'
+            AND character_maximum_length IS NOT NULL AND character_maximum_length < 100
+        ) THEN
+          ALTER TABLE error_events ALTER COLUMN detection_method TYPE VARCHAR(100);
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='fail_events' AND column_name='detection_method'
+            AND character_maximum_length IS NOT NULL AND character_maximum_length < 100
+        ) THEN
+          ALTER TABLE fail_events ALTER COLUMN detection_method TYPE VARCHAR(100);
+        END IF;
+      END $$;
+    `);
+    console.log('DB: [Detect_NA] detection_method columns widened to VARCHAR(100)');
+
+    // --- Migrate: move WAFER_FAIL_CLUSTER from error_codes → fail_codes ---
+    // YIELD_VIOLATION is OCR-detected → stays in error_codes/error_events
+    await pool.query(`
+      DO $$ BEGIN
+        -- Move only WAFER_FAIL_CLUSTER (visual fail) from error_codes to fail_codes
+        INSERT INTO fail_codes (fail_id, category, description, severity, handler, keywords, is_active)
+          SELECT error_id, category, description, severity, handler,
+                 COALESCE(keywords, ''), is_active
+          FROM error_codes
+          WHERE error_id IN ('WAFER_FAIL_CLUSTER')
+        ON CONFLICT (fail_id) DO NOTHING;
+
+        -- Move any error_events referencing WAFER_FAIL_CLUSTER to fail_events
+        INSERT INTO fail_events (fail_id, machine_id, status, detection_method, severity, category, description, handler, seen_count, miss_count, resolution_note, evidence_path, first_seen_at, last_seen_at, resolved_at)
+          SELECT error_id, machine_id, status, detection_method, severity, category, description, handler, seen_count, miss_count, resolution_note, evidence_path, first_seen_at, last_seen_at, resolved_at
+          FROM error_events
+          WHERE error_id IN ('WAFER_FAIL_CLUSTER');
+
+        -- Delete migrated error_events
+        DELETE FROM error_events WHERE error_id IN ('WAFER_FAIL_CLUSTER');
+
+        -- Delete from error_codes
+        DELETE FROM error_codes WHERE error_id IN ('WAFER_FAIL_CLUSTER');
+
+        -- Ensure YIELD_VIOLATION stays in error_codes (move back if accidentally in fail_codes)
+        INSERT INTO error_codes (error_id, category, description, severity, handler, keywords, is_active)
+          SELECT fail_id, category, description, severity, handler,
+                 COALESCE(keywords, ''), is_active
+          FROM fail_codes
+          WHERE fail_id = 'YIELD_VIOLATION'
+        ON CONFLICT (error_id) DO NOTHING;
+
+        DELETE FROM fail_events WHERE fail_id = 'YIELD_VIOLATION';
+        DELETE FROM fail_codes WHERE fail_id = 'YIELD_VIOLATION';
+      END $$;
+    `);
+    console.log('DB: [Detect_NA] fail codes migration complete');
+
+    // Add trigger for fail_codes updated_at
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'set_fail_codes_updated') THEN
+          CREATE TRIGGER set_fail_codes_updated
+            BEFORE UPDATE ON fail_codes
+            FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+        END IF;
+      END $$;
+    `);
+    console.log('DB: [Detect_NA] fail_codes trigger created');
+
+    // Drop code_type column from error_codes if it exists (cleanup from previous approach)
+    await pool.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='error_codes' AND column_name='code_type') THEN
+          ALTER TABLE error_codes DROP COLUMN code_type;
+        END IF;
+      END $$;
+    `);
+    console.log('DB: [Detect_NA] code_type column dropped from error_codes (if existed)');
+
     // await pool.query(alterUsersTableQuery);
     console.log('DB: Foreign key added to users table');
     console.log('✅ Database initialization complete!');
@@ -2711,6 +2891,619 @@ async function getDepartmentUserStatistics() {
 // ========== END AI SUGGESTIONS FUNCTIONS ==========
 // =====================================================
 
+// =====================================================
+// ========== DETECT_NA — ERROR DETECTION TABLES =====
+// =====================================================
+// 4 ตาราง: machines, error_codes, error_code_keywords, error_events
+// evidence เก็บแบบชั่วคราว (ลบเมื่อ error clear) → path เก็บใน error_events.evidence_path
+// =====================================================
+
+// --- DDL Queries ---
+
+const createMachinesTableQuery = `
+CREATE TABLE IF NOT EXISTS machines (
+    machine_id    VARCHAR(50)  PRIMARY KEY,
+    display_name  VARCHAR(100) NOT NULL,
+    ip_address    INET         NOT NULL,
+    vnc_port      INT          DEFAULT 0,
+    vnc_password  VARCHAR(100) DEFAULT '',
+    vnc_window_id VARCHAR(200) DEFAULT '',
+    is_active     BOOLEAN      DEFAULT true,
+    created_at    TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  DEFAULT NOW()
+);
+`;
+
+const createErrorCodesTableQuery = `
+CREATE TABLE IF NOT EXISTS error_codes (
+    error_id    VARCHAR(50)  PRIMARY KEY,
+    category    VARCHAR(50)  NOT NULL,
+    description TEXT         NOT NULL,
+    severity    VARCHAR(10)  NOT NULL CHECK (severity IN ('high', 'medium', 'low')),
+    handler     VARCHAR(50)  NOT NULL,
+    keywords    TEXT         DEFAULT '',
+    is_active   BOOLEAN      DEFAULT true,
+    created_at  TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+`;
+
+const createFailCodesTableQuery = `
+CREATE TABLE IF NOT EXISTS fail_codes (
+    fail_id     VARCHAR(50)  PRIMARY KEY,
+    category    VARCHAR(50)  NOT NULL,
+    description TEXT         NOT NULL,
+    severity    VARCHAR(10)  NOT NULL CHECK (severity IN ('high', 'medium', 'low')),
+    handler     VARCHAR(50)  DEFAULT '',
+    keywords    TEXT         DEFAULT '',
+    is_active   BOOLEAN      DEFAULT true,
+    created_at  TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+`;
+
+const createFailEventsTableQuery = `
+CREATE TABLE IF NOT EXISTS fail_events (
+    id               BIGSERIAL    PRIMARY KEY,
+    fail_id          VARCHAR(50)  NOT NULL REFERENCES fail_codes(fail_id),
+    machine_id       VARCHAR(50)  NOT NULL REFERENCES machines(machine_id),
+    status           VARCHAR(10)  NOT NULL DEFAULT 'OPEN'
+                     CHECK (status IN ('OPEN', 'CLOSED', 'REMOVED')),
+    detection_method VARCHAR(100),
+    severity         VARCHAR(10),
+    category         VARCHAR(50),
+    description      TEXT,
+    handler          VARCHAR(50),
+    seen_count       INT          DEFAULT 1,
+    miss_count       INT          DEFAULT 0,
+    resolution_note  TEXT,
+    evidence_path    TEXT,
+    first_seen_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    last_seen_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    resolved_at      TIMESTAMPTZ
+);
+`;
+
+const createFailEventsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_fail_events_status     ON fail_events(status);
+CREATE INDEX IF NOT EXISTS idx_fail_events_machine    ON fail_events(machine_id);
+CREATE INDEX IF NOT EXISTS idx_fail_events_fail       ON fail_events(fail_id);
+CREATE INDEX IF NOT EXISTS idx_fail_events_first_seen ON fail_events(first_seen_at DESC);
+`;
+
+const createErrorEventsTableQuery = `
+CREATE TABLE IF NOT EXISTS error_events (
+    id               BIGSERIAL    PRIMARY KEY,
+    error_id         VARCHAR(50)  NOT NULL REFERENCES error_codes(error_id),
+    machine_id       VARCHAR(50)  NOT NULL REFERENCES machines(machine_id),
+    status           VARCHAR(10)  NOT NULL DEFAULT 'OPEN'
+                     CHECK (status IN ('OPEN', 'CLOSED', 'REMOVED')),
+    detection_method VARCHAR(100),
+    severity         VARCHAR(10),
+    category         VARCHAR(50),
+    description      TEXT,
+    handler          VARCHAR(50),
+    seen_count       INT          DEFAULT 1,
+    miss_count       INT          DEFAULT 0,
+    resolution_note  TEXT,
+    evidence_path    TEXT,
+    first_seen_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    last_seen_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    resolved_at      TIMESTAMPTZ
+);
+`;
+
+const createErrorEventsIndexQuery = `
+CREATE INDEX IF NOT EXISTS idx_events_status     ON error_events(status);
+CREATE INDEX IF NOT EXISTS idx_events_machine    ON error_events(machine_id);
+CREATE INDEX IF NOT EXISTS idx_events_error      ON error_events(error_id);
+CREATE INDEX IF NOT EXISTS idx_events_first_seen ON error_events(first_seen_at DESC);
+`;
+
+const createDetectNaTriggersQuery = `
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'set_machines_updated') THEN
+        CREATE TRIGGER set_machines_updated
+            BEFORE UPDATE ON machines
+            FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'set_error_codes_updated') THEN
+        CREATE TRIGGER set_error_codes_updated
+            BEFORE UPDATE ON error_codes
+            FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+    END IF;
+END
+$$;
+`;
+
+// --- CRUD: machines ---
+
+async function getAllMachines(activeOnly: boolean = false) {
+  const q = activeOnly
+    ? 'SELECT * FROM machines WHERE is_active = true ORDER BY machine_id'
+    : 'SELECT * FROM machines ORDER BY machine_id';
+  const result = await pool.query(q);
+  return result.rows;
+}
+
+async function getMachine(machineId: string) {
+  const result = await pool.query('SELECT * FROM machines WHERE machine_id = $1', [machineId]);
+  return result.rows[0] || null;
+}
+
+async function upsertMachine(machine: {
+  machine_id: string; display_name: string; ip_address: string;
+  vnc_port?: number; vnc_password?: string; vnc_window_id?: string; is_active?: boolean;
+}) {
+  const result = await pool.query(`
+    INSERT INTO machines (machine_id, display_name, ip_address, vnc_port, vnc_password, vnc_window_id, is_active)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (machine_id) DO UPDATE SET
+      display_name  = EXCLUDED.display_name,
+      ip_address    = EXCLUDED.ip_address,
+      vnc_port      = EXCLUDED.vnc_port,
+      vnc_password  = EXCLUDED.vnc_password,
+      vnc_window_id = EXCLUDED.vnc_window_id,
+      is_active     = EXCLUDED.is_active
+    RETURNING *;
+  `, [
+    machine.machine_id, machine.display_name, machine.ip_address,
+    machine.vnc_port ?? 0, machine.vnc_password ?? '', machine.vnc_window_id ?? '',
+    machine.is_active ?? true
+  ]);
+  return result.rows[0];
+}
+
+async function deleteMachine(machineId: string) {
+  await pool.query('DELETE FROM machines WHERE machine_id = $1', [machineId]);
+}
+
+// --- CRUD: error_codes ---
+
+async function getAllErrorCodes(activeOnly: boolean = false) {
+  const q = activeOnly
+    ? 'SELECT * FROM error_codes WHERE is_active = true ORDER BY error_id'
+    : 'SELECT * FROM error_codes ORDER BY error_id';
+  const result = await pool.query(q);
+  return result.rows;
+}
+
+async function getErrorCodesWithKeywords() {
+  const result = await pool.query(`
+    SELECT error_id, category, description, severity, handler, keywords, is_active
+    FROM error_codes
+    WHERE is_active = true
+    ORDER BY error_id;
+  `);
+  return result.rows;
+}
+
+async function upsertErrorCode(code: {
+  error_id: string; category: string; description: string;
+  severity: string; handler: string; keywords?: string; is_active?: boolean;
+}) {
+  const result = await pool.query(`
+    INSERT INTO error_codes (error_id, category, description, severity, handler, keywords, is_active)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (error_id) DO UPDATE SET
+      category    = EXCLUDED.category,
+      description = EXCLUDED.description,
+      severity    = EXCLUDED.severity,
+      handler     = EXCLUDED.handler,
+      keywords    = EXCLUDED.keywords,
+      is_active   = EXCLUDED.is_active
+    RETURNING *;
+  `, [code.error_id, code.category, code.description, code.severity, code.handler, code.keywords ?? '', code.is_active ?? true]);
+  return result.rows[0];
+}
+
+async function deleteErrorCode(errorId: string) {
+  // Soft delete: set is_active = false (events may reference it)
+  await pool.query('UPDATE error_codes SET is_active = false WHERE error_id = $1', [errorId]);
+}
+
+// --- CRUD: error_events ---
+
+async function getActiveErrorEvents(machineId?: string) {
+  let q = 'SELECT * FROM error_events WHERE status = \'OPEN\'';
+  const params: any[] = [];
+  if (machineId) {
+    q += ' AND machine_id = $1';
+    params.push(machineId);
+  }
+  q += ' ORDER BY first_seen_at DESC';
+  const result = await pool.query(q, params);
+  return result.rows;
+}
+
+async function getErrorEventHistory(limit: number = 100, machineId?: string) {
+  let q = 'SELECT * FROM error_events WHERE status IN (\'CLOSED\', \'REMOVED\')';
+  const params: any[] = [];
+  let idx = 1;
+  if (machineId) {
+    q += ` AND machine_id = $${idx++}`;
+    params.push(machineId);
+  }
+  q += ` ORDER BY resolved_at DESC NULLS LAST LIMIT $${idx}`;
+  params.push(limit);
+  const result = await pool.query(q, params);
+  return result.rows;
+}
+
+async function createErrorEvent(event: {
+  error_id: string; machine_id: string;
+  detection_method?: string; severity?: string; category?: string;
+  description?: string; handler?: string; evidence_path?: string;
+}) {
+  const result = await pool.query(`
+    INSERT INTO error_events
+      (error_id, machine_id, status, detection_method, severity, category, description, handler, evidence_path)
+    VALUES ($1, $2, 'OPEN', $3, $4, $5, $6, $7, $8)
+    RETURNING *;
+  `, [
+    event.error_id, event.machine_id,
+    event.detection_method || null, event.severity || null,
+    event.category || null, event.description || null,
+    event.handler || null, event.evidence_path || null
+  ]);
+  return result.rows[0];
+}
+
+async function updateErrorEventSeen(eventId: number, evidencePath?: string, severity?: string, description?: string, detectionMethod?: string) {
+  const result = await pool.query(`
+    UPDATE error_events
+    SET last_seen_at = NOW(), miss_count = 0, seen_count = seen_count + 1,
+        evidence_path = COALESCE($2, evidence_path),
+        severity = COALESCE($3, severity),
+        description = COALESCE($4, description),
+        detection_method = COALESCE($5, detection_method)
+    WHERE id = $1 AND status = 'OPEN'
+    RETURNING *;
+  `, [eventId, evidencePath || null, severity || null, description || null, detectionMethod || null]);
+  return result.rows[0];
+}
+
+async function incrementMissCount(machineId: string, excludeErrorIds: string[]) {
+  // error ที่ไม่อยู่ใน exclude list → miss_count++
+  const result = await pool.query(`
+    UPDATE error_events
+    SET miss_count = miss_count + 1
+    WHERE machine_id = $1 AND status = 'OPEN'
+      AND error_id != ALL($2::VARCHAR[])
+    RETURNING *;
+  `, [machineId, excludeErrorIds]);
+  return result.rows;
+}
+
+async function closeTimedOutEvents(missThreshold: number = 1) {
+  const result = await pool.query(`
+    UPDATE error_events
+    SET status = 'CLOSED', resolved_at = NOW(), evidence_path = NULL
+    WHERE status = 'OPEN' AND miss_count >= $1
+    RETURNING *;
+  `, [missThreshold]);
+  return result.rows;
+}
+
+async function closeErrorEvent(eventId: number, resolutionNote?: string) {
+  const result = await pool.query(`
+    UPDATE error_events
+    SET status = 'CLOSED', resolved_at = NOW(), resolution_note = $2, evidence_path = NULL
+    WHERE id = $1 AND status = 'OPEN'
+    RETURNING *;
+  `, [eventId, resolutionNote || null]);
+  return result.rows[0];
+}
+
+async function closeAllOpenErrorEvents() {
+  const result = await pool.query(`
+    UPDATE error_events
+    SET status = 'CLOSED', resolved_at = NOW(), evidence_path = NULL
+    WHERE status = 'OPEN'
+    RETURNING *;
+  `);
+  return result.rows;
+}
+
+async function removeErrorEvent(eventId: number) {
+  const result = await pool.query(`
+    UPDATE error_events
+    SET status = 'REMOVED', resolved_at = NOW(), evidence_path = NULL
+    WHERE id = $1
+    RETURNING *;
+  `, [eventId]);
+  return result.rows[0];
+}
+
+async function getErrorEventStats(days: number = 7) {
+  const result = await pool.query(`
+    SELECT error_id, category, severity,
+           COUNT(*) AS total_events,
+           COUNT(*) FILTER (WHERE status = 'OPEN') AS currently_open,
+           ROUND(AVG(seen_count), 1) AS avg_seen_per_event
+    FROM error_events
+    WHERE first_seen_at >= NOW() - ($1 || ' days')::INTERVAL
+    GROUP BY error_id, category, severity
+    ORDER BY total_events DESC;
+  `, [days]);
+  return result.rows;
+}
+
+async function getErrorMTTR() {
+  const result = await pool.query(`
+    SELECT category,
+           COUNT(*) AS resolved_count,
+           ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - first_seen_at))) / 60, 1) AS avg_minutes
+    FROM error_events
+    WHERE status = 'CLOSED' AND resolved_at IS NOT NULL
+    GROUP BY category
+    ORDER BY avg_minutes DESC;
+  `);
+  return result.rows;
+}
+
+// --- CRUD: fail_codes ---
+
+async function getAllFailCodes(activeOnly: boolean = false) {
+  const q = activeOnly
+    ? 'SELECT * FROM fail_codes WHERE is_active = true ORDER BY fail_id'
+    : 'SELECT * FROM fail_codes ORDER BY fail_id';
+  const result = await pool.query(q);
+  return result.rows;
+}
+
+async function upsertFailCode(code: {
+  fail_id: string; category: string; description: string;
+  severity: string; handler?: string; keywords?: string; is_active?: boolean;
+}) {
+  const result = await pool.query(`
+    INSERT INTO fail_codes (fail_id, category, description, severity, handler, keywords, is_active)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (fail_id) DO UPDATE SET
+      category    = EXCLUDED.category,
+      description = EXCLUDED.description,
+      severity    = EXCLUDED.severity,
+      handler     = EXCLUDED.handler,
+      keywords    = EXCLUDED.keywords,
+      is_active   = EXCLUDED.is_active
+    RETURNING *;
+  `, [code.fail_id, code.category, code.description, code.severity, code.handler ?? '', code.keywords ?? '', code.is_active ?? true]);
+  return result.rows[0];
+}
+
+async function deleteFailCode(failId: string) {
+  await pool.query('UPDATE fail_codes SET is_active = false WHERE fail_id = $1', [failId]);
+}
+
+// --- CRUD: fail_events ---
+
+async function getActiveFailEvents(machineId?: string) {
+  let q = 'SELECT * FROM fail_events WHERE status = \'OPEN\'';
+  const params: any[] = [];
+  if (machineId) { q += ' AND machine_id = $1'; params.push(machineId); }
+  q += ' ORDER BY first_seen_at DESC';
+  const result = await pool.query(q, params);
+  return result.rows;
+}
+
+async function getFailEventHistory(limit: number = 100, machineId?: string) {
+  let q = 'SELECT * FROM fail_events WHERE status IN (\'CLOSED\', \'REMOVED\')';
+  const params: any[] = [];
+  let idx = 1;
+  if (machineId) { q += ` AND machine_id = $${idx++}`; params.push(machineId); }
+  q += ` ORDER BY resolved_at DESC NULLS LAST LIMIT $${idx}`;
+  params.push(limit);
+  const result = await pool.query(q, params);
+  return result.rows;
+}
+
+async function createFailEvent(event: {
+  fail_id: string; machine_id: string;
+  detection_method?: string; severity?: string; category?: string;
+  description?: string; handler?: string; evidence_path?: string;
+}) {
+  const result = await pool.query(`
+    INSERT INTO fail_events
+      (fail_id, machine_id, status, detection_method, severity, category, description, handler, evidence_path)
+    VALUES ($1, $2, 'OPEN', $3, $4, $5, $6, $7, $8)
+    RETURNING *;
+  `, [
+    event.fail_id, event.machine_id,
+    event.detection_method || null, event.severity || null,
+    event.category || null, event.description || null,
+    event.handler || null, event.evidence_path || null
+  ]);
+  return result.rows[0];
+}
+
+async function updateFailEventSeen(eventId: number, evidencePath?: string, severity?: string, description?: string, detectionMethod?: string) {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET last_seen_at = NOW(), miss_count = 0, seen_count = seen_count + 1,
+        evidence_path = COALESCE($2, evidence_path),
+        severity = COALESCE($3, severity),
+        description = COALESCE($4, description),
+        detection_method = COALESCE($5, detection_method)
+    WHERE id = $1 AND status = 'OPEN'
+    RETURNING *;
+  `, [eventId, evidencePath || null, severity || null, description || null, detectionMethod || null]);
+  return result.rows[0];
+}
+
+async function incrementFailMissCount(machineId: string, excludeFailIds: string[]) {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET miss_count = miss_count + 1
+    WHERE machine_id = $1 AND status = 'OPEN'
+      AND fail_id != ALL($2::VARCHAR[])
+    RETURNING *;
+  `, [machineId, excludeFailIds]);
+  return result.rows;
+}
+
+async function closeTimedOutFailEvents(missThreshold: number = 1) {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET status = 'CLOSED', resolved_at = NOW(), evidence_path = NULL
+    WHERE status = 'OPEN' AND miss_count >= $1
+    RETURNING *;
+  `, [missThreshold]);
+  return result.rows;
+}
+
+async function closeFailEvent(eventId: number, resolutionNote?: string) {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET status = 'CLOSED', resolved_at = NOW(), resolution_note = $2, evidence_path = NULL
+    WHERE id = $1 AND status = 'OPEN'
+    RETURNING *;
+  `, [eventId, resolutionNote || null]);
+  return result.rows[0];
+}
+
+async function closeAllOpenFailEvents() {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET status = 'CLOSED', resolved_at = NOW(), evidence_path = NULL
+    WHERE status = 'OPEN'
+    RETURNING *;
+  `);
+  return result.rows;
+}
+
+async function removeFailEvent(eventId: number) {
+  const result = await pool.query(`
+    UPDATE fail_events
+    SET status = 'REMOVED', resolved_at = NOW(), evidence_path = NULL
+    WHERE id = $1
+    RETURNING *;
+  `, [eventId]);
+  return result.rows[0];
+}
+
+// =====================================================
+// ========== END DETECT_NA FUNCTIONS ===============
+// =====================================================
+
+// =====================================================
+// ========== CONFLICT TRACKING FUNCTIONS ==============
+// =====================================================
+
+/**
+ * Update conflict status for a verified answer
+ */
+async function updateConflictStatus(
+  questionId: number,
+  conflictStatus: 'none' | 'detected' | 'resolved' | 'rejected',
+  conflictDetails?: object
+) {
+  // Ensure columns exist first (in case migration hasn't run yet)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='verified_answers' AND column_name='conflict_status') THEN
+        ALTER TABLE verified_answers ADD COLUMN conflict_status VARCHAR(50) DEFAULT 'none';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='verified_answers' AND column_name='conflict_details') THEN
+        ALTER TABLE verified_answers ADD COLUMN conflict_details JSONB DEFAULT '{}'::jsonb;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='verified_answers' AND column_name='final_consensus_answer') THEN
+        ALTER TABLE verified_answers ADD COLUMN final_consensus_answer TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='verified_answers' AND column_name='final_consensus_by') THEN
+        ALTER TABLE verified_answers ADD COLUMN final_consensus_by VARCHAR(255);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='verified_answers' AND column_name='final_consensus_at') THEN
+        ALTER TABLE verified_answers ADD COLUMN final_consensus_at TIMESTAMP;
+      END IF;
+    END $$;
+  `);
+
+  const result = await pool.query(
+    `UPDATE verified_answers 
+     SET conflict_status = $1, 
+         conflict_details = COALESCE($2, conflict_details),
+         last_updated_at = NOW()
+     WHERE id = $3
+     RETURNING id, conflict_status, conflict_details`,
+    [conflictStatus, conflictDetails ? JSON.stringify(conflictDetails) : null, questionId]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Get conflict status for a verified answer
+ */
+async function getConflictStatus(questionId: number) {
+  // Check if conflict columns exist
+  const colCheck = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns 
+      WHERE table_name='verified_answers' AND column_name='conflict_status'
+    ) as has_conflict_cols;
+  `);
+
+  if (!colCheck.rows[0]?.has_conflict_cols) {
+    // Columns don't exist yet - return basic data
+    const basic = await pool.query(
+      `SELECT id, sum_verified_answer FROM verified_answers WHERE id = $1`,
+      [questionId]
+    );
+    if (!basic.rows[0]) return null;
+    return {
+      ...basic.rows[0],
+      conflict_status: 'none',
+      conflict_details: {},
+      final_consensus_answer: null,
+      final_consensus_by: null,
+      final_consensus_at: null,
+    };
+  }
+
+  const result = await pool.query(
+    `SELECT id, conflict_status, conflict_details, final_consensus_answer, 
+            final_consensus_by, final_consensus_at, sum_verified_answer
+     FROM verified_answers WHERE id = $1`,
+    [questionId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * Save final consensus answer (only when conflict is resolved)
+ */
+async function saveFinalConsensus(
+  questionId: number,
+  finalAnswer: string,
+  consensusBy: string
+) {
+  // Update verified_answers with final consensus
+  const result = await pool.query(
+    `UPDATE verified_answers 
+     SET final_consensus_answer = $1,
+         final_consensus_by = $2,
+         final_consensus_at = NOW(),
+         conflict_status = 'resolved',
+         last_updated_at = NOW()
+     WHERE id = $3
+     RETURNING *`,
+    [finalAnswer, consensusBy, questionId]
+  );
+  return result.rows[0];
+}
+
+// =====================================================
+// ========== END CONFLICT TRACKING FUNCTIONS ==========
+// =====================================================
+
 // These startup cleanup functions can be run if needed.
 export {
   // User Functions
@@ -2788,4 +3581,44 @@ export {
   deleteUserAndHistory,
   deleteInactiveGuestUsersAndChats,
   deleteAllGuestUsersAndChats,
+
+  // Detect_NA — Error Detection Functions
+  getAllMachines,
+  getMachine,
+  upsertMachine,
+  deleteMachine,
+  getAllErrorCodes,
+  getErrorCodesWithKeywords,
+  upsertErrorCode,
+  deleteErrorCode,
+  getActiveErrorEvents,
+  getErrorEventHistory,
+  createErrorEvent,
+  updateErrorEventSeen,
+  incrementMissCount,
+  closeTimedOutEvents,
+  closeErrorEvent,
+  closeAllOpenErrorEvents,
+  removeErrorEvent,
+  getErrorEventStats,
+  getErrorMTTR,
+
+  // Detect_NA — Fail Detection Functions (separate from error)
+  getAllFailCodes,
+  upsertFailCode,
+  deleteFailCode,
+  getActiveFailEvents,
+  getFailEventHistory,
+  createFailEvent,
+  updateFailEventSeen,
+  incrementFailMissCount,
+  closeTimedOutFailEvents,
+  closeFailEvent,
+  closeAllOpenFailEvents,
+  removeFailEvent,
+
+  // Conflict Tracking Functions
+  updateConflictStatus,
+  getConflictStatus,
+  saveFinalConsensus,
 };

@@ -1655,15 +1655,24 @@ body[data-theme="dark"] .ai-sources i {
     to { opacity: 1; }
 }
 
+/* Light mode modal */
 .modal-content {
-    background-color: #1e1e1e;
+    background-color: #ffffff;
     padding: 20px;
     border-radius: 8px;
     width: 90%;
     max-width: 500px;
     max-height: 80vh;
     overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    color: #1f2937;
+}
+
+/* Dark mode modal */
+[data-theme="dark"] .modal-content {
+    background-color: #1e1e1e;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    color: #e0e0e0;
 }
 
 .modal-header {
@@ -1671,6 +1680,10 @@ body[data-theme="dark"] .ai-sources i {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
+    color: #1f2937;
+}
+
+[data-theme="dark"] .modal-header {
     color: #e0e0e0;
 }
 
@@ -1689,7 +1702,58 @@ body[data-theme="dark"] .ai-sources i {
 }
 
 .modal-close:hover {
+    color: #333;
+}
+
+[data-theme="dark"] .modal-close:hover {
     color: #e0e0e0;
+}
+
+/* ===== Verification Console Theme ===== */
+/* Light mode */
+.vc-title { color: #1f2937; }
+.vc-text { color: #374151; }
+.vc-text-secondary { color: #6b7280; }
+.vc-card {
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid #e5e7eb;
+}
+.vc-border { border-color: #e5e7eb; }
+.vc-textarea {
+    background: #f9fafb;
+    border: 1px solid #d1d5db;
+    color: #1f2937;
+}
+.vc-consensus-bg {
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.vc-summary-bg {
+    background: rgba(0, 0, 0, 0.03);
+    color: #374151;
+}
+
+/* Dark mode */
+[data-theme="dark"] .vc-title { color: #e0e0e0; }
+[data-theme="dark"] .vc-text { color: #d1d5db; }
+[data-theme="dark"] .vc-text-secondary { color: #9ca3af; }
+[data-theme="dark"] .vc-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid #333;
+}
+[data-theme="dark"] .vc-border { border-color: #333; }
+[data-theme="dark"] .vc-textarea {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #444;
+    color: #e0e0e0;
+}
+[data-theme="dark"] .vc-consensus-bg {
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+[data-theme="dark"] .vc-summary-bg {
+    background: rgba(0, 0, 0, 0.2);
+    color: #d1d5db;
 }
 
 .verification-timeline {

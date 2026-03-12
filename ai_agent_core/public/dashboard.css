@@ -137,9 +137,9 @@ body {
 }
 
 .card-primary { border-left-color: var(--infineon-primary); }
-.card-warning { border-left-color: var(--color-warning); }
-.card-danger { border-left-color: var(--color-danger); }
-.card-info { border-left-color: var(--color-info); }
+.card-warning { border-left-color: var(--infineon-primary); }
+.card-danger { border-left-color: var(--infineon-primary); }
+.card-info { border-left-color: var(--infineon-primary); }
 
 .card-icon {
     width: 56px;
@@ -157,18 +157,18 @@ body {
 }
 
 .card-warning .card-icon {
-    background: rgba(253, 203, 110, 0.2);
-    color: var(--color-warning);
+    background: rgba(0, 147, 116, 0.1);
+    color: var(--infineon-primary);
 }
 
 .card-danger .card-icon {
-    background: rgba(214, 48, 49, 0.1);
-    color: var(--color-danger);
+    background: rgba(0, 147, 116, 0.1);
+    color: var(--infineon-primary);
 }
 
 .card-info .card-icon {
-    background: rgba(9, 132, 227, 0.1);
-    color: var(--color-info);
+    background: rgba(0, 147, 116, 0.1);
+    color: var(--infineon-primary);
 }
 
 .card-content h3 {
@@ -308,8 +308,8 @@ body {
 }
 
 .badge-critical {
-    background: #fee;
-    color: var(--color-danger);
+    background: #e8f5e9;
+    color: var(--infineon-primary);
 }
 
 .badge-warning {
@@ -335,8 +335,8 @@ body {
 }
 
 .confidence-low {
-    background: rgba(214, 48, 49, 0.15);
-    color: var(--color-danger);
+    background: rgba(0, 147, 116, 0.15);
+    color: var(--infineon-primary);
 }
 
 /* Risk Zone */
@@ -353,8 +353,8 @@ body {
 }
 
 .risk-critical {
-    background: rgba(231, 76, 60, 0.1);
-    border-left-color: var(--color-critical);
+    background: rgba(0, 147, 116, 0.1);
+    border-left-color: var(--infineon-primary);
 }
 
 .risk-watch {
@@ -378,7 +378,7 @@ body {
 .risk-confidence {
     font-size: 1.5rem;
     font-weight: 700;
-    color: var(--color-danger);
+    color: var(--infineon-primary);
 }
 
 .risk-metrics {

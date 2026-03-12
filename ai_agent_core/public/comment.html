@@ -67,6 +67,57 @@
         [data-theme="dark"] .ai-source-verified-by {
             color: #999 !important;
         }
+
+        /* Conflict Banner - Light mode */
+        .conflict-banner {
+            background: #ffffff;
+            border: 2px solid rgba(239, 68, 68, 0.5);
+        }
+        .conflict-banner-text {
+            color: #4a1e1e;
+        }
+        /* Conflict Banner - Dark mode */
+        body[data-theme="dark"] .conflict-banner,
+        [data-theme="dark"] .conflict-banner {
+            background: #2a2a2a !important;
+            border-color: #404040 !important;
+        }
+        body[data-theme="dark"] .conflict-banner-text,
+        [data-theme="dark"] .conflict-banner-text {
+            color: #d1d5db !important;
+        }
+
+        /* Conflict Final Answer Box */
+        #conflictFinalAnswerBox {
+            background: #ffffff;
+            border: 1px solid rgba(16, 185, 129, 0.15);
+        }
+        [data-theme="dark"] #conflictFinalAnswerBox {
+            background: #333;
+            border: 1px solid #404040;
+        }
+
+        /* Conflict Header (Expert Conflict Occurred) */
+        .conflict-header-bar {
+            background: #ffffff;
+            border: none;
+            border-left: 4px solid #066b63;
+        }
+        [data-theme="dark"] .conflict-header-bar {
+            background: #2a2a2a !important;
+            border-left: 4px solid #066b63 !important;
+        }
+
+        /* Conflict Final Answer Section */
+        .conflict-answer-section {
+            background: #ffffff;
+            border: none;
+            border-left: 4px solid #066b63;
+        }
+        [data-theme="dark"] .conflict-answer-section {
+            background: #2a2a2a !important;
+            border-left: 4px solid #066b63 !important;
+        }
         
         /* Confidence Badge Styles */
         .source-confidence-badge {
@@ -1962,10 +2013,93 @@
             }
             
             // Update right column verification section
-            updateVerificationRightColumn();
+            updateVerificationRightColumn(null);
+            
+            // Check for expert conflict status and show warning
+            checkAndShowConflictWarning();
         }
 
-        function updateVerificationRightColumn() {
+        async function checkAndShowConflictWarning() {
+            try {
+                const res = await fetch(`/api/get-conflict-status/${currentQuestionId}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                // Remove existing conflict warning if any
+                const existing = document.getElementById('conflictWarningBanner');
+                if (existing) existing.remove();
+
+                // Re-render verification items with correct conflict status
+                updateVerificationRightColumn(data.conflictStatus);
+
+                if (data.conflictStatus === 'detected') {
+                    const verSection = document.getElementById('verificationStatusContent');
+                    if (verSection) {
+                        const warningHTML = `
+                        <div id="conflictWarningBanner" class="conflict-banner" style="margin-top: 10px; padding: 14px 16px; border-radius: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <i class="fas fa-exclamation-triangle" style="color: #ef4444; font-size: 18px;"></i>
+                                <span style="color: #ef4444; font-weight: 800; font-size: 15px;">Conflict Detected</span>
+                            </div>
+                            <p class="conflict-banner-text" style="font-size: 13px; margin: 0 0 10px 0; line-height: 1.5;">
+                                ${(data.conflictDetails && data.conflictDetails.conflictSummary) || 'Experts have given conflicting answers. Please review.'}
+                            </p>
+                            <button onclick="openVerificationConsole()" style="background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; width: 100%;">
+                                <i class="fas fa-clipboard-check"></i> Resolve Conflict
+                            </button>
+                        </div>`;
+                        verSection.insertAdjacentHTML('beforeend', warningHTML);
+                    }
+                } else if (data.conflictStatus === 'resolved' && data.finalConsensusAnswer) {
+                    const verSection = document.getElementById('verificationStatusContent');
+                    if (verSection) {
+                        const escapedAnswer = (data.finalConsensusAnswer || '')
+                            .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                            .replace(/\n/g, '<br>');
+                        const consensusBy = data.finalConsensusBy || 'Senior Expert';
+                        const consensusDate = data.finalConsensusAt 
+                            ? new Date(data.finalConsensusAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                            : '';
+                        
+                        const resolvedHTML = `
+                        <div id="conflictWarningBanner" style="margin-top: 12px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(6, 107, 99, 0.3);">
+                            <!-- Conflict History Indicator -->
+                            <div class="conflict-header-bar" style="padding: 8px 14px; border-bottom: none; border-radius: 10px 10px 0 0; display: flex; align-items: center; gap: 6px;">
+                                <i class="fas fa-exclamation-triangle" style="color: #f87171; font-size: 12px;"></i>
+                                <span class="vc-text-secondary" style="font-size: 11px; font-weight: 600;">Expert Conflict Occurred</span>
+                                <i class="fas fa-arrow-right" style="font-size: 9px; color: #9ca3af;"></i>
+                                <i class="fas fa-check-circle" style="color: #0a8276; font-size: 12px;"></i>
+                                <span style="color: #0a8276; font-size: 11px; font-weight: 600;">Resolved</span>
+                            </div>
+                            <!-- Final Answer Section -->
+                            <div class="conflict-answer-section" style="padding: 14px 16px; border-radius: 0 0 10px 10px;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <i class="fas fa-star" style="color: #0a8276; font-size: 14px;"></i>
+                                    <span style="color: #066b63; font-weight: 700; font-size: 14px;">Final Answer (Consensus)</span>
+                                </div>
+                                <div class="vc-text" style="font-size: 13px; line-height: 1.6; margin-bottom: 10px; padding: 10px 12px; border-radius: 6px;" id="conflictFinalAnswerBox">
+                                    ${escapedAnswer}
+                                </div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                    <div class="vc-text-secondary" style="font-size: 11px;">
+                                        <i class="fas fa-user-check" style="color: #0a8276;"></i>
+                                        Approved by <strong>${consensusBy}</strong> ${consensusDate ? '&middot; ' + consensusDate : ''}
+                                    </div>
+                                    <button onclick="openVerificationConsole()" style="background: rgba(10, 130, 118, 0.12); color: #0a8276; border: 1px solid rgba(10, 130, 118, 0.3); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 600;">
+                                        <i class="fas fa-history"></i> View Conflict History
+                                    </button>
+                                </div>
+                            </div>
+                        </div>`;
+                        verSection.insertAdjacentHTML('beforeend', resolvedHTML);
+                    }
+                }
+            } catch (e) {
+                console.error('Error checking conflict status:', e);
+            }
+        }
+
+    function updateVerificationRightColumn(conflictStatus) {
             const verStatusContent = document.getElementById('verificationStatusContent');
             if (!verStatusContent || !currentQuestion) {
                 return;
@@ -2083,11 +2217,16 @@
                             const isSelfVerified = currentQuestion.verification_type === 'self';
                             const prefix = isSelfVerified ? '' : 'Request: ';
                             
+                            // Show warning icon if conflict was detected or resolved
+                            const hasConflict = conflictStatus === 'detected' || conflictStatus === 'resolved';
+                            const icon = hasConflict ? '<i class="fas fa-exclamation-triangle" style="color:#ef4444;font-size:13px;"></i>' : '<i class="fas fa-check" style="color:#28a745;font-size:13px;"></i>';
+                            const borderColor = hasConflict ? '#ef4444' : '#28a745';
+                            
                             return `
-                                <div class="verification-item verified">
+                                <div class="verification-item verified" style="border-left-color: ${borderColor};">
                                     <div class="verification-item-header">
                                         <div class="verification-item-text">
-                                            ${prefix}✓ Verified from ${dept} - ${username} (${date})
+                                            ${prefix}${icon} Verified from ${dept} - ${username} (${date})
                                         </div>
                                     </div>
                                     ${comment ? `<div class="verification-item-comment">${comment}</div>` : ''}
@@ -3149,5 +3288,256 @@
             </div>
         </div>
     </div>
+
+    <!-- ========== VERIFICATION CONSOLE MODAL ========== -->
+    <div id="verificationConsoleModal" class="modal">
+        <div class="modal-content" style="max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header vc-border" style="display: flex; align-items: center; gap: 10px; border-bottom-width: 1px; border-bottom-style: solid; padding-bottom: 12px;">
+                <i class="fas fa-clipboard-check" style="font-size: 20px; color: #60a5fa;"></i>
+                <h3 class="vc-title" style="margin: 0; font-size: 18px;">Verification Console</h3>
+                <span style="flex:1;"></span>
+                <span id="vcStatusBadge" style="padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;"></span>
+                <button class="modal-close" onclick="closeVerificationConsole()">&times;</button>
+            </div>
+
+            <!-- Verification Entries -->
+            <div style="margin-top: 16px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+                    <i class="fas fa-check-circle" style="color: #34d399;"></i>
+                    <span class="vc-title" style="font-weight: 600;">Verification</span>
+                </div>
+                <div id="vcVerificationEntries" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Conflict Alert -->
+            <div id="vcConflictAlert" style="display: none; margin-top: 16px; padding: 14px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 10px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <i class="fas fa-exclamation-triangle" style="color: #ef4444; font-size: 16px;"></i>
+                    <span style="color: #ef4444; font-weight: 700; font-size: 14px;">Conflict Detected</span>
+                </div>
+                <p id="vcConflictSummary" class="vc-text" style="font-size: 13px; margin: 0 0 10px 0;"></p>
+                <div id="vcConflictPoints" class="vc-text" style="font-size: 12px; margin-bottom: 8px;"></div>
+                <button onclick="scrollToDiscussion()" style="background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                    <i class="fas fa-search"></i> Review Conflict
+                </button>
+            </div>
+
+            <!-- Final Consensus Section -->
+            <div id="vcConsensusSection" class="vc-consensus-bg" style="margin-top: 20px; padding: 16px; border-radius: 10px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                    <i class="fas fa-star" style="color: #10b981;"></i>
+                    <span class="vc-title" style="font-weight: 600;">Final Consensus</span>
+                    <span style="flex:1;"></span>
+                    <span id="vcConsensusStatusBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 8px;"></span>
+                </div>
+                
+                <div id="vcConsensusSummaryView" style="display: none;">
+                    <div class="vc-text-secondary" style="font-size: 11px; margin-bottom: 4px;">Summary</div>
+                    <div id="vcConsensusSummaryText" class="vc-summary-bg" style="font-size: 13px; line-height: 1.6; padding: 12px; border-radius: 8px; white-space: pre-wrap;"></div>
+                    <div id="vcConsensusReviewInfo" class="vc-text-secondary" style="margin-top: 8px; font-size: 11px;"></div>
+                </div>
+
+                <div id="vcConsensusEditView">
+                    <div class="vc-text-secondary" style="font-size: 11px; margin-bottom: 4px;">Write or edit the final consensus answer:</div>
+                    <textarea id="vcConsensusTextarea" class="vc-textarea" style="width: 100%; min-height: 120px; border-radius: 8px; padding: 10px; font-size: 13px; line-height: 1.6; resize: vertical; font-family: inherit;" placeholder="สรุปคำตอบสุดท้ายที่ถูกต้อง..."></textarea>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="vcSendFinalBtn" onclick="sendFinalAnswer()" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                    <i class="fas fa-paper-plane"></i> Send Final Answer
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ========== VERIFICATION CONSOLE LOGIC ==========
+    let vcConflictData = null;
+
+    async function openVerificationConsole() {
+        const modal = document.getElementById('verificationConsoleModal');
+        modal.style.display = 'flex';
+        modal.style.justifyContent = 'center';
+        modal.style.alignItems = 'center';
+        await loadVerificationConsoleData();
+    }
+
+    function closeVerificationConsole() {
+        document.getElementById('verificationConsoleModal').style.display = 'none';
+    }
+
+    function scrollToDiscussion() {
+        const el = document.getElementById('vcDiscussionSection');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function loadVerificationConsoleData() {
+        try {
+            const res = await fetch(`/api/get-conflict-status/${currentQuestionId}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            vcConflictData = data;
+            renderVerificationConsole(data);
+        } catch (e) {
+            console.error('Error loading verification console:', e);
+        }
+    }
+
+    function renderVerificationConsole(data) {
+        const statusBadge = document.getElementById('vcStatusBadge');
+        const conflictAlert = document.getElementById('vcConflictAlert');
+        const consensusSummary = document.getElementById('vcConsensusSummaryView');
+        const consensusEdit = document.getElementById('vcConsensusEditView');
+        const consensusStatusBadge = document.getElementById('vcConsensusStatusBadge');
+
+        // Status badge
+        if (data.conflictStatus === 'detected') {
+            statusBadge.textContent = 'Conflict Detected';
+            statusBadge.style.background = 'rgba(251, 191, 36, 0.15)';
+            statusBadge.style.color = '#fbbf24';
+        } else if (data.conflictStatus === 'resolved') {
+            statusBadge.textContent = 'Resolved';
+            statusBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+            statusBadge.style.color = '#10b981';
+        } else if (data.conflictStatus === 'rejected') {
+            statusBadge.textContent = 'Rejected';
+            statusBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+            statusBadge.style.color = '#ef4444';
+        } else {
+            statusBadge.textContent = 'No Conflict';
+            statusBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+            statusBadge.style.color = '#10b981';
+        }
+
+        // Verification entries
+        const entriesEl = document.getElementById('vcVerificationEntries');
+        if (data.expertVerifications && data.expertVerifications.length > 0) {
+            entriesEl.innerHTML = data.expertVerifications.map(v => {
+                const dept = (v.requested_departments && v.requested_departments[0]) || 'General';
+                const date = new Date(v.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+                const comment = (v.comment || 'ยืนยันแล้ว').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const isConflict = data.conflictStatus === 'detected';
+                return `
+                <div class="vc-card" style="padding: 10px 14px; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                        <span style="color: ${isConflict ? '#fbbf24' : '#34d399'}; font-size: 12px;"><i class="fas ${isConflict ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i></span>
+                        <span class="vc-title" style="font-weight: 600; font-size: 13px;">Request: ${isConflict ? '⚠️' : '✓'} Verified from ${dept}-${v.commenter_name[0] || 'r'}</span>
+                        <span class="vc-text-secondary" style="font-size: 11px;">(${date})</span>
+                    </div>
+                    <div class="vc-text" style="font-size: 12px; line-height: 1.5; margin-left: 22px; white-space: pre-wrap;">${comment}</div>
+                </div>`;
+            }).join('');
+        } else {
+            entriesEl.innerHTML = '<div class="vc-text-secondary" style="font-size: 13px; padding: 10px;">No expert verifications yet.</div>';
+        }
+
+        // Conflict alert
+        const details = data.conflictDetails || {};
+        if (data.conflictStatus === 'detected') {
+            conflictAlert.style.display = 'block';
+            document.getElementById('vcConflictSummary').textContent = 
+                details.conflictSummary || 'Experts have given conflicting answers on this knowledge. Please review the conflict and submit a final answer.';
+            
+            const pointsEl = document.getElementById('vcConflictPoints');
+            if (details.conflictPoints && details.conflictPoints.length > 0) {
+                pointsEl.innerHTML = '<div style="font-weight:600; margin-bottom:4px;">Conflict Points:</div>' +
+                    details.conflictPoints.map(p => `<div style="padding-left: 12px;">• ${p}</div>`).join('');
+            } else {
+                pointsEl.innerHTML = '';
+            }
+        } else {
+            conflictAlert.style.display = 'none';
+        }
+
+        // Final consensus section
+        if (data.finalConsensusAnswer) {
+            consensusSummary.style.display = 'block';
+            consensusEdit.style.display = 'none';
+            document.getElementById('vcConsensusSummaryText').textContent = data.finalConsensusAnswer;
+            
+            const reviewInfo = document.getElementById('vcConsensusReviewInfo');
+            const consensusDate = data.finalConsensusAt ? new Date(data.finalConsensusAt) : null;
+            const timeAgo = consensusDate ? formatDate(consensusDate) : '';
+            reviewInfo.innerHTML = `
+                <div style="display:flex; gap: 16px; align-items: center;">
+                    <span><i class="fas fa-user-check" style="color: #10b981;"></i> Reviewed By</span>
+                    <span class="vc-title" style="font-weight:600;">Senior Expert ${data.finalConsensusBy || 'Unknown'}</span>
+                    <span class="vc-text-secondary"><i class="far fa-clock"></i> ${timeAgo}</span>
+                </div>`;
+            
+            consensusStatusBadge.textContent = 'Approved';
+            consensusStatusBadge.style.background = 'rgba(16,185,129,0.15)';
+            consensusStatusBadge.style.color = '#10b981';
+        } else if (data.conflictStatus === 'detected') {
+            consensusSummary.style.display = 'none';
+            consensusEdit.style.display = 'block';
+            // Leave textarea empty for user to write final answer
+            const textarea = document.getElementById('vcConsensusTextarea');
+            textarea.value = '';
+            consensusStatusBadge.textContent = 'Pending';
+            consensusStatusBadge.style.background = 'rgba(251,191,36,0.15)';
+            consensusStatusBadge.style.color = '#fbbf24';
+        } else if (data.sumVerifiedAnswer) {
+            consensusSummary.style.display = 'block';
+            consensusEdit.style.display = 'none';
+            document.getElementById('vcConsensusSummaryText').textContent = data.sumVerifiedAnswer;
+            consensusStatusBadge.textContent = 'Auto-Synthesized';
+            consensusStatusBadge.style.background = 'rgba(96,165,250,0.15)';
+            consensusStatusBadge.style.color = '#60a5fa';
+        } else {
+            consensusSummary.style.display = 'none';
+            consensusEdit.style.display = 'block';
+            consensusStatusBadge.textContent = 'Draft';
+            consensusStatusBadge.style.background = 'rgba(156,163,175,0.15)';
+            consensusStatusBadge.style.color = '#9ca3af';
+        }
+
+        // Show/hide buttons based on status
+        const sendBtn = document.getElementById('vcSendFinalBtn');
+
+        if (data.conflictStatus === 'resolved') {
+            sendBtn.style.display = 'none';
+        } else {
+            sendBtn.style.display = 'flex';
+        }
+    }
+
+    async function sendFinalAnswer() {
+        const textarea = document.getElementById('vcConsensusTextarea');
+        const summaryText = document.getElementById('vcConsensusSummaryText');
+        const finalAnswer = (textarea && textarea.value.trim()) || (summaryText && summaryText.textContent.trim());
+        
+        if (!finalAnswer) {
+            alert('Please write the final consensus answer before sending.');
+            return;
+        }
+
+        if (!confirm('Are you sure you want to send this as the final answer? This will save it to the knowledge base.')) return;
+
+        try {
+            const res = await fetch('/api/submit-final-consensus', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questionId: currentQuestionId, finalAnswer })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showMessage('Final answer saved successfully!', 'success');
+                await loadVerificationConsoleData();
+                await loadQuestionDetail();
+            } else {
+                showMessage(data.error || 'Failed to save final answer', 'error');
+            }
+        } catch (e) {
+            showMessage('Error saving final answer', 'error');
+        }
+    }
+
+    // ========== END VERIFICATION CONSOLE LOGIC ==========
+    </script>
 </body>
 </html>

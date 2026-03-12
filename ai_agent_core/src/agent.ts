@@ -8,7 +8,7 @@ import { Readable } from 'stream';
 import FormData, { from } from 'form-data';
 import { XMLParser } from 'fast-xml-parser';
 import * as Minio from 'minio'; // Import for /save_img endpoint
-import { saveVerifiedAnswer, searchVerifiedAnswers, searchVerifiedAnswersHybrid, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics } from './db.js';
+import { saveVerifiedAnswer, searchVerifiedAnswers, searchVerifiedAnswersHybrid, getAnswerVerifications, filterQuestionsByType, countQuestionsByType, getHotTags, saveVerificationAttachments, getVerificationAttachments, getAnswerVerificationAttachments, triggerNotificationsForQuestion, saveAISuggestion, getAISuggestion, updateAISuggestionDecision, saveAILearningAnalysis, getAIPerformanceSummary, getAIConflictPatterns, getKnowledgeGroupAnalytics, getConfidenceDistribution, getDepartmentUserStatistics, updateConflictStatus, getConflictStatus, saveFinalConsensus } from './db.js';
 
 dotenv.config();
 
@@ -4748,7 +4748,7 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
           
           // Collect all expert comments for comprehensive analysis
           const allVerifications = await pool.query(
-            `SELECT commenter_name, comment, requested_departments 
+            `SELECT commenter_name, comment, requested_departments, created_at
              FROM answer_verifications 
              WHERE verified_answer_id = $1 
              AND verification_type = 'verification'
@@ -4759,6 +4759,166 @@ router.post('/submit-verification', async (req: Request, res: Response) => {
           const expertComments = allVerifications.rows
             .map(v => `- ${v.commenter_name} (${v.requested_departments?.[0] || 'General'}): ${v.comment || 'ยืนยันแล้ว'}`)
             .join('\n');
+
+          // ========== ⚠️ EXPERT CONFLICT DETECTION ==========
+          // When multiple experts have verified, use LLM to detect conflicts between their answers
+          let expertConflictDetected = false;
+          let expertConflictDetails: any = null;
+
+          if (allVerifications.rows.length > 1) {
+            console.log(`🔍 Checking for conflicts between ${allVerifications.rows.length} expert verifications...`);
+            
+            const expertAnswersForConflictCheck = allVerifications.rows
+              .map(v => `**${v.commenter_name}** (${v.requested_departments?.[0] || 'General'}, ${new Date(v.created_at || Date.now()).toLocaleDateString('th-TH')}):\n${v.comment || 'ยืนยันแล้ว'}`)
+              .join('\n\n---\n\n');
+
+            const conflictCheckPrompt = `คุณเป็นผู้ตรวจสอบความสอดคล้องของคำตอบจากผู้เชี่ยวชาญหลายคน
+
+**คำถามต้นฉบับ:**
+${originalQuestion}
+
+**คำตอบจากผู้เชี่ยวชาญแต่ละคน:**
+${expertAnswersForConflictCheck}
+
+**ภารกิจของคุณ:**
+ตรวจสอบว่าคำตอบจากผู้เชี่ยวชาญแต่ละคนมีความขัดแย้งกันหรือไม่
+
+**เกณฑ์การตัดสิน:**
+- "no_conflict" = คำตอบสอดคล้องกัน อาจมีรายละเอียดเพิ่มเติมแต่ไม่ขัดแย้ง
+- "minor_conflict" = มีความแตกต่างเล็กน้อย เช่น ใช้คำต่างกัน แต่สาระเดียวกัน
+- "major_conflict" = มีความขัดแย้งในเนื้อหาสำคัญ ข้อมูลไม่ตรงกัน
+- "contradictory" = ขัดแย้งกันโดยสิ้นเชิง ข้อมูลตรงข้ามกัน
+
+กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
+{
+  "conflictLevel": "no_conflict/minor_conflict/major_conflict/contradictory",
+  "hasConflict": true/false,
+  "conflictSummary": "สรุปสั้นๆ ว่าขัดแย้งตรงไหน หรือสอดคล้องกันอย่างไร",
+  "conflictPoints": ["จุดที่ขัดแย้ง 1", "จุดที่ขัดแย้ง 2"],
+  "expertAgreements": ["จุดที่เห็นตรงกัน 1", "จุดที่เห็นตรงกัน 2"],
+  "suggestedResolution": "คำแนะนำในการแก้ไขความขัดแย้ง"
+}
+
+ตอบเฉพาะ JSON เท่านั้น:`;
+
+            let conflictResult: any = null;
+
+            // Try IFXGPT for conflict detection
+            try {
+              if (ifxClientAvailable && ifxClient) {
+                console.log('🔍 Expert Conflict Check: Trying IFXGPT...');
+                const ifxResponse = await ifxClient.chat.completions.create({
+                  model: 'gpt-5.2',
+                  messages: [
+                    { role: 'system', content: 'You are an expert conflict detector. Analyze expert answers for conflicts. Always respond with valid JSON only.' },
+                    { role: 'user', content: conflictCheckPrompt }
+                  ],
+                  max_completion_tokens: 1000,
+                  temperature: 0.1,
+                });
+                const responseText = ifxResponse.choices[0]?.message?.content || '';
+                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  conflictResult = JSON.parse(jsonMatch[0]);
+                  console.log('✅ Expert Conflict Check (IFXGPT) succeeded');
+                }
+              }
+            } catch (ifxErr) {
+              console.warn('Expert Conflict Check (IFXGPT) failed:', ifxErr);
+            }
+
+            // Fallback to Google AI
+            if (!conflictResult) {
+              try {
+                console.log('🔍 Expert Conflict Check: Trying Google AI...');
+                const geminiResult = await ai.models.generateContent({
+                  model: 'gemma-3-4b-it',
+                  contents: conflictCheckPrompt,
+                  config: { maxOutputTokens: 1000, temperature: 0.1 },
+                });
+                const responseText = geminiResult.text || '';
+                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  conflictResult = JSON.parse(jsonMatch[0]);
+                  console.log('✅ Expert Conflict Check (Google AI) succeeded');
+                }
+              } catch (googleErr) {
+                console.warn('Expert Conflict Check (Google AI) failed:', googleErr);
+              }
+            }
+
+            // Fallback to Ollama
+            if (!conflictResult) {
+              try {
+                console.log('🔍 Expert Conflict Check: Trying Ollama...');
+                const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'gemma3:1b',
+                    prompt: conflictCheckPrompt,
+                    stream: false,
+                    options: { temperature: 0.1, num_predict: 1000 }
+                  })
+                });
+                if (ollamaResponse.ok) {
+                  const ollamaData = await ollamaResponse.json() as { response?: string };
+                  const responseText = ollamaData.response || '';
+                  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    conflictResult = JSON.parse(jsonMatch[0]);
+                    console.log('✅ Expert Conflict Check (Ollama) succeeded');
+                  }
+                }
+              } catch (ollamaErr) {
+                console.warn('Expert Conflict Check (Ollama) failed:', ollamaErr);
+              }
+            }
+
+            // Process conflict result
+            if (conflictResult) {
+              const hasConflict = conflictResult.hasConflict === true || 
+                                  conflictResult.conflictLevel === 'major_conflict' || 
+                                  conflictResult.conflictLevel === 'contradictory';
+              
+              if (hasConflict) {
+                expertConflictDetected = true;
+                expertConflictDetails = {
+                  conflictLevel: conflictResult.conflictLevel,
+                  conflictSummary: conflictResult.conflictSummary,
+                  conflictPoints: conflictResult.conflictPoints || [],
+                  expertAgreements: conflictResult.expertAgreements || [],
+                  suggestedResolution: conflictResult.suggestedResolution || '',
+                  detectedAt: new Date().toISOString(),
+                  expertCount: allVerifications.rows.length,
+                  experts: allVerifications.rows.map(v => ({
+                    name: v.commenter_name,
+                    department: v.requested_departments?.[0] || 'General',
+                    comment: v.comment || 'ยืนยันแล้ว',
+                    date: v.created_at
+                  }))
+                };
+
+                // Save conflict status to DB - DO NOT save to main DB yet
+                await updateConflictStatus(parseInt(questionId), 'detected', expertConflictDetails);
+                console.log(`⚠️ CONFLICT DETECTED for Q${questionId}: ${conflictResult.conflictLevel}`);
+                console.log(`   Summary: ${conflictResult.conflictSummary}`);
+                console.log(`   ⛔ NOT saving synthesized answer to DB - waiting for final consensus`);
+              } else {
+                // No conflict - mark as none
+                await updateConflictStatus(parseInt(questionId), 'none', {
+                  conflictLevel: conflictResult.conflictLevel || 'no_conflict',
+                  conflictSummary: conflictResult.conflictSummary || 'ไม่พบความขัดแย้ง',
+                  expertAgreements: conflictResult.expertAgreements || [],
+                  checkedAt: new Date().toISOString()
+                });
+                console.log(`✅ No conflict detected for Q${questionId}`);
+              }
+            } else {
+              console.warn('⚠️ Expert conflict check failed - proceeding without conflict detection');
+            }
+          }
+          // ========== END EXPERT CONFLICT DETECTION ==========
         
           // ========== ⭐ NEW: SYNTHESIZE ANSWER FROM ALL VERIFICATIONS ==========
           console.log(`🔄 Synthesizing final answer from ${allVerifications.rows.length} verifications...`);
@@ -4841,7 +5001,22 @@ ${expertCommentsForSynthesis}
           }
           
           // If synthesis succeeded, create embedding and save to sum_verified_answer
+          // ⚠️ BUT ONLY if no expert conflict was detected!
           if (synthesizedAnswer && synthesizedAnswer.length > 50) {
+            if (expertConflictDetected) {
+              // Conflict detected - DO NOT save to main DB
+              // Store synthesized answer in conflict_details for later review
+              console.log(`⛔ Conflict detected - NOT saving synthesized answer to main DB for Q${questionId}`);
+              console.log(`   Synthesized answer stored in conflict_details for Verification Console review`);
+              await pool.query(
+                `UPDATE verified_answers 
+                 SET conflict_details = conflict_details || $1::jsonb,
+                     last_updated_at = NOW()
+                 WHERE id = $2`,
+                [JSON.stringify({ pendingSynthesizedAnswer: synthesizedAnswer }), questionId]
+              );
+            } else {
+              // No conflict - save normally
             try {
               // Add synthesis metadata footer
               const verifierNames = allVerifications.rows
@@ -4892,10 +5067,31 @@ ${expertCommentsForSynthesis}
             } catch (updateError) {
               console.error('Failed to update synthesized answer:', updateError);
             }
+            } // end if/else expertConflictDetected
           } else {
             console.warn('⚠️ Synthesis failed or too short, not saving synthesized answer');
           }
           // ========== END ANSWER SYNTHESIS ==========
+
+          // ⛔ SKIP LLM Judge when expert conflict is detected — wait for resolution
+          if (expertConflictDetected) {
+            console.log(`⛔ Expert conflict detected for Q${questionId} — SKIPPING LLM Judge`);
+            console.log(`   Judge will run after conflict is resolved via submit-final-consensus`);
+            return; // Exit — don't judge until consensus is reached
+          }
+
+          // ========== CHECK: Use final_consensus_answer if conflict was previously resolved ==========
+          const conflictCheck = await pool.query(
+            `SELECT conflict_status, final_consensus_answer FROM verified_answers WHERE id = $1`,
+            [questionId]
+          );
+          const conflictRow = conflictCheck.rows[0];
+          let judgeReferenceAnswer = humanAnswer;
+          
+          if (conflictRow?.conflict_status === 'resolved' && conflictRow?.final_consensus_answer) {
+            judgeReferenceAnswer = conflictRow.final_consensus_answer;
+            console.log(`📋 Using final_consensus_answer as judge reference for Q${questionId} (conflict was resolved)`);
+          }
         
           // Use LLM to judge the difference
           const judgePrompt = `คุณเป็นผู้ตรวจสอบคุณภาพคำตอบ AI โปรดวิเคราะห์ความแตกต่างระหว่างคำตอบ AI กับคำตอบจากผู้เชี่ยวชาญ
@@ -4906,7 +5102,7 @@ ${expertCommentsForSynthesis}
 ${aiAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
 
 คำตอบจากผู้เชี่ยวชาญ (คำตอบที่ถูกต้อง):
-${humanAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+${judgeReferenceAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
 
 ความเห็นจากผู้เชี่ยวชาญที่ยืนยัน:
 ${expertComments || 'ไม่มีความเห็นเพิ่มเติม'}
@@ -5021,7 +5217,7 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
             const normalizeText = (text: string) => 
               text.toLowerCase().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
             
-            const humanNorm = normalizeText(humanAnswer);
+            const humanNorm = normalizeText(judgeReferenceAnswer);
             const aiNorm = normalizeText(aiAnswer);
             
             // Calculate word overlap (Jaccard similarity)
@@ -5109,7 +5305,7 @@ ${expertComments || 'ไม่มีความเห็นเพิ่มเ�
           await updateAISuggestionDecision(
             aiSuggestion.id,
             judgeResult.decision as 'accepted' | 'rejected',
-            humanAnswer,
+            judgeReferenceAnswer,
             commenterName || 'LLM-Judge'
           );
           
@@ -5389,6 +5585,531 @@ Return JSON only: {"group": "Category Name", "confidence": 0.9}`;
     res.status(500).json({ success: false, error: String(error) });
   }
 });
+
+// ========== VERIFICATION CONSOLE API ENDPOINTS ==========
+
+// GET /api/get-conflict-status/:questionId - Get conflict status for a question
+router.get('/get-conflict-status/:questionId', async (req: Request, res: Response) => {
+  try {
+    const questionId = parseInt(req.params.questionId);
+    if (isNaN(questionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid question ID' });
+    }
+
+    const conflictData = await getConflictStatus(questionId);
+    if (!conflictData) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    // Get all expert verifications for the discussion view
+    const verifications = await pool.query(
+      `SELECT av.id, av.commenter_name, av.comment, av.requested_departments, 
+              av.created_at, av.attachments
+       FROM answer_verifications av
+       WHERE av.verified_answer_id = $1 
+       AND av.verification_type = 'verification'
+       ORDER BY av.created_at ASC`,
+      [questionId]
+    );
+
+    // ========== ON-DEMAND CONFLICT DETECTION ==========
+    // If there are 2+ expert verifications but conflict_status is still 'none' or null,
+    // run LLM conflict detection now (handles pre-existing verifications)
+    let currentConflictStatus = conflictData.conflict_status || 'none';
+    let currentConflictDetails = conflictData.conflict_details || {};
+
+    if (verifications.rows.length >= 2 && (currentConflictStatus === 'none' || !currentConflictStatus)) {
+      console.log(`🔍 On-demand conflict check for Q${questionId} (${verifications.rows.length} experts, status='${currentConflictStatus}')`);
+      
+      // Get the original question
+      const questionResult = await pool.query(
+        `SELECT question FROM verified_answers WHERE id = $1`,
+        [questionId]
+      );
+      const originalQuestion = questionResult.rows[0]?.question || '';
+
+      const expertAnswersForCheck = verifications.rows
+        .map((v: any) => `**${v.commenter_name}** (${v.requested_departments?.[0] || 'General'}, ${new Date(v.created_at || Date.now()).toLocaleDateString('th-TH')}):\n${v.comment || 'ยืนยันแล้ว'}`)
+        .join('\n\n---\n\n');
+
+      const conflictCheckPrompt = `คุณเป็นผู้ตรวจสอบความสอดคล้องของคำตอบจากผู้เชี่ยวชาญหลายคน
+
+**คำถามต้นฉบับ:**
+${originalQuestion}
+
+**คำตอบจากผู้เชี่ยวชาญแต่ละคน:**
+${expertAnswersForCheck}
+
+**ภารกิจของคุณ:**
+ตรวจสอบว่าคำตอบจากผู้เชี่ยวชาญแต่ละคนมีความขัดแย้งกันหรือไม่
+
+**เกณฑ์การตัดสิน:**
+- "no_conflict" = คำตอบสอดคล้องกัน อาจมีรายละเอียดเพิ่มเติมแต่ไม่ขัดแย้ง
+- "minor_conflict" = มีความแตกต่างเล็กน้อย เช่น ใช้คำต่างกัน แต่สาระเดียวกัน
+- "major_conflict" = มีความขัดแย้งในเนื้อหาสำคัญ ข้อมูลไม่ตรงกัน
+- "contradictory" = ขัดแย้งกันโดยสิ้นเชิง ข้อมูลตรงข้ามกัน
+
+กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
+{
+  "conflictLevel": "no_conflict/minor_conflict/major_conflict/contradictory",
+  "hasConflict": true/false,
+  "conflictSummary": "สรุปสั้นๆ ว่าขัดแย้งตรงไหน หรือสอดคล้องกันอย่างไร",
+  "conflictPoints": ["จุดที่ขัดแย้ง 1", "จุดที่ขัดแย้ง 2"],
+  "expertAgreements": ["จุดที่เห็นตรงกัน 1", "จุดที่เห็นตรงกัน 2"],
+  "suggestedResolution": "คำแนะนำในการแก้ไขความขัดแย้ง"
+}
+
+ตอบเฉพาะ JSON เท่านั้น:`;
+
+      let conflictResult: any = null;
+
+      // Try IFXGPT
+      try {
+        if (ifxClientAvailable && ifxClient) {
+          const ifxResponse = await ifxClient.chat.completions.create({
+            model: 'gpt-5.2',
+            messages: [
+              { role: 'system', content: 'You are an expert conflict detector. Analyze expert answers for conflicts. Always respond with valid JSON only.' },
+              { role: 'user', content: conflictCheckPrompt }
+            ],
+            max_completion_tokens: 1000,
+            temperature: 0.1,
+          });
+          const responseText = ifxResponse.choices[0]?.message?.content || '';
+          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            conflictResult = JSON.parse(jsonMatch[0]);
+            console.log('✅ On-demand conflict check (IFXGPT) succeeded');
+          }
+        }
+      } catch (e) { console.warn('On-demand IFXGPT failed:', e); }
+
+      // Fallback: Google AI
+      if (!conflictResult) {
+        try {
+          const geminiResult = await ai.models.generateContent({
+            model: 'gemma-3-4b-it',
+            contents: conflictCheckPrompt,
+            config: { maxOutputTokens: 1000, temperature: 0.1 },
+          });
+          const responseText = geminiResult.text || '';
+          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            conflictResult = JSON.parse(jsonMatch[0]);
+            console.log('✅ On-demand conflict check (Google AI) succeeded');
+          }
+        } catch (e) { console.warn('On-demand Google AI failed:', e); }
+      }
+
+      // Fallback: Ollama
+      if (!conflictResult) {
+        try {
+          const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gemma3:1b',
+              prompt: conflictCheckPrompt,
+              stream: false,
+              options: { temperature: 0.1, num_predict: 1000 }
+            })
+          });
+          if (ollamaResponse.ok) {
+            const ollamaData = await ollamaResponse.json() as { response?: string };
+            const responseText = ollamaData.response || '';
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              conflictResult = JSON.parse(jsonMatch[0]);
+              console.log('✅ On-demand conflict check (Ollama) succeeded');
+            }
+          }
+        } catch (e) { console.warn('On-demand Ollama failed:', e); }
+      }
+
+      // Process result and update DB
+      if (conflictResult) {
+        const hasConflict = conflictResult.hasConflict === true || 
+                            conflictResult.conflictLevel === 'major_conflict' || 
+                            conflictResult.conflictLevel === 'contradictory';
+
+        if (hasConflict) {
+          currentConflictStatus = 'detected';
+          currentConflictDetails = {
+            conflictLevel: conflictResult.conflictLevel,
+            conflictSummary: conflictResult.conflictSummary,
+            conflictPoints: conflictResult.conflictPoints || [],
+            expertAgreements: conflictResult.expertAgreements || [],
+            suggestedResolution: conflictResult.suggestedResolution || '',
+            detectedAt: new Date().toISOString(),
+            expertCount: verifications.rows.length,
+            experts: verifications.rows.map((v: any) => ({
+              name: v.commenter_name,
+              department: v.requested_departments?.[0] || 'General',
+              comment: v.comment || 'ยืนยันแล้ว',
+              date: v.created_at
+            }))
+          };
+          await updateConflictStatus(questionId, 'detected', currentConflictDetails);
+          console.log(`⚠️ On-demand: CONFLICT DETECTED for Q${questionId}`);
+        } else {
+          currentConflictStatus = 'none';
+          currentConflictDetails = {
+            conflictLevel: conflictResult.conflictLevel || 'no_conflict',
+            conflictSummary: conflictResult.conflictSummary || 'ไม่พบความขัดแย้ง',
+            expertAgreements: conflictResult.expertAgreements || [],
+            checkedAt: new Date().toISOString()
+          };
+          await updateConflictStatus(questionId, 'none', currentConflictDetails);
+          console.log(`✅ On-demand: No conflict for Q${questionId}`);
+        }
+      }
+    }
+    // ========== END ON-DEMAND CONFLICT DETECTION ==========
+
+    res.json({
+      success: true,
+      conflictStatus: currentConflictStatus,
+      conflictDetails: currentConflictDetails,
+      finalConsensusAnswer: conflictData.final_consensus_answer || null,
+      finalConsensusBy: conflictData.final_consensus_by || null,
+      finalConsensusAt: conflictData.final_consensus_at || null,
+      sumVerifiedAnswer: conflictData.sum_verified_answer || null,
+      expertVerifications: verifications.rows
+    });
+  } catch (error) {
+    console.error('Error getting conflict status:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/submit-final-consensus - Submit final consensus answer (resolves conflict)
+router.post('/submit-final-consensus', async (req: Request, res: Response) => {
+  try {
+    const { questionId, finalAnswer } = req.body;
+    const consensusBy = req.session.user?.username || 'Anonymous';
+
+    if (!questionId || !finalAnswer) {
+      return res.status(400).json({ success: false, error: 'Missing questionId or finalAnswer' });
+    }
+
+    // Save final consensus
+    const result = await saveFinalConsensus(parseInt(questionId), finalAnswer, consensusBy);
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    // Now save the final answer to sum_verified_answer with embedding
+    try {
+      const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+      const embeddingRes = await fetch(`${API_SERVER_URL}/encode_embedding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: finalAnswer, dimensions: 2048, is_query: false })
+      });
+
+      if (embeddingRes.ok) {
+        const embData = await embeddingRes.json() as { embedding?: number[] };
+        const embedding = embData.embedding || [];
+        
+        if (embedding.length === 2048) {
+          await pool.query(
+            `UPDATE verified_answers 
+             SET sum_verified_answer = $1, 
+                 sum_verified_answer_embedding = $2,
+                 last_updated_at = NOW()
+             WHERE id = $3`,
+            [finalAnswer, JSON.stringify(embedding), questionId]
+          );
+          console.log(`✅ Final consensus answer saved to sum_verified_answer for Q${questionId}`);
+        }
+      }
+    } catch (embErr) {
+      console.warn('Failed to create embedding for final consensus:', embErr);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Final consensus saved and conflict resolved',
+      consensusBy,
+      questionId
+    });
+
+    // ========== RUN LLM JUDGE AFTER CONFLICT RESOLUTION ==========
+    // Now that conflict is resolved with consensus, run the judge using consensus answer as reference
+    setImmediate(async () => {
+      try {
+        const aiSuggestion = await getAISuggestion(parseInt(questionId));
+        if (!aiSuggestion || aiSuggestion.decision !== 'pending') {
+          console.log(`ℹ️ No pending AI suggestion for Q${questionId} — skipping post-consensus judge`);
+          return;
+        }
+
+        const questionResult = await pool.query(
+          `SELECT question FROM verified_answers WHERE id = $1`,
+          [questionId]
+        );
+        const originalQuestion = questionResult.rows[0]?.question || '';
+        const aiAnswer = aiSuggestion.ai_generated_answer || '';
+
+        // Collect expert comments
+        const allVerifications = await pool.query(
+          `SELECT commenter_name, comment, requested_departments
+           FROM answer_verifications 
+           WHERE verified_answer_id = $1 AND verification_type = 'verification'
+           ORDER BY created_at`,
+          [questionId]
+        );
+        const expertComments = allVerifications.rows
+          .map((v: any) => `- ${v.commenter_name} (${v.requested_departments?.[0] || 'General'}): ${v.comment || 'ยืนยันแล้ว'}`)
+          .join('\n');
+
+        console.log(`🔄 Running LLM Judge post-conflict-resolution for Q${questionId} using consensus answer`);
+
+        const judgePrompt = `คุณเป็นผู้ตรวจสอบคุณภาพคำตอบ AI โปรดวิเคราะห์ความแตกต่างระหว่างคำตอบ AI กับคำตอบจากผู้เชี่ยวชาญ
+
+คำถาม: ${originalQuestion}
+
+คำตอบจาก AI:
+${aiAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+คำตอบจากผู้เชี่ยวชาญ (คำตอบที่ถูกต้อง — Final Consensus หลังแก้ไข Conflict):
+${finalAnswer.replace(/<[^>]*>/g, '').substring(0, 1500)}
+
+ความเห็นจากผู้เชี่ยวชาญที่ยืนยัน:
+${expertComments || 'ไม่มีความเห็นเพิ่มเติม'}
+
+**เกณฑ์การตัดสิน:**
+- "accepted" = AI ตอบถูกต้อง ครบถ้วน ตรงคำถาม ใช้ได้
+- "rejected" = AI ตอบผิด/ไม่ครบ/ไม่ตรงคำถาม หรือข้อมูลผิดพลาด
+
+กรุณาวิเคราะห์และตอบในรูปแบบ JSON เท่านั้น:
+{
+  "decision": "accepted" หรือ "rejected",
+  "similarityPercent": ตัวเลข 0-100,
+  "conflictType": "none/off_topic/incomplete_answer/factual_error/wrong_context/outdated_info/style_difference",
+  "severity": "none" หรือ "minor" หรือ "major" หรือ "critical",
+  "keyDifferences": ["จุดที่ต่าง 1", "จุดที่ต่าง 2"],
+  "analysis": "อธิบายสั้นๆ",
+  "suggestedImprovement": "คำแนะนำ",
+  "aiInfoCorrect": true หรือ false
+}
+
+ตอบเฉพาะ JSON เท่านั้น:`;
+
+        let judgeResult: any = null;
+
+        // Try IFXGPT
+        try {
+          if (ifxClientAvailable && ifxClient) {
+            const ifxResponse = await ifxClient.chat.completions.create({
+              model: 'gpt-5.2',
+              messages: [
+                { role: 'system', content: 'You are an AI answer quality judge. Always respond with valid JSON only.' },
+                { role: 'user', content: judgePrompt }
+              ],
+              max_completion_tokens: 800,
+              temperature: 0.1,
+            });
+            const responseText = ifxResponse.choices[0]?.message?.content || '';
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              judgeResult = JSON.parse(jsonMatch[0]);
+              console.log('✅ Post-consensus Judge (IFXGPT):', judgeResult.decision);
+            }
+          }
+        } catch (e) { console.warn('Post-consensus IFXGPT judge failed:', e); }
+
+        // Fallback: Google AI
+        if (!judgeResult) {
+          try {
+            const geminiResult = await ai.models.generateContent({
+              model: 'gemma-3-4b-it',
+              contents: judgePrompt,
+              config: { maxOutputTokens: 800, temperature: 0.1 },
+            });
+            const responseText = geminiResult.text || '';
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              judgeResult = JSON.parse(jsonMatch[0]);
+              console.log('✅ Post-consensus Judge (Google AI):', judgeResult.decision);
+            }
+          } catch (e) { console.warn('Post-consensus Google AI judge failed:', e); }
+        }
+
+        // Fallback: Ollama
+        if (!judgeResult) {
+          try {
+            const ollamaResponse = await fetch(process.env.API_OLLAMA!, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'gemma3:1b',
+                prompt: judgePrompt,
+                stream: false,
+                options: { temperature: 0.1, num_predict: 800 }
+              })
+            });
+            if (ollamaResponse.ok) {
+              const ollamaData = await ollamaResponse.json() as { response?: string };
+              const responseText = ollamaData.response || '';
+              const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                judgeResult = JSON.parse(jsonMatch[0]);
+                console.log('✅ Post-consensus Judge (Ollama):', judgeResult.decision);
+              }
+            }
+          } catch (e) { console.warn('Post-consensus Ollama judge failed:', e); }
+        }
+
+        if (judgeResult && judgeResult.decision) {
+          await updateAISuggestionDecision(
+            aiSuggestion.id,
+            judgeResult.decision as 'accepted' | 'rejected',
+            finalAnswer,
+            consensusBy || 'LLM-Judge-PostConsensus'
+          );
+          console.log(`✅ Post-consensus LLM Judge for Q${questionId}: ${judgeResult.decision} (similarity: ${judgeResult.similarityPercent}%)`);
+        } else {
+          console.warn(`⚠️ Post-consensus judge failed for Q${questionId} — no valid result`);
+        }
+      } catch (judgeErr) {
+        console.error(`❌ Post-consensus judge error for Q${questionId}:`, judgeErr);
+      }
+    });
+    // ========== END POST-CONSENSUS JUDGE ==========
+
+  } catch (error) {
+    console.error('Error submitting final consensus:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/request-third-expert - Request additional expert review
+router.post('/request-third-expert', async (req: Request, res: Response) => {
+  try {
+    const { questionId, departments, reason } = req.body;
+    const requestedBy = req.session.user?.username || 'Anonymous';
+
+    if (!questionId) {
+      return res.status(400).json({ success: false, error: 'Missing questionId' });
+    }
+
+    const newDepts = departments || [];
+
+    // Add new departments to requested_departments
+    const currentQ = await pool.query(
+      `SELECT requested_departments FROM verified_answers WHERE id = $1`,
+      [questionId]
+    );
+    
+    if (currentQ.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    const existingDepts: string[] = currentQ.rows[0].requested_departments || [];
+    const allDepts = [...new Set([...existingDepts, ...newDepts])];
+
+    await pool.query(
+      `UPDATE verified_answers 
+       SET requested_departments = $1, 
+           conflict_status = 'detected',
+           last_updated_at = NOW()
+       WHERE id = $2`,
+      [allDepts, questionId]
+    );
+
+    // Trigger notifications for new departments
+    try {
+      await triggerNotificationsForQuestion(parseInt(questionId), requestedBy, newDepts[0] || '');
+    } catch (notifErr) {
+      console.warn('Could not trigger notifications for third expert:', notifErr);
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Requested ${newDepts.length} additional expert(s)`,
+      requestedDepartments: allDepts,
+      reason
+    });
+  } catch (error) {
+    console.error('Error requesting third expert:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/reopen-discussion - Reopen discussion on a conflicted answer
+router.post('/reopen-discussion', async (req: Request, res: Response) => {
+  try {
+    const { questionId, reason } = req.body;
+    
+    if (!questionId) {
+      return res.status(400).json({ success: false, error: 'Missing questionId' });
+    }
+
+    // Reset conflict status back to detected, clear any pending consensus
+    await pool.query(
+      `UPDATE verified_answers 
+       SET conflict_status = 'detected',
+           final_consensus_answer = NULL,
+           final_consensus_by = NULL,
+           final_consensus_at = NULL,
+           last_updated_at = NOW()
+       WHERE id = $1`,
+      [questionId]
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Discussion reopened',
+      questionId
+    });
+  } catch (error) {
+    console.error('Error reopening discussion:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// POST /api/reject-answer - Reject the answer entirely
+router.post('/reject-answer', async (req: Request, res: Response) => {
+  try {
+    const { questionId, reason } = req.body;
+    const rejectedBy = req.session.user?.username || 'Anonymous';
+
+    if (!questionId) {
+      return res.status(400).json({ success: false, error: 'Missing questionId' });
+    }
+
+    await updateConflictStatus(parseInt(questionId), 'rejected', {
+      rejectedBy,
+      rejectedAt: new Date().toISOString(),
+      reason: reason || 'Answer rejected by reviewer'
+    });
+
+    // Clear any synthesized answer
+    await pool.query(
+      `UPDATE verified_answers 
+       SET sum_verified_answer = NULL,
+           sum_verified_answer_embedding = NULL,
+           final_consensus_answer = NULL,
+           last_updated_at = NOW()
+       WHERE id = $1`,
+      [questionId]
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Answer rejected',
+      rejectedBy,
+      questionId
+    });
+  } catch (error) {
+    console.error('Error rejecting answer:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+// ========== END VERIFICATION CONSOLE API ENDPOINTS ==========
+
 // ⭐ NEW: LIST FILES FOR A SPECIFIC CHAT (e.g., ID -1)
 // =================================================================================
 router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
@@ -8529,7 +9250,7 @@ router.get('/missing-knowledge-topics', async (req: Request, res: Response) => {
  */
 router.get('/knowledge-group-analytics', async (req: Request, res: Response) => {
   try {
-    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts, allQuestionsCounts] = await Promise.all([
+    const [groupAnalytics, confidenceDistribution, aiSuggestionsCounts, allQuestionsCounts, activeConflictsCounts] = await Promise.all([
       getKnowledgeGroupAnalytics(),
       getConfidenceDistribution(),
       // Get direct counts from ai_suggestions table
@@ -8553,7 +9274,13 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
                      AND (va.verification_type IS NULL OR va.verification_type = 'request')
                 THEN 1 END) as pending_verification
         FROM verified_answers va
-      `)
+      `),
+      // Count active (unresolved) conflicts
+      pool.query(`
+        SELECT COUNT(*) as active_conflicts
+        FROM verified_answers
+        WHERE conflict_status = 'detected'
+      `).catch(() => ({ rows: [{ active_conflicts: 0 }] }))
     ]);
 
     // Calculate summary stats from groupAnalytics (for group distribution)
@@ -8572,6 +9299,7 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
     const allQuestionsCount = allQuestionsCounts.rows[0] || {};
     const actualTotalQuestions = parseInt(allQuestionsCount.total_all_questions) || 0;
     const actualPendingVerification = parseInt(allQuestionsCount.pending_verification) || 0;
+    const activeConflicts = parseInt(activeConflictsCounts.rows[0]?.active_conflicts) || 0;
     
     res.json({
       success: true,
@@ -8587,13 +9315,52 @@ router.get('/knowledge-group-analytics', async (req: Request, res: Response) => 
           rejectionRate: totalDecisions > 0 ? Math.round(100 * totalRejected / totalDecisions) : 0,
           highConfidenceCount: totalHighConf,
           lowConfidenceCount: totalLowConf,
-          uniqueGroups: groupAnalytics.length
+          uniqueGroups: groupAnalytics.length,
+          activeConflicts
         }
       }
     });
 
   } catch (error) {
     console.error('Error getting knowledge group analytics:', error);
+    res.status(500).json({ success: false, error: String(error) });
+  }
+});
+
+/**
+ * Get All Conflict Questions List
+ * GET /api/conflict-questions
+ * Returns questions with conflict_status = 'detected' or 'resolved'
+ */
+router.get('/conflict-questions', async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        va.id,
+        va.question,
+        va.conflict_status,
+        va.conflict_details,
+        va.final_consensus_answer,
+        va.final_consensus_by,
+        va.final_consensus_at,
+        va.created_at,
+        va.tags,
+        va.created_by,
+        (SELECT COUNT(*) FROM answer_verifications av 
+         WHERE av.verified_answer_id = va.id AND av.verification_type = 'verification') as expert_count
+      FROM verified_answers va
+      WHERE va.conflict_status IN ('detected', 'resolved')
+      ORDER BY 
+        CASE WHEN va.conflict_status = 'detected' THEN 0 ELSE 1 END,
+        va.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching conflict questions:', error);
     res.status(500).json({ success: false, error: String(error) });
   }
 });

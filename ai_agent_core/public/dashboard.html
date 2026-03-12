@@ -15,6 +15,18 @@
     </script>
     <style>
 
+        /* Override chatbox height to allow full scroll on dashboard */
+        #chatbox {
+            height: auto;
+            max-height: none;
+            overflow-y: auto;
+        }
+
+        .contain-overflow {
+            min-height: auto;
+            overflow-y: visible;
+        }
+
         /* Dashboard Specific Styles */
         .dashboard-main {
             flex: 1;
@@ -180,8 +192,8 @@
         }
 
         .risk-item.critical {
-            background: #fee;
-            border-left-color: #d63031;
+            background: #e8f5e9;
+            border-left-color: #009374;
         }
 
         .risk-item.warning {
@@ -212,7 +224,7 @@
         }
 
         .risk-critical .risk-percentage {
-            color: #d63031;
+            color: #009374;
         }
 
         .risk-warning .risk-percentage {
@@ -257,7 +269,7 @@
         }
 
         .action-red {
-            background: #d63031;
+            background: #009374;
         }
 
         .action-orange {
@@ -590,8 +602,8 @@
         }
 
         body[data-theme="dark"] .badge-critical {
-            background: transparent;
-            color: #ff6b6b;
+            background: rgba(0, 184, 148, 0.2);
+            color: #00b894;
         }
 
         body[data-theme="dark"] .badge-warning {
@@ -605,7 +617,7 @@
         }
 
         body[data-theme="dark"] .risk-item.critical {
-            background: rgba(214, 48, 49, 0.15);
+            background: rgba(0, 147, 116, 0.15);
         }
 
         body[data-theme="dark"] .risk-item.warning {
@@ -693,8 +705,8 @@
         }
 
         body[data-theme="dark"] .confidence-low {
-            background: rgba(214, 48, 49, 0.2);
-            color: #ff6b6b;
+            background: rgba(0, 184, 148, 0.2);
+            color: #00b894;
         }
 
         body[data-theme="dark"] .donut-center {
@@ -780,6 +792,205 @@
 
         body[data-theme="dark"] .severity-low {
             background: rgba(0, 184, 148, 0.2);
+            color: #00b894;
+        }
+
+        /* ===== Conflict Questions Table ===== */
+        .conflict-table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .conflict-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+
+        .conflict-table th {
+            background: #f8f9fa;
+            color: #555;
+            font-weight: 600;
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 2px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .conflict-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+        }
+
+        .conflict-table tbody tr {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .conflict-table tbody tr:hover {
+            background: #f0faf8;
+        }
+
+        .conflict-question-text {
+            max-width: 350px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .conflict-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .conflict-badge.detected {
+            background: rgba(239, 68, 68, 0.12);
+            color: #dc3545;
+        }
+
+        .conflict-badge.resolved {
+            background: rgba(0, 147, 116, 0.12);
+            color: #009374;
+        }
+
+        .conflict-experts {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #666;
+            font-size: 0.82rem;
+        }
+
+        .conflict-tag {
+            display: inline-block;
+            background: #e8f5f3;
+            color: #009374;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            margin-right: 4px;
+        }
+
+        .conflict-date {
+            color: #999;
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+
+        .conflict-action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .conflict-action-btn.resolve {
+            background: #dc3545;
+            color: white;
+        }
+
+        .conflict-action-btn.resolve:hover {
+            background: #c82333;
+        }
+
+        .conflict-action-btn.view {
+            background: #e8f5f3;
+            color: #009374;
+        }
+
+        .conflict-action-btn.view:hover {
+            background: #d0ebe6;
+        }
+
+        .conflict-empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .conflict-empty-state i {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: #ddd;
+        }
+
+        .conflict-summary-text {
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #888;
+            font-size: 0.82rem;
+        }
+
+        /* Dark mode for conflict table */
+        body[data-theme="dark"] .conflict-table th {
+            background: #2a2a2a;
+            color: #aaa;
+            border-bottom-color: #444;
+        }
+
+        body[data-theme="dark"] .conflict-table td {
+            border-bottom-color: #333;
+        }
+
+        body[data-theme="dark"] .conflict-table tbody tr:hover {
+            background: rgba(0, 147, 116, 0.08);
+        }
+
+        body[data-theme="dark"] .conflict-question-text {
+            color: #ddd;
+        }
+
+        body[data-theme="dark"] .conflict-badge.detected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ff6b6b;
+        }
+
+        body[data-theme="dark"] .conflict-badge.resolved {
+            background: rgba(0, 184, 148, 0.2);
+            color: #00b894;
+        }
+
+        body[data-theme="dark"] .conflict-tag {
+            background: rgba(0, 147, 116, 0.15);
+            color: #00b894;
+        }
+
+        body[data-theme="dark"] .conflict-date {
+            color: #777;
+        }
+
+        body[data-theme="dark"] .conflict-summary-text {
+            color: #e0e0e0;
+        }
+
+        body[data-theme="dark"] .conflict-empty-state {
+            color: #666;
+        }
+
+        body[data-theme="dark"] .conflict-empty-state i {
+            color: #444;
+        }
+
+        body[data-theme="dark"] .conflict-action-btn.view {
+            background: rgba(0, 147, 116, 0.15);
             color: #00b894;
         }
     
@@ -882,7 +1093,7 @@
                     <div class="questions-section">
 
                 <!-- Stats Grid -->
-                <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
                     <div class="stat-box">
                         <div class="stat-label"><i class="fas fa-list"></i> Total Questions</div>
                         <div class="stat-value" id="totalQuestions">-</div>
@@ -896,12 +1107,17 @@
                     <div class="stat-box">
                         <div class="stat-label"><i class="fas fa-check-circle"></i> Accepted</div>
                         <div class="stat-value" id="acceptedAnswers">-</div>
-                        <div class="stat-detail">AI answers accepted</div>
+                        <div class="stat-detail">All answers accepted</div>
                     </div>
                     <div class="stat-box">
                         <div class="stat-label"><i class="fas fa-times-circle"></i> Rejected</div>
                         <div class="stat-value" id="rejectedAnswers">-</div>
-                        <div class="stat-detail">AI answers rejected</div>
+                        <div class="stat-detail">All answers rejected</div>
+                    </div>
+                    <div class="stat-box" id="conflictsStatBox">
+                        <div class="stat-label"><i class="fas fa-exclamation-triangle"></i> Conflicts</div>
+                        <div class="stat-value" id="activeConflicts">-</div>
+                        <div class="stat-detail">Needs resolution</div>
                     </div>
                 </div>
 
@@ -961,6 +1177,41 @@
                         <p class="panel-subtitle" style="color: #6b7280; margin-bottom: 12px; font-size: 14px;">Comparison of requests and verifications by department</p>
                         <div id="departmentChart" style="padding: 20px; min-height: 280px;">
                             <p style="text-align: center; color: #6b7280;"><i class="fas fa-spinner fa-spin"></i> Loading chart...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 4: Expert Conflict Questions -->
+                <div class="dashboard-row" style="margin-bottom: 20px;">
+                    <div class="dashboard-panel">
+                        <div class="panel-title" style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>
+                                <i class="fas fa-exclamation-triangle" style="color: #dc3545;"></i>
+                                Expert Conflict Questions
+                                <span id="conflictCountBadge" style="background: #dc3545; color: white; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; margin-left: 8px; display: none;">0</span>
+                            </span>
+                            <span style="font-size: 0.82rem; color: #999; font-weight: normal;">คำถามที่ผู้เชี่ยวชาญมีความเห็นขัดแย้ง — คลิกเพื่อไปแก้ไข</span>
+                        </div>
+                        <div class="conflict-table-container">
+                            <table class="conflict-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 40px;">#</th>
+                                        <th>Question</th>
+                                        <th>Status</th>
+                                        <th>Experts</th>
+                                        <th>Conflict Summary</th>
+                                        <th>Tags</th>
+                                        <th>Date</th>
+                                        <th style="width: 100px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="conflictTableBody">
+                                    <tr><td colspan="8" class="conflict-empty-state">
+                                        <i class="fas fa-spinner fa-spin"></i><br>Loading...
+                                    </td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>

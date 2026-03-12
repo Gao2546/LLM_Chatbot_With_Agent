@@ -6,6 +6,7 @@ images/
 image/
 env/
 llm_venv/
+.venv/
 data_base/
 node_modules/
 output/
@@ -27,7 +28,10 @@ tmp/
 *.pth
 *.zip
 *.backup
+*.mp4
+*.pdf
 .key
+ca-bundle.crt
 __pycache__/
 data*/
 low_save/
@@ -41,13 +45,9 @@ RAG_Model/scratch/
 # Note
 Note*
 
-ai_agent_core/build/db.js
-ai_agent_core/build/agent.js
-ai_agent_core/build/api.js
-ai_agent_core/build/auth.js
-ai_agent_core/build/db.js
-ai_agent_core/build/index.js
-api_local_server/build/index.js
+# Build output
+ai_agent_core/build/
+api_local_server/build/
 
 ai_agent_core/public/test-api.html
 api_server/check_schema.py
@@ -70,3 +70,13 @@ clean_comments_data.sql
 database_migration_add_user_table.sql
 database_migration_create_initial_tables.sql
 database_migration_update_schema.sql
+
+# Detect_Na large output/data
+Detect_Na/test_videos/
+Detect_Na/evidence/
+Detect_Na/roi_results/
+Detect_Na/error_analysis_simple/
+Detect_Na/wafer_analysis/
+Detect_Na/active_errors.json
+Detect_Na/error_history.json
+Detect_Na/latest_pipeline_result.json
