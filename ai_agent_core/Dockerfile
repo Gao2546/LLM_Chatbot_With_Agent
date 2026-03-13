@@ -1,12 +1,12 @@
 # Stage 1: Build ai_agent_core
 # Use RedHat UBI for OpenShift compatibility
 FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS builder_app
-WORKDIR /app
 
-RUN whoami
-RUN ls -la
-RUN mkdir node_modules
-RUN ls -la
+USER 0
+RUN mkdir -p /app && chown 1001:0 /app && chmod 775 /app
+USER 1001
+
+WORKDIR /app
 
 COPY package*.json ./
 RUN npm install
@@ -15,7 +15,6 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY public ./public
 
-# RUN npm update @modelcontextprotocol/sdk
 RUN npm run build
 
 
@@ -37,11 +36,15 @@ RUN npm run build
 # Stage 3: Production image
 FROM registry.access.redhat.com/ubi9/nodejs-22:latest
 
-WORKDIR /app
+USER 0
+RUN mkdir -p /app && chown 1001:0 /app && chmod 775 /app
 
 # Copy CA certificate first (UBI already has ca-certificates installed)
-COPY ca-bundle.crt ./
-RUN cp ca-bundle.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust extract || true
+COPY ca-bundle.crt /app/
+RUN cp /app/ca-bundle.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust extract || true
+
+USER 1001
+WORKDIR /app
 
 # Setup ai_agent_core
 COPY package.json ./
