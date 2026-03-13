@@ -1,13 +1,20 @@
 // ===== GLOBAL CONFIG =====
-const APP_CONFIG = {
-    DETECT_NA_URL: window.location.hostname === 'localhost' 
-        ? 'http://localhost:5001'
-        : 'http://detect-na-dashboard-play-chatbotllm.apps.openshiftdomain.com'
-};
+function getDetectNaUrl() {
+    const hostname = window.location.hostname;
+    // Local development
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:5001';
+    }
+    // OpenShift: same cluster domain, different route name
+    // e.g. main app: chatbot-play-chatbotllm.apps.xxx.infineon.com
+    //      detect-na: detect-na-dashboard-play-chatbotllm.apps.xxx.infineon.com
+    const domain = hostname.split('.').slice(1).join('.');
+    return `http://detect-na-dashboard-play-chatbotllm.${domain}`;
+}
 
 // Open Detect_Na Manufacturing Dashboard
 function openDetectNaDashboard() {
-    window.open(APP_CONFIG.DETECT_NA_URL, '_blank');
+    window.open(getDetectNaUrl(), '_blank');
 }
 
 let socket = io({ serveClient: false });
