@@ -2,7 +2,7 @@
 const APP_CONFIG = {
     DETECT_NA_URL: window.location.hostname === 'localhost' 
         ? 'http://localhost:5001'
-        : 'http://detect-na-dashboard-detect-na.apps.openshiftdomain.com'
+        : 'http://detect-na-dashboard-play-chatbotllm.apps.openshiftdomain.com'
 };
 
 // Open Detect_Na Manufacturing Dashboard

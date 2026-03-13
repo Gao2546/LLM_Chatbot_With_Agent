@@ -32,11 +32,11 @@ All pods share the same `ai_agent` PostgreSQL database.
 # Login to OpenShift
 oc login --token=YOUR_TOKEN --server=YOUR_SERVER
 
-# Apply all resources (BuildConfig, Deployment, Service, Route)
+# Apply all resources to play-chatbotllm namespace
 oc apply -f detect-na-openshift.yaml
 
 # Verify resources created
-oc get all -n detect-na
+oc get all -n play-chatbotllm
 ```
 
 ### Step 2: Build and Deploy
@@ -44,10 +44,10 @@ oc get all -n detect-na
 **Option A: Manual trigger**
 ```bash
 # Start build manually
-oc start-build detect-na-dashboard -n detect-na --follow
+oc start-build detect-na-dashboard -n play-chatbotllm --follow
 
 # Watch pod creation
-oc logs -f deployment/detect-na-dashboard -n detect-na
+oc logs -f deployment/detect-na-dashboard -n play-chatbotllm
 ```
 
 **Option B: Automatic (via GitLab CI/CD)**
@@ -61,11 +61,11 @@ The `.gitlab-ci.yml` pipeline includes a third build step (`HICP_IMAGE_NAME3`). 
 
 ```bash
 # Get the public URL
-oc get route detect-na-dashboard -n detect-na
+oc get route detect-na-dashboard -n play-chatbotllm
 
 # Output example:
 # NAME                  HOST/PORT                                            PATH   SERVICES              PORT   TERMINATION
-# detect-na-dashboard   detect-na-dashboard-detect-na.apps.xxx.com                detect-na-dashboard   http
+# detect-na-dashboard   detect-na-dashboard-play-chatbotllm.apps.xxx.com            detect-na-dashboard   http
 ```
 
 **Copy this URL** for the next step.
@@ -79,10 +79,17 @@ Edit `ai_agent_core/public/index.html` and replace the `dashboardButton` onclick
 <button id="dashboardButton" onclick="window.open('http://localhost:5001','_blank')">
 
 // After:
-<button id="dashboardButton" onclick="window.open('http://detect-na-dashboard-detect-na.apps.YOUR_DOMAIN.com','_blank')">
+<button id="dashboardButton" onclick="openDetectNaDashboard()">
 ```
 
-**Where `YOUR_DOMAIN` is from Step 3** (e.g., `apps.oshift.infineon.com`)
+The actual URL is configured in `ai_agent_core/public/script.js`:
+```javascript
+const APP_CONFIG = {
+    DETECT_NA_URL: window.location.hostname === 'localhost' 
+        ? 'http://localhost:5001'
+        : 'http://detect-na-dashboard-play-chatbotllm.apps.openshiftdomain.com'
+};
+```
 
 ### Step 5: Commit and Push
 
@@ -129,25 +136,25 @@ oc apply -f detect-na-openshift.yaml
 - Verify the Dockerfile exists in the repo
 
 ### Pod crashes: "Failed to connect to PostgreSQL"
-- Check DB pod is running: `oc get pods -n ai-agent` (or the actual namespace)
-- Verify hostname: `oc get svc -n [db-namespace]` should show `llm-chatbot-with-agent-postgresql`
-- If in different namespace, update `DB_HOST` in deployment env vars
+- Check DB pod is running: `oc get pods -n play-chatbotllm`
+- Verify hostname resolves: `oc exec -ti pod/detect-na-dashboard-xxx -n play-chatbotllm -- nslookup llm-chatbot-with-agent-postgresql`
+- If DB is in different namespace, update `DB_HOST` env var in deployment
 
 ### Pod crashes: "Tesseract not found"
 - Dockerfile installs `tesseract` via `dnf install tesseract`
-- Verify in pod: `oc exec -ti pod/detect-na-dashboard-xxx -n detect-na -- which tesseract`
+- Verify in pod: `oc exec -ti pod/detect-na-dashboard-xxx -n play-chatbotllm -- which tesseract`
 
 ### Route returns 503 Service Unavailable
 - Pod may still be starting (liveness check takes ~30s)
-- View logs: `oc logs -f deployment/detect-na-dashboard -n detect-na`
+- View logs: `oc logs -f deployment/detect-na-dashboard -n play-chatbotllm`
 
 ### How to redeploy (without code changes)
 ```bash
 # Delete old pod, Deployment will recreate it
-oc delete pod -l app=detect-na-dashboard -n detect-na
+oc delete pod -l app=detect-na-dashboard -n play-chatbotllm
 
 # Or rollout restart
-oc rollout restart deployment/detect-na-dashboard -n detect-na
+oc rollout restart deployment/detect-na-dashboard -n play-chatbotllm
 ```
 
 ---
