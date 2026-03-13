@@ -18,6 +18,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { GoogleGenAI } from "@google/genai";
 import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
 
 import { 
     setChatMode, 
@@ -1022,7 +1023,7 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     const userId = req.session.user?.id;
     const chatId = req.session.user?.currentChatId;
 
-    if (!userId || !chatId) {
+    if (userId === undefined || chatId === undefined || userId === null || chatId === null) {
         return res.status(401).send("User session not found or no active chat.");
     }
 
@@ -1106,13 +1107,25 @@ router.post('/upload', upload.array('files'), async (req, res) => {
             form.append('files', file.buffer, file.originalname);
         }
 
-        const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
-        console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
-        const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
-            headers: form.getHeaders()
-        });
-        
-        res.json(flaskRes.data.reply);
+      const API_SERVER_URL = process.env.API_SERVER_URL || "http://localhost:5000";
+
+      console.log(`\n🚀 Forwarding to Python server at ${API_SERVER_URL}/process...`);
+
+      const flaskRes = await fetch(`${API_SERVER_URL}/process`, {
+        method: "POST",
+        headers: {
+          ...form.getHeaders(), // includes multipart boundary
+        },
+        body: form as any, // FormData from `form-data` package (Node)
+      });
+
+      if (!flaskRes.ok) {
+        const errText = await flaskRes.text();
+        throw new Error(`Flask server error ${flaskRes.status}: ${errText}`);
+      }
+
+      const data = await flaskRes.json() as {reply:string,processed_files:string[]};
+      res.json(data.reply);
 
     } catch (err) {
         console.error("Error during the upload process:", err);
@@ -1120,18 +1133,214 @@ router.post('/upload', upload.array('files'), async (req, res) => {
     }
 });
 
+async function getTextPageFromURL(url: string): Promise<string> {
+  try {
+      let response
+      if (url.includes("https://confluencewikiprod.intra.infineon.com")){
+        response = await fetch(url,{
+          method: 'GET',
+          headers: {
+                    "Authorization": `Bearer ${process.env.ConfluencePAT}`,
+                    'Content-Type': "application/json",
+                    }
+        });
+      }
+      else{
+        response = await fetch(url);
+      }
+      if (!response.ok) {
+          throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+      const html = await response.text();
+      const $ = cheerio.load(html);
+
+      // Remove all script and style tags completely
+      $('script, style').remove();
+
+      // Get the cleaned body content
+      const cleanHtml = $('body').html() || "";
+
+      // OR: Get just the clean text (no HTML tags at all)
+      const cleanText = $('body').text().replace(/\s+/g, ' ').trim() || "";
+
+      console.log(cleanText);
+
+      console.log(`HTML content fetched from ${url} (length: ${cleanText.length} characters). Sending to LLM for text extraction...`);
+      const llm_response = await fetch(`${process.env.API_SERVER_URL || 'http://localhost:5000'}/llm_inference`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: cleanText ,
+                                 system_prompt: "Extract the main textual content from the given HTML page. Remove all HTML tags, scripts, styles, and non-text elements. Return only markdown that a user would read on the page. Keep all data in english",
+                                 model: 'gpt-5-mini',
+
+                                })
+      });
+      if (!llm_response.ok) {
+          throw new Error(`Failed to extract text from HTML: ${llm_response.status} ${llm_response.statusText}`);
+      }
+      const llm_data = await llm_response.json() as {response:string,success:boolean};
+      return llm_data.response;
+  } catch (error) {
+      console.error(`Error fetching URL (${url}):`, error);
+      throw error;
+  }
+}
+
+/**
+ * Reuse your existing function as-is (shown in your snippet):
+ *   async function getTextPageFromURL(url: string): Promise<string>
+ * It returns markdown (string).
+ */
+
+/**
+ * POST /upload_url
+ * Body: { url: string, file_name?: string, user_id?: string|number, chat_id?: string|number, text?: string }
+ *
+ * - Fetch URL -> extract markdown via getTextPageFromURL()
+ * - Create a "virtual file" markdown buffer
+ * - Forward to Python /process like your /upload endpoint
+ */
+router.post('/upload_url', express.json({ limit: '2mb' }), async (req, res) => {
+  const { url, filename, user_id, chat_id, text } = req.body as {
+    url: string;
+    filename?: string;
+    user_id?: string | number;
+    chat_id?: string | number;
+    text?: string;
+  };
+
+  // Prefer explicit user/chat passed in body; fallback to session (optional)
+  const userId = user_id ?? req.session.user?.id;
+  const chatId = chat_id ?? req.session.user?.currentChatId;
+
+  if (!url) return res.status(400).send('Missing "url".');
+  if (userId === undefined || userId === null || chatId === undefined || chatId === null) {
+    return res.status(401).send('User session not found or no active chat (or pass user_id/chat_id).');
+  }
+  let markdown : string = "";
+  try {
+    // 1) Extract markdown text from the URL
+    markdown = await getTextPageFromURL(url);
+
+    // 2) Turn markdown into an in-memory "file" (like multer would)
+    const safeName = (filename?.trim() || 'page.md').replace(/[^\w.\-]+/g, '_');
+    const mdBuffer = Buffer.from(markdown, 'utf8');
+
+    const fileMetadata = [
+      {
+        originalName: safeName,
+        mimeType: 'text/markdown',
+        size: mdBuffer.length,
+        fileType: 'document',
+        isImage: false,
+        isTable: false,
+        isDocument: true,
+        sourceUrl: url
+      }
+    ];
+
+    // 3) Forward to Python processing server (same structure as /upload)
+    const form = new FormData();
+    form.append('user_id', String(userId));
+    form.append('chat_history_id', String(chatId));
+    form.append('text', text ?? ''); // optional user message
+    form.append('processing_mode', 'legacy_text'); // or 'new_page_image'
+    form.append('file_metadata', JSON.stringify(fileMetadata));
+
+    // Organized "document" field + backward compatible "files"
+    form.append('document_0', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+    form.append('files', mdBuffer, { filename: safeName, contentType: 'text/markdown' });
+
+    const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
+    // const flaskRes = await axios.post(`${API_SERVER_URL}/process`, form, {
+    //   headers: form.getHeaders(),
+    //   timeout: 60 * 60 * 1000,
+    //   maxBodyLength: Infinity,
+    //   maxContentLength: Infinity,
+    //   validateStatus: () => true,
+    // });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60 * 60 * 1000);
+
+    try {
+      const flaskRes = await fetch(`${API_SERVER_URL}/process`, {
+        method: "POST",
+        body: form, // form = FormData (เช่นจาก form-data package หรือ built-in)
+        headers: form.getHeaders?.() ?? undefined, // ถ้าใช้ form-data package
+        signal: controller.signal,
+      });
+
+      // ถ้า response ไม่ใช่ 2xx ให้เอา text มาดูเพื่อ debug
+      if (!flaskRes.ok) {
+        const errText = await flaskRes.text().catch(() => "");
+        return res.status(502).json({
+          error: `Python /process failed ${flaskRes.status}`,
+          detail: errText,
+        });
+      }
+
+      const data = await flaskRes.json().catch(() => null) as {reply : string, processed_files : string[]} ;
+
+      if (!data || typeof data.reply === "undefined") {
+        return res.status(502).json({
+          error: "Invalid response from Python /process",
+          detail: data,
+        });
+      }
+
+      return res.json(data.reply);
+    } catch (err: any) {
+      const msg =
+        err?.name === "AbortError"
+          ? "Python /process timed out"
+          : `Fetch to Python /process failed: ${err?.message ?? String(err)}`;
+
+      return res.status(502).json({ error: msg });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    // return res.json(processResponse.json());
+  } catch (err) {
+    console.error('Error during /upload_url:', err);
+    return res.status(500).send('Failed to fetch URL, create markdown, or process.');
+  }
+  // return res.json({'ok': true,'message': markdown || null})
+});
+
 
 router.post('/processDocument', upload.array('files'), async (req: Request, res: Response) => {
-  const { text, method } = req.body;
+  const { text, method, url, url_filename } = req.body;
   const files = req.files as Express.Multer.File[];
   
   // 1. Validate Session
   const userId = req.session.user?.id;
-  if (!userId) {
-      return res.status(401).json({ error: "Unauthorized: User session not found." });
+  const role = req.session.user?.role;
+  if (userId === undefined || userId === null || role != 'admin') {
+      return res.status(401).json({ error: "Unauthorized: User session not admin." });
   }
 
+  // if (role != 'admin') {
+  //   return res.status(401).json({ error: "Unauthorized: User session not found." });
+  // }
+
   try {
+    if (url) {
+          console.log(`Fetching content from URL: ${url}...`);
+          const urlText = await getTextPageFromURL(url);
+          // Create a virtual file for the URL content
+          const virtualFile: Partial<Express.Multer.File> = {
+              fieldname: 'files',
+              originalname: url_filename || `url_content_${Date.now()}.txt`,
+              encoding: 'utf-8',
+              mimetype: 'text/plain',
+              buffer: Buffer.from(urlText, 'utf-8'),
+              size: Buffer.byteLength(urlText, 'utf-8')
+          };
+          files.push(virtualFile as Express.Multer.File);
+      }
+
       // 2. Prepare FormData for Python Server
       const form = new FormData();
       
@@ -1246,6 +1455,58 @@ router.post('/create_record', async (req : Request, res : Response) => {
 });
 
 
+
+router.post("/create_guest_user", async (req: Request, res: Response) => {
+  const { model: selectedModel, mode: selectedMode, docSearchMethod: selectedDocSearchMethod, socket: socketId } =
+    req.body;
+
+  const initialMode = selectedMode ?? "ask";
+  const initialModel = selectedModel ?? "gemma3:1b";
+  const docSearchMethod = selectedDocSearchMethod ?? "none";
+
+  try {
+    // If a user already exists in session, just return it (optional behavior)
+    if (req.session.user) {
+      return res.status(200).json({ ok: true, user: req.session.user });
+    }
+
+    // 1) Create guest user
+    const guestName = `guest_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const guestUser = await createGuestUser(guestName);
+
+    // 2) Create chat history for the guest
+    // const chat_history_id = await newChatHistory(guestUser.id, docSearchMethod);
+
+    // 3) Initialize session
+    req.session.user = {
+      id: guestUser.id,
+      username: guestUser.username,
+      isGuest: true,
+      chatIds: [],
+      currentChatId: null,
+      currentDocSearchMethod: docSearchMethod,
+      currentChatMode: initialMode,
+      currentChatModel: initialModel,
+      socketId: socketId,
+    };
+
+    // 4) Persist user/chat settings
+    await setUserActiveStatus(guestUser.id, true);
+    // await setChatMode(chat_history_id, initialMode);
+    // await setChatModel(chat_history_id, initialModel);
+    // await setCurrentChatId(guestUser.id, chat_history_id);
+
+    return res.status(201).json({
+      ok: true,
+      user: req.session.user,
+    });
+  } catch (err) {
+    console.error("Error creating guest user/session:", err);
+    return res.status(500).json({ error: "Failed to create guest session" });
+  }
+});
+
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -1256,8 +1517,11 @@ router.post('/message', async (req : Request, res : Response) => {
     const { message: userMessage, model: selectedModel, mode: selectedMode, role: selectedRole, socket: socketId ,work_dir: work_dir, requestId: requestId_, docSearchMethod: docSearchMethod } = req.body;
     requestId = typeof requestId_ == "string" ? requestId_ : "";
     const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60*60*1000);
     runningRequests.set(requestId, controller);
+    console.log("pp1")
     const socket = io.sockets.sockets.get(socketId);
+    console.log("pp2")
     
     // Get system information with timeout and fallback
     let systemInformation : resultsT = { content: [{ type: 'text', text: '{"os":"Unknown","system_hardware":"Unknown","current_directory":"Unknown","time":"' + new Date().toISOString() + '"}' }] };
@@ -1274,6 +1538,7 @@ router.post('/message', async (req : Request, res : Response) => {
       console.warn('Could not get system information, using defaults:', e);
       // Continue with default system information
     }
+    console.log("pp3")
     
     // Safe parsing with fallback
     let systemInformationJSON: any = { os: 'Unknown', system_hardware: 'Unknown', current_directory: 'Unknown', time: new Date().toISOString() };
@@ -1284,6 +1549,7 @@ router.post('/message', async (req : Request, res : Response) => {
     } catch (e) {
         console.warn('Could not parse system information, using defaults');
     }
+    console.log("pp4")
     
     let setting_prompt;
     setting_prompt = setting_prompts + "\n\n\n\n----------------------- **USER SYSTEM INFORMATION** -----------------------\n\n" + `## **Operation System**\n${JSON.stringify(systemInformationJSON.os)}\n\n---\n\n` + `## **System Hardware**\n${JSON.stringify(systemInformationJSON.system_hardware)}\n\n---\n\n` + `## **Current Directory**\n${JSON.stringify(systemInformationJSON.current_directory)}\n\n---\n\n` + `## **System Time**\n${JSON.stringify(systemInformationJSON.time)}\n\n----------------------- **END** -----------------------\n\n`
@@ -1298,9 +1564,10 @@ router.post('/message', async (req : Request, res : Response) => {
     let documentSearchMethod = req.session.user?.currentDocSearchMethod ?? 'none';
     let serch_doc = ""
     // const documentSearchMethod = docSearchMethod || "none";
+    console.log("pp5")
 
     let chatContent = "";
-    if (currentChatId) {
+    if (currentChatId !== null || currentChatId !== undefined) {
       const rows = await readChatHistory(currentChatId);
       // REMOVED: await createChatFolder(userId, currentChatId);
       if (rows.length > 0) {
@@ -1316,8 +1583,10 @@ router.post('/message', async (req : Request, res : Response) => {
       }
       req.session.user!.socketId = socketId;
     }
+    console.log("pp6")
 
-    if (currentChatId){
+
+    if (currentChatId !== null && currentChatId !== undefined) {
       const API_SERVER_URL = process.env.API_SERVER_URL || 'http://localhost:5000';
       const response_similar_TopK = await fetch(`${API_SERVER_URL}/search_similar`, {
         method: 'POST',
@@ -1328,18 +1597,20 @@ router.post('/message', async (req : Request, res : Response) => {
           chat_history_id: currentChatId,
           chat_history_messages: chatContent,
           top_k: 20,
-          top_k_pages: 5,
-          top_k_text: 5,
+          top_k_pages: 10,
+          top_k_text: 10,
           threshold_page: 1.5,
           threshold_text: 1.5,
           documentSearchMethod: documentSearchMethod,
         }),
         signal: controller.signal,
       });
+      console.log("pp7")
 
       const result_similar_TopK = await response_similar_TopK.json() as SearchSimilarResponse;
       console.log("----- Search Similar Documents Results -----")
       console.log(result_similar_TopK)
+      clearTimeout(timeoutId);
       if (result_similar_TopK && result_similar_TopK.results){
         result_similar_TopK.results.forEach(doc => {
           try {
@@ -1393,7 +1664,7 @@ router.post('/message', async (req : Request, res : Response) => {
     else{
       console.log("No document")
       question = chatContent.replace(/\n<DATA_SECTION>\n/g, "\n");
-      question_backup = chatContent + "\n\n" + "document" + ": " + "No Document" + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
+      question_backup = chatContent  + "\n" //+ "If there is insufficient information to answer the user's question, tell the user what information you need."
     }
 
     const modelToUse = currentChatModel || initialModel;
@@ -1422,6 +1693,7 @@ router.post('/message', async (req : Request, res : Response) => {
     }
 
     let response: { text: string } | null = null;
+    console.log("pp8")
     
     // ===== AI SUGGESTS MODE - Use LLM + Verified Knowledge Base =====
     if (modeToUse === 'ai_suggests') {
@@ -1926,6 +2198,7 @@ router.post('/message', async (req : Request, res : Response) => {
    else if (modelToUse.startsWith("{_IFXGPT_API_}")) {
     try {
       console.log("Calling IFX GPT API (internal OpenAI)...");
+      console.log("pp9")
       
       const internalModelName = modelToUse.replace("{_IFXGPT_API_}", "");
       
@@ -1958,7 +2231,7 @@ router.post('/message', async (req : Request, res : Response) => {
     }
   }
 
-
+    console.log("pp10")
     if (!response){
       console.error("No response received from AI model");
       return res.status(500).json({ error: "No response received from AI model" });
@@ -2103,7 +2376,7 @@ router.post('/message', async (req : Request, res : Response) => {
     chatContent = chatContent.replace("assistance: assistance:", "assistance:");
     all_response = all_response.replace("assistance:", "");
     
-    if (userId) {
+    if (userId !== undefined && userId !== null) {
       await storeChatHistory(currentChatId, chatContent);
     }
     
@@ -2131,7 +2404,7 @@ router.post('/edit-message', async (req, res) => {
   const controller = new AbortController();
   runningRequests.set(requestId, controller);
   const socket = io.sockets.sockets.get(socketId);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (userId === undefined || userId === null) return res.status(401).json({ error: 'Unauthorized' });
   // Read current history
   const rows = await readChatHistory(chatId);
   if (rows.length === 0) return res.status(404).json({ error: 'Chat not found' });
@@ -2976,7 +3249,7 @@ router.get('/chat-history', async (req: express.Request, res: express.Response) 
     const chatId = req.query.chatId as string;
     const userId = req.session?.user?.id;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userId === undefined || userId === null) return res.status(401).json({ error: 'Unauthorized' });
     if (!chatId) return res.status(400).json({ error: 'ChatId is required' });
     
     req.session.user!.currentChatId = parseInt(chatId);
@@ -3043,7 +3316,7 @@ router.delete('/chat-history/:chatId', async (req, res) => {
 
 router.get('/ClearChat', async (req, res) => {
   const userId = req.session.user?.id;
-  if (userId) {
+  if (userId !== undefined && userId !== null) {
     await setCurrentChatId(userId, null);
     if (req.session.user) {
       req.session.user.currentChatId = null;
@@ -3057,7 +3330,7 @@ router.get('/ClearChat', async (req, res) => {
 router.get('/get_current_user', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     res.json({ userId: userId });
@@ -3070,7 +3343,7 @@ router.get('/get_current_user', async (req, res) => {
 router.get('/isGuest', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     else {
@@ -3098,11 +3371,11 @@ router.get('/reload-page', async (req, res) => {
       return res.status(400).json({ error: 'Bypass mode not supported anymore' });
     }
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    if (!chatId) {
+    if (chatId === undefined || chatId === null) {
       return res.status(400).json({ error: 'ChatId is required' });
     }
 
@@ -3147,7 +3420,7 @@ router.get('/load-chat-data', async (req, res) => {
     const chatId = (req.session?.user as any)?.currentChatId;
     const userId = req.session?.user?.id;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3200,7 +3473,7 @@ router.post('/set-model', async (req, res) => {
     const currentChatId = (req.session.user as any)?.currentChatId;
     const { model } = req.body; // Expect 'model' in the body
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (!currentChatId) {
@@ -3233,7 +3506,7 @@ router.post('/set-mode', async (req, res) => {
     const currentChatId = (req.session.user as any)?.currentChatId;
     const { mode } = req.body;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (!currentChatId) {
@@ -3888,7 +4161,7 @@ router.get('/get-notifications', async (req: Request, res: Response) => {
   try {
     const userId = req.session.user?.id;
     
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.json({ success: true, notifications: [], unreadCount: 0 });
     }
 
@@ -3932,7 +4205,7 @@ router.post('/mark-notification-read', async (req: Request, res: Response) => {
     const { notificationId } = req.body;
     const userId = req.session.user?.id;
 
-    if (!userId || !notificationId) {
+    if (userId === undefined || userId === null || !notificationId) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
@@ -4137,7 +4410,7 @@ router.post('/vote-question/:questionId', async (req: Request, res: Response) =>
     const { vote } = req.body; // vote: 1 (upvote), -1 (downvote), 0 (remove vote)
     const userId = req.session.user?.id;
 
-    if (!userId) {
+    if (userId === undefined || userId === null) {
       return res.status(401).json({ success: false, error: 'Login required' });
     }
 
@@ -4218,25 +4491,25 @@ router.post('/increment-view', async (req: Request, res: Response) => {
 });
 
 // GET /api/reload-page - Get current user info
-router.get('/reload-page', async (req: Request, res: Response) => {
-  try {
-    const userId = req.session.user?.id;
-    const username = req.session.user?.username || 'Guest';
+// router.get('/reload-page', async (req: Request, res: Response) => {
+//   try {
+//     const userId = req.session.user?.id;
+//     const username = req.session.user?.username || 'Guest';
     
-    res.json({ 
-      success: true, 
-      userId: userId || null,
-      username: username 
-    });
-  } catch (error) {
-    console.error('Error reloading page:', error);
-    res.json({ 
-      success: false, 
-      userId: null, 
-      username: 'Guest' 
-    });
-  }
-});
+//     res.json({ 
+//       success: true, 
+//       userId: userId ?? null,
+//       username: username 
+//     });
+//   } catch (error) {
+//     console.error('Error reloading page:', error);
+//     res.json({ 
+//       success: false, 
+//       userId: null, 
+//       username: 'Guest' 
+//     });
+//   }
+// });
 
 // GET /api/get-verification-status/:questionId - Get verification timeline for a question
 router.get('/get-verification-status/:questionId', async (req: Request, res: Response) => {
@@ -6114,6 +6387,7 @@ router.post('/reject-answer', async (req: Request, res: Response) => {
 // =================================================================================
 router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
     const chatId = parseInt(req.params.chatId, 10);
+    console.log("passN1");
     
     if (isNaN(chatId)) {
         return res.status(400).json({ error: 'Invalid Chat ID' });
@@ -6121,6 +6395,7 @@ router.get('/chat/:chatId/files', async (req: Request, res: Response) => {
 
     try {
         const files = await getFilesByChatId(chatId);
+        console.log(`Fetched ${files} files for chat ID ${chatId}`);
         res.json(files);
     } catch (error) {
         console.error('Error fetching files:', error);
@@ -6158,12 +6433,14 @@ router.delete('/file/:fileId', async (req: Request, res: Response) => {
 router.post('/file/:fileId/active', async (req: Request, res: Response) => {
     const fileId = parseInt(req.params.fileId, 10);
     // Use session ID by default, or allow body override if needed
-    const userId = req.session.user?.id || req.body.userId;
+    const userId = req.session.user?.id ?? req.body.userId;
+    console.log(`Adding active user: fileId=${fileId}, userId=${userId}`);
+    console.log('Session user:', req.session.user);
 
     if (isNaN(fileId)) {
         return res.status(400).json({ error: 'Invalid File ID' });
     }
-    if (!userId) {
+    if (userId === undefined || userId === null) {
         return res.status(401).json({ error: 'Unauthorized: User ID required' });
     }
 
@@ -6184,12 +6461,12 @@ router.post('/file/:fileId/active', async (req: Request, res: Response) => {
 router.delete('/file/:fileId/active', async (req: Request, res: Response) => {
     const fileId = parseInt(req.params.fileId, 10);
     // Use session ID by default, or allow body override if needed
-    const userId = req.session.user?.id || req.body.userId;
+    const userId = req.session.user?.id ?? req.body.userId;
 
     if (isNaN(fileId)) {
         return res.status(400).json({ error: 'Invalid File ID' });
     }
-    if (!userId) {
+    if (userId === undefined || userId === null) {
         return res.status(401).json({ error: 'Unauthorized: User ID required' });
     }
 

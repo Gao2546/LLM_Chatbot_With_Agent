@@ -199,7 +199,8 @@ FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PATH="/home/chatllm/.local/bin:${PATH}"
+    PATH="/home/chatllm/.local/bin:${PATH}"\
+    LOCAL=True
 
 # 1. Install system dependencies as ROOT
 RUN apt-get update && apt-get install -y --no-install-recommends \

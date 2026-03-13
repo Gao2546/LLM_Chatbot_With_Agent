@@ -32,6 +32,7 @@ tmp/
 *.pdf
 .key
 ca-bundle.crt
+*.keys
 __pycache__/
 data*/
 low_save/

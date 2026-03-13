@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import * as Minio from 'minio'; // Import MinIO client
 import { fileURLToPath } from 'url';
 import path from 'path';
+import bcrypt from 'bcrypt';
 
 
 // Load environment variables from .env file
@@ -395,11 +396,16 @@ async function initializeDummyData() {
     try {
         // 1. Insert System User (ID 0) if not exists
         // We use ID 0 to avoid conflicts with auto-incrementing regular users (starting at 1)
-        await pool.query(`
-            INSERT INTO users (id, username, password, email, role, is_active, is_guest)
-            VALUES (0, 'system_placeholder', NULL, 'system@local', 'admin', TRUE, FALSE)
-            ON CONFLICT (id) DO NOTHING;
-        `);
+        // Hash the password
+        const hashedPassword = await bcrypt.hash("hicpadmin", 10) as string;
+        await pool.query(
+          `
+          INSERT INTO users (id, username, password, email, role, is_active, is_guest)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (id) DO NOTHING;
+          `,
+          [0, 'system_placeholder', hashedPassword, 'system@local', 'admin', true, false]
+        );
         console.log('DB: System user (ID 0) ensured.');
 
         // 2. Insert Dummy Chat History (ID -1) if not exists

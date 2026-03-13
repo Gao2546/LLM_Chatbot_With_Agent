@@ -16,7 +16,7 @@ socket.on('ping', () => {
 });
 
 socket.on('StreamText', (text) => {
-    console.log('📨 Received StreamText chunk (PARTIAL):', text.substring(0, 50) + '...', 'length:', text.length);
+    // console.log('📨 Received StreamText chunk (PARTIAL):', text.substring(0, 50) + '...', 'length:', text.length);
     isCurrentlyStreaming = true;
     if (window.messageElementStream) {
         // Store accumulated text - don't mark as complete yet
@@ -36,10 +36,11 @@ socket.on('CallTool', async (toolName, toolParameters, callback) => {
     switch (toolName) {
 
       case 'GetSystemInformation': {
-        const response = await fetch(`${baseSysURL}/info`);
-        const data = await response.json();
-        console.log(data);
-        callback(data);
+        // const response = await fetch(`${baseSysURL}/info`);
+        // const data = await response.json();
+        // console.log(data);
+        // callback(data);
+        callback("No system information")
         break;
       }
 
@@ -318,6 +319,178 @@ const fileInput = document.getElementById('fileInput');
 const selectedFilesDiv = document.getElementById('selectedFiles');
 const fileDialogButton = document.getElementById('fileDialogButton');
 const changeDirButton = document.getElementById('changeDirButton');
+const urlInput = document.getElementById('urlInput')
+
+
+function cleanFileName(name, fallback = "Untitled") {
+  if (!name) return fallback;
+
+  // drop any path
+  name = name.split(/[/\\]/).pop();
+
+  // normalize spaces + remove common illegal filename chars
+  name = name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "");
+
+  // avoid reserved Windows names
+  const base = name.replace(/\.[^/.]+$/, "");
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) name = "_" + name;
+
+  // avoid trailing dot/space (Windows)
+  name = name.replace(/[. ]+$/g, "");
+
+  return name || fallback;
+}
+
+
+// Themed URL dialog (uses CSS classes from my previous message)
+function showUrlDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "url-dialog-overlay";
+    overlay.innerHTML = `
+      <div class="url-dialog" role="dialog" aria-modal="true" aria-labelledby="urlDialogTitle">
+        <div class="url-dialog-header">
+          <div class="url-dialog-title" id="urlDialogTitle">Enter URL</div>
+          <button class="url-dialog-close" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="url-dialog-body">
+          <label class="url-dialog-label" for="urlDialogInput">URL</label>
+          <input class="url-dialog-input" id="urlDialogInput" type="url"
+                 placeholder="https://example.com" autocomplete="off" />
+
+          <div class="url-dialog-error" id="urlDialogError"></div>
+        </div>
+
+        <div class="url-dialog-footer">
+          <button class="url-dialog-btn" type="button" data-action="cancel">Cancel</button>
+          <button class="url-dialog-btn url-dialog-btn-primary" type="button" data-action="submit">Submit</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const dialog = overlay.querySelector(".url-dialog");
+    const input = overlay.querySelector("#urlDialogInput");
+    const err = overlay.querySelector("#urlDialogError");
+    const btnClose = overlay.querySelector(".url-dialog-close");
+    const btnCancel = overlay.querySelector('[data-action="cancel"]');
+    const btnSubmit = overlay.querySelector('[data-action="submit"]');
+
+    const showError = (msg) => {
+      err.textContent = msg;
+      err.style.display = "block";
+    };
+
+    const close = (value) => {
+      document.removeEventListener("keydown", onKeyDown);
+      overlay.classList.remove("show");
+      // wait transition then remove
+      setTimeout(() => overlay.remove(), 150);
+      resolve(value); // value: string | null
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter") btnSubmit.click();
+    };
+
+    btnSubmit.addEventListener("click", () => {
+      const value = input.value.trim();
+      if (!value) return showError("Please enter a URL.");
+      // Optional: basic URL validation
+      try {
+        new URL(value);
+      } catch {
+        return showError("Invalid URL format.");
+      }
+      close(value);
+    });
+
+    btnCancel.addEventListener("click", () => close(null));
+    btnClose.addEventListener("click", () => close(null));
+
+    // click outside dialog = cancel
+    overlay.addEventListener("mousedown", (e) => {
+      if (!dialog.contains(e.target)) close(null);
+    });
+
+    document.addEventListener("keydown", onKeyDown);
+
+    // animate in + focus
+    requestAnimationFrame(() => overlay.classList.add("show"));
+    setTimeout(() => input.focus(), 0);
+  });
+}
+
+// Your existing click handler updated to use the themed dialog
+urlInput.addEventListener("click", async () => {
+  const enteredUrl = await showUrlDialog();
+  if (enteredUrl === null) return;
+
+  const fileName = cleanFileName(enteredUrl.split("/").filter(Boolean).pop() || "URL Content", "Infineon Webpage");
+
+  if (!window.urlList) window.urlList = [];
+
+  const isDuplicate = window.urlList.some(item => item.url === enteredUrl);
+  if (!isDuplicate) {
+    window.urlList.push({ url: enteredUrl, filename: fileName });
+  }
+
+  updateFileList();
+  updateUrlList();
+});
+
+function getByteSize(str) {
+  // TextEncoder encodes string into UTF-8 bytes
+  return new TextEncoder().encode(str).length;
+}
+
+function removeUrl(url) {
+  window.urlList = (window.urlList || []).filter(item => item.url !== url);
+  updateFileList();
+  updateUrlList();
+}
+
+function updateUrlList() {
+  // สำคัญ: อย่าเคลียร์ทิ้งทั้ง div ถ้าจะให้ไฟล์ยังอยู่ด้วย
+  // แต่ถ้าจะใช้ div เดียวจริง ๆ ต้อง "เรนเดอร์รวม" ในที่เดียว
+  // ที่นี่ขอแก้ขั้นต่ำ: เคลียร์ก่อน append เพื่อไม่ให้ซ้ำ
+  // (แต่จะทำให้รายการไฟล์ที่ render จาก updateFileList หาย)
+  // ทางที่ถูกคือแยก container หรือทำ render รวม
+
+  if (!window.urlList || window.urlList.length === 0) return;
+  selectedFilesDiv.style.display = 'flex';
+  for (let i = 0; i < window.urlList.length; i++) {
+    const file = window.urlList[i];
+
+    const fileItem = document.createElement('div');
+    const fileType = getFileType("url", file.filename);
+    const fileIcon = getFileIcon(fileType);
+    const fileSize = formatFileSize(getByteSize(file.url));
+
+    fileItem.className = 'file-item-display';
+    fileItem.innerHTML = `
+      <span class="file-icon">${fileIcon}</span>
+      <div class="file-info">
+        <div class="file-name">${file.filename}</div>
+        <div class="file-meta">${fileSize} • ${fileType}</div>
+      </div>
+      <button class="file-remove-btn">✕</button>
+    `;
+
+    fileItem.querySelector('.file-remove-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeUrl(file.url);
+    });
+
+    selectedFilesDiv.appendChild(fileItem);
+  }
+}
 
 // 1. Create a global DataTransfer object to hold the accumulated files
 const dt = new DataTransfer();
@@ -338,8 +511,8 @@ fileInput.addEventListener('change', function() {
             dt.items.add(file);
         }
     }
-    // ลบ this.files = dt.files; ออก เพราะไม่ทำงานใน Chrome/Edge
-    updateFileList();  // อัปเดต UI ตามปกติ
+    updateFileList(); 
+    updateUrlList();
 });
 
 function updateFileList() {
@@ -383,26 +556,246 @@ function updateFileList() {
     }
 }
 
-// Helper function to get file type
-function getFileType(mimeType, fileName) {
-    const ext = fileName.split('.').pop().toLowerCase();
-    
-    if (mimeType.startsWith('image/')) return 'Image';
-    if (['csv', 'xlsx', 'xls', 'json'].includes(ext)) return 'Table/Data';
-    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return 'Document';
-    
-    return 'File';
+// --- File type detection (detailed) ---
+function getFileType(mimeType = '', fileName = '') {
+  const name = (fileName || '').toLowerCase();
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const mt = (mimeType || '').toLowerCase();
+
+  // 1) Explicit URL pseudo-type (your app)
+  if (mt === 'url' || ext === 'url') return 'URL';
+
+  // 2) Images
+  if (mt.startsWith('image/')) {
+    if (mt.includes('svg')) return 'Image (SVG)';
+    if (mt.includes('gif')) return 'Image (GIF)';
+    if (mt.includes('webp')) return 'Image (WebP)';
+    if (mt.includes('png')) return 'Image (PNG)';
+    if (mt.includes('jpeg') || mt.includes('jpg')) return 'Image (JPEG)';
+    if (mt.includes('bmp')) return 'Image (BMP)';
+    if (mt.includes('tiff')) return 'Image (TIFF)';
+    if (mt.includes('heic') || mt.includes('heif')) return 'Image (HEIC/HEIF)';
+    return 'Image';
+  }
+  if (['png','jpg','jpeg','gif','webp','bmp','tif','tiff','svg','ico','heic','heif','avif'].includes(ext)) {
+    if (ext === 'svg') return 'Image (SVG)';
+    if (ext === 'gif') return 'Image (GIF)';
+    if (ext === 'webp') return 'Image (WebP)';
+    if (ext === 'png') return 'Image (PNG)';
+    if (ext === 'avif') return 'Image (AVIF)';
+    if (['jpg','jpeg'].includes(ext)) return 'Image (JPEG)';
+    if (ext === 'bmp') return 'Image (BMP)';
+    if (['tif','tiff'].includes(ext)) return 'Image (TIFF)';
+    if (['heic','heif'].includes(ext)) return 'Image (HEIC/HEIF)';
+    if (ext === 'ico') return 'Icon (ICO)';
+    return 'Image';
+  }
+
+  // 3) Video
+  if (mt.startsWith('video/')) {
+    if (mt.includes('mp4')) return 'Video (MP4)';
+    if (mt.includes('webm')) return 'Video (WebM)';
+    if (mt.includes('quicktime')) return 'Video (MOV)';
+    if (mt.includes('x-matroska')) return 'Video (MKV)';
+    return 'Video';
+  }
+  if (['mp4','m4v','mov','webm','mkv','avi','wmv','flv','mpeg','mpg','3gp','ts','m2ts'].includes(ext)) {
+    const map = { mp4:'Video (MP4)', webm:'Video (WebM)', mov:'Video (MOV)', mkv:'Video (MKV)', avi:'Video (AVI)', wmv:'Video (WMV)', flv:'Video (FLV)' };
+    return map[ext] || 'Video';
+  }
+
+  // 4) Audio
+  if (mt.startsWith('audio/')) {
+    if (mt.includes('mpeg')) return 'Audio (MP3)';
+    if (mt.includes('wav')) return 'Audio (WAV)';
+    if (mt.includes('ogg')) return 'Audio (OGG)';
+    if (mt.includes('flac')) return 'Audio (FLAC)';
+    if (mt.includes('mp4') || mt.includes('aac')) return 'Audio (AAC/M4A)';
+    return 'Audio';
+  }
+  if (['mp3','wav','ogg','flac','m4a','aac','wma','aiff','alac','opus','mid','midi'].includes(ext)) {
+    const map = { mp3:'Audio (MP3)', wav:'Audio (WAV)', ogg:'Audio (OGG)', flac:'Audio (FLAC)', m4a:'Audio (M4A)', aac:'Audio (AAC)', opus:'Audio (OPUS)' };
+    return map[ext] || 'Audio';
+  }
+
+  // 5) Documents / text
+  if (mt === 'application/pdf' || ext === 'pdf') return 'PDF';
+  if (mt.startsWith('text/')) {
+    if (mt.includes('html')) return 'Web Page (HTML)';
+    if (mt.includes('css')) return 'Stylesheet (CSS)';
+    if (mt.includes('csv')) return 'Data (CSV)';
+    if (mt.includes('xml')) return 'Data (XML)';
+    if (mt.includes('markdown')) return 'Document (Markdown)';
+    return 'Text';
+  }
+  if ([
+    'txt','md','markdown','rtf','log',
+    'html','htm','xhtml',
+    'css','scss','sass','less',
+    'tex'
+  ].includes(ext)) {
+    const map = {
+      txt:'Text', log:'Log', rtf:'Rich Text (RTF)',
+      md:'Document (Markdown)', markdown:'Document (Markdown)',
+      html:'Web Page (HTML)', htm:'Web Page (HTML)', xhtml:'Web Page (XHTML)',
+      css:'Stylesheet (CSS)', scss:'Stylesheet (SCSS)', sass:'Stylesheet (SASS)', less:'Stylesheet (LESS)',
+      tex:'LaTeX'
+    };
+    return map[ext] || 'Text/Document';
+  }
+
+  // 6) Office documents
+  // Word
+  if (
+    mt === 'application/msword' ||
+    mt === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    ['doc','docx','dot','dotx'].includes(ext)
+  ) return ext === 'doc' ? 'Word (DOC)' : 'Word (DOCX)';
+
+  // Excel
+  if (
+    mt === 'application/vnd.ms-excel' ||
+    mt === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    ['xls','xlsx','xlsm','xlt','xltx','xlam'].includes(ext)
+  ) {
+    if (ext === 'csv') return 'Data (CSV)';
+    if (ext === 'xls') return 'Excel (XLS)';
+    if (ext === 'xlsm') return 'Excel Macro (XLSM)';
+    return 'Excel (XLSX)';
+  }
+
+  // PowerPoint
+  if (
+    mt === 'application/vnd.ms-powerpoint' ||
+    mt === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    ['ppt','pptx','pps','ppsx','pot','potx'].includes(ext)
+  ) return ext === 'ppt' ? 'PowerPoint (PPT)' : 'PowerPoint (PPTX)';
+
+  // OpenDocument
+  if (['odt','ods','odp','odg'].includes(ext)) {
+    const map = { odt:'OpenDocument Text (ODT)', ods:'OpenDocument Spreadsheet (ODS)', odp:'OpenDocument Presentation (ODP)', odg:'OpenDocument Graphics (ODG)' };
+    return map[ext];
+  }
+
+  // 7) Data / structured
+  if (mt.includes('json') || ext === 'json') return 'Data (JSON)';
+  if (mt.includes('xml') || ext === 'xml') return 'Data (XML)';
+  if (['yaml','yml'].includes(ext)) return 'Data (YAML)';
+  if (['toml'].includes(ext)) return 'Data (TOML)';
+  if (['ini','conf','config','env'].includes(ext)) return 'Config';
+  if (['sql'].includes(ext)) return 'Database Script (SQL)';
+  if (['parquet'].includes(ext)) return 'Data (Parquet)';
+  if (['avro'].includes(ext)) return 'Data (Avro)';
+  if (['orc'].includes(ext)) return 'Data (ORC)';
+
+  // 8) Programming / code
+  if (mt.includes('javascript') || ['js','mjs','cjs'].includes(ext)) return 'Code (JavaScript)';
+  if (mt.includes('typescript') || ['ts','tsx'].includes(ext)) return 'Code (TypeScript)';
+  if (['jsx'].includes(ext)) return 'Code (JSX)';
+  if (['py'].includes(ext)) return 'Code (Python)';
+  if (['ipynb'].includes(ext)) return 'Notebook (Jupyter)';
+  if (['java'].includes(ext)) return 'Code (Java)';
+  if (['c','h'].includes(ext)) return 'Code (C)';
+  if (['cpp','hpp','cc','cxx','hh'].includes(ext)) return 'Code (C++)';
+  if (['cs'].includes(ext)) return 'Code (C#)';
+  if (['go'].includes(ext)) return 'Code (Go)';
+  if (['rs'].includes(ext)) return 'Code (Rust)';
+  if (['php'].includes(ext)) return 'Code (PHP)';
+  if (['rb'].includes(ext)) return 'Code (Ruby)';
+  if (['kt','kts'].includes(ext)) return 'Code (Kotlin)';
+  if (['swift'].includes(ext)) return 'Code (Swift)';
+  if (['sh','bash','zsh','fish'].includes(ext)) return 'Script (Shell)';
+  if (['ps1'].includes(ext)) return 'Script (PowerShell)';
+  if (['bat','cmd'].includes(ext)) return 'Script (Windows Batch)';
+  if (['lua'].includes(ext)) return 'Code (Lua)';
+  if (['r'].includes(ext)) return 'Code (R)';
+  if (['scala'].includes(ext)) return 'Code (Scala)';
+  if (['dart'].includes(ext)) return 'Code (Dart)';
+  if (['pl'].includes(ext)) return 'Code (Perl)';
+  if (['asm','s'].includes(ext)) return 'Code (Assembly)';
+  if (['dockerfile'].includes(ext) || name.endsWith('dockerfile')) return 'DevOps (Dockerfile)';
+  if (['yml','yaml'].includes(ext) && (name.includes('github') || name.includes('gitlab') || name.includes('ci'))) return 'CI/CD Config';
+
+  // 9) Archives / compressed
+  if (mt.includes('zip') || ext === 'zip') return 'Archive (ZIP)';
+  if (mt.includes('gzip') || ['gz','tgz'].includes(ext)) return 'Archive (GZIP/TAR.GZ)';
+  if (mt.includes('x-tar') || ext === 'tar') return 'Archive (TAR)';
+  if (['7z'].includes(ext)) return 'Archive (7Z)';
+  if (['rar'].includes(ext)) return 'Archive (RAR)';
+  if (['bz2','tbz','tbz2'].includes(ext)) return 'Archive (BZIP2)';
+  if (['xz','txz'].includes(ext)) return 'Archive (XZ)';
+  if (['zst'].includes(ext)) return 'Archive (Zstandard)';
+
+  // 10) Disk images / installers
+  if (['iso'].includes(ext)) return 'Disk Image (ISO)';
+  if (['dmg'].includes(ext)) return 'Disk Image (DMG)';
+  if (['img'].includes(ext)) return 'Disk Image (IMG)';
+  if (['apk'].includes(ext)) return 'Android App (APK)';
+  if (['ipa'].includes(ext)) return 'iOS App (IPA)';
+  if (['exe'].includes(ext)) return 'Windows Executable (EXE)';
+  if (['msi'].includes(ext)) return 'Windows Installer (MSI)';
+  if (['deb'].includes(ext)) return 'Linux Package (DEB)';
+  if (['rpm'].includes(ext)) return 'Linux Package (RPM)';
+
+  // 11) Fonts
+  if (mt.startsWith('font/') || ['ttf','otf','woff','woff2','eot'].includes(ext)) {
+    const map = { ttf:'Font (TTF)', otf:'Font (OTF)', woff:'Font (WOFF)', woff2:'Font (WOFF2)', eot:'Font (EOT)' };
+    return map[ext] || 'Font';
+  }
+
+  // 12) E-books
+  if (['epub'].includes(ext)) return 'eBook (EPUB)';
+  if (['mobi'].includes(ext)) return 'eBook (MOBI)';
+  if (['azw','azw3'].includes(ext)) return 'eBook (Kindle)';
+
+  // 13) Certificates / keys
+  if (['pem','crt','cer','der'].includes(ext)) return 'Certificate';
+  if (['key','p12','pfx'].includes(ext)) return 'Key/Keystore';
+
+  // 14) 3D / CAD
+  if (['stl','obj','fbx','gltf','glb','dae','3ds','blend','step','stp'].includes(ext)) {
+    const map = { stl:'3D Model (STL)', obj:'3D Model (OBJ)', fbx:'3D Model (FBX)', gltf:'3D Model (glTF)', glb:'3D Model (GLB)', blend:'Blender File' };
+    return map[ext] || '3D/CAD';
+  }
+
+  // 15) GIS / Geo
+  if (['geojson'].includes(ext)) return 'GIS (GeoJSON)';
+  if (['shp','dbf','shx','prj'].includes(ext)) return 'GIS (Shapefile)';
+  if (['kml','kmz'].includes(ext)) return 'GIS (KML/KMZ)';
+
+  // 16) Default / unknown
+  if (mt === 'application/octet-stream') return 'Binary (Unknown)';
+  if (mt) return `File (${mt})`;
+  return 'File';
 }
 
-// Helper function to get file icon
+// --- Icons for detailed types (use prefix matching) ---
 function getFileIcon(fileType) {
-    const icons = {
-        'Image': '🖼️',
-        'Table/Data': '📊',
-        'Document': '📄',
-        'File': '📎'
-    };
-    return icons[fileType] || '📎';
+  const t = (fileType || '').toLowerCase();
+
+  if (t.startsWith('image')) return '🖼️';
+  if (t.startsWith('video')) return '🎞️';
+  if (t.startsWith('audio')) return '🎵';
+  if (t === 'pdf') return '📕';
+
+  if (t.includes('word')) return '📝';
+  if (t.includes('excel') || t.includes('spreadsheet') || t.includes('csv') || t.includes('data')) return '📊';
+  if (t.includes('powerpoint') || t.includes('presentation')) return '📽️';
+
+  if (t.includes('code') || t.includes('script') || t.includes('notebook') || t.includes('devops') || t.includes('config') || t.includes('ci/cd')) return '💻';
+
+  if (t.includes('archive')) return '🗜️';
+  if (t.includes('disk image')) return '💿';
+  if (t.includes('installer') || t.includes('executable') || t.includes('package') || t.includes('app')) return '📦';
+
+  if (t.includes('font')) return '🔤';
+  if (t.includes('ebook')) return '📚';
+  if (t.includes('certificate') || t.includes('key')) return '🔐';
+  if (t.includes('3d') || t.includes('cad')) return '🧩';
+  if (t.includes('gis')) return '🗺️';
+
+  if (t === 'url') return '🔗';
+  return '📎';
 }
 
 // Helper function to format file size
@@ -416,8 +809,8 @@ function formatFileSize(bytes) {
 
 function clearSelectedFiles() {
     dt.items.clear();
-    // ลบ fileInput.files = dt.files; ออก เพราะไม่ทำงาน
     updateFileList();
+    updateUrlList();
     selectedFilesDiv.style.display = 'none';
     selectedFilesDiv.innerHTML = '';
 }
@@ -436,6 +829,7 @@ function removeFile(fileName) {
     }
     // ลบ fileInput.files = dt.files; ออก
     updateFileList();
+    updateUrlList();
 }
 
 window.addEventListener('beforeunload', async (event) => {
@@ -522,12 +916,27 @@ function applyTheme(theme) {
     updateThemeButton(theme);
 }
 
+function createGuestUser() {
+    fetch('/api/create_guest_user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Guest user created:', data);
+    })
+    .catch(error => {
+        console.error('Error creating guest user:', error);
+    });
+}
+
 
 // Fetch chat history when the page loads
 document.addEventListener('DOMContentLoaded', async (event) => {
     // socket.emit('pong');
     console.log('reload-page')
     initTheme(); // Initialize theme on page load
+    createGuestUser(); // Create a guest user on page load (if needed)
     // Add this check: Collapse sidebar on load if screen is small
     if (window.innerWidth < 868) {
         const chatList = document.getElementById('chatList');
@@ -574,7 +983,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             console.error("Failed to fetch session info for doc search button", e);
         }
 
-        if (isGuest || isGuest == undefined) {
+        if (isGuest == undefined) { // If we couldn't determine guest status, default to disabling the button for safety
             docSearchBtn.title = "Login required to use document search";
             docSearchBtn.classList.add('disabled');
             docSearchBtn.style.pointerEvents = 'none';
@@ -616,7 +1025,7 @@ document.addEventListener('DOMContentLoaded', async (event) => {
             const defaultMode = populateModes();
             const defaultModel = populateModels();
 
-            if (data.userId) {
+            if (data.userId !== undefined && data.userId !== null) {
                 socket.emit('register', { userId: data.userId });
                 messagesDiv.innerHTML = ''; // Clear existing messages
                 let lastUserMsg = null; // Track user message for pairing with next agent response
@@ -713,7 +1122,8 @@ document.addEventListener('DOMContentLoaded', async (event) => {
                     }
 
                     if (data.chatIds) {
-                        await displayChatList(data.chatIds);
+                        const reverseChatIds = [...data.chatIds].reverse(); // Reverse to show most recent first
+                        await displayChatList(reverseChatIds);
                         const currChatId = data.currChatId;
 
                         // Highlight the active chat item
@@ -1022,6 +1432,44 @@ userInput.addEventListener('input', function() {
 });
 
 
+async function uploadUrl() {
+    try {
+        if (window.urlList?.length) {
+            const TIMEOUT_DURATION = 1000 * 60 * 60;
+
+            for (const URLpayload of window.urlList) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_DURATION);
+
+            try {
+                const res = await fetch("/api/upload_url", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(URLpayload),
+                signal: controller.signal,
+                });
+
+                if (!res.ok) {
+                const t = await res.text().catch(() => "");
+                throw new Error(`upload_url HTTP ${res.status}: ${t}`);
+                }
+
+                const data = await res.json();
+                console.log("Success:", data);
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            }
+
+            window.urlList = [];
+            return "ok"
+        }
+        } catch (error) {
+        console.error("Error uploading URL:", error);
+        return "error"
+    }
+}
+
 async function sendMessage() {
     const defaultMode = populateModes(true); // Get default without modifying DOM yet
     const defaultModel = populateModels(true); // Get default without modifying DOM yet
@@ -1073,6 +1521,7 @@ async function sendMessage() {
 
     // displayMessage(currentMessage, 'user-message'); // Display initial user message
     displayMarkdownMessage(currentMessage, 'user-message'); // Display initial user message
+    // Update chat list and session info after the loop finishes
     // userInput.value = ''; // Clear input field
     // userFiles.value = '';
     userInput.style.height = 'auto'; // Reset height after sending
@@ -1142,6 +1591,45 @@ async function sendMessage() {
         clearSelectedFiles();
     }
 
+    const res = await uploadUrl();
+
+    if (res !== "ok"){
+        console.log(res);
+        console.log("error upload url");
+    }
+
+
+    try {
+        const sessionResponse = await fetch('/auth/session');
+        const sessionData = await sessionResponse.json();
+        if (sessionData.loggedIn) {
+            if (sessionData.chatIds) {
+                const reverseChatIds = [...sessionData.chatIds].reverse(); // Reverse to show most recent first
+                await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
+                const currChatId = sessionData.currChatId;
+
+                // Highlight the active chat item
+                if (currChatId) {
+                    const chatListDiv = document.getElementById('chatListEle');
+                    const allChatItems = chatListDiv.querySelectorAll('.chat-item');
+                    allChatItems.forEach(item => item.classList.remove('active'));
+                    const targetText = `Chat ${currChatId}`;
+                    const targetItem = Array.from(allChatItems).find(item => item.getElementsByClassName('chat-title')[0].textContent?.trim() === targetText);
+                    if (targetItem) {
+                        targetItem.classList.add('active');
+                    } else {
+                        console.warn('Chat item not found for currentChatId:', targetText);
+                    }
+                }
+            }
+            if (sessionData.userId !== undefined && sessionData.userId !== null) {
+                socket.emit('register', { userId: sessionData.userId });
+            }
+        }
+    } catch (sessionError) {
+        console.error('Error checking session status after loop:', sessionError);
+    }
+
     try { // Wrap the loop in a try-catch
         do {
             loopCount++;
@@ -1170,12 +1658,11 @@ async function sendMessage() {
             const sessionResponse = await fetch('/auth/session');
             const sessionData = await sessionResponse.json();
             console.log(socket.id + sessionData.currChatId)
-            // Set your desired timeout in milliseconds (e.g., 30 seconds)
+            // Set your desired timeout in milliseconds (e.g., 2 hr)
             const TIMEOUT_DURATION = 1000*60*60*2;
                     
             // 1. Create an AbortController instance
             const controller = new AbortController();
-            const signal = controller.signal;
                     
             // 2. Set up the timeout
             const timeoutId = setTimeout(() => {
@@ -1197,14 +1684,8 @@ async function sendMessage() {
                 docSearchMethod: globalThis.docSearchState,
                 requestId: socket.id + sessionData.currChatId
             }),
-            signal: signal
+            signal: controller.signal
         });
-
-
-
-
-
-
 
 
 
@@ -1240,6 +1721,7 @@ async function sendMessage() {
 
 
             const data = await response.json();
+            clearTimeout(timeoutId);
 
             if (data.response) {
                 agentResponse = data.response; // Store the FULL response
@@ -1315,7 +1797,8 @@ async function sendMessage() {
             const sessionData = await sessionResponse.json();
             if (sessionData.loggedIn) {
                 if (sessionData.chatIds) {
-                    await displayChatList(sessionData.chatIds); // Ensure displayChatList is awaited if it becomes async
+                    const reverseChatIds = [...sessionData.chatIds].reverse(); // Reverse to show most recent first
+                    await displayChatList(reverseChatIds); // Ensure displayChatList is awaited if it becomes async
                     const currChatId = sessionData.currChatId;
 
                     // Highlight the active chat item
@@ -1332,7 +1815,7 @@ async function sendMessage() {
                         }
                     }
                 }
-                if (sessionData.userId) {
+                if (sessionData.userId !== undefined && sessionData.userId !== null) {
                     socket.emit('register', { userId: sessionData.userId });
                 }
             }
@@ -1365,10 +1848,12 @@ function displayMessage(text, className) {
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            editButton.style.display = 'inline-flex';
+            // editButton.style.display = 'inline-flex';
+            editButton.style.display = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            editButton.style.display = 'none';
+            // editButton.style.display = 'none';
+            editButton.style.display = 'hidden';
         });
         
         // Edit button click handler
@@ -1389,16 +1874,19 @@ function displayMessage(text, className) {
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = () => verifyAnswer(text);
         
         buttonsDiv.appendChild(verifyBtn);
         
         messageElement.addEventListener('mouseenter', () => {
-            verifyBtn.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            verifyBtn.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            verifyBtn.style.visibility = 'hidden';
         });
         
         messageElement.appendChild(buttonsDiv);
@@ -1443,6 +1931,7 @@ async function displayChatList(chatIds) {
     chatListDiv.innerHTML = ''; // Clear existing list
 
     chatIds.forEach(chatId => {
+        if (chatId < 0) return; // Skip invalid chat IDs
         const chatElement = document.createElement('div');
         chatElement.classList.add('chat-item');
 
@@ -1519,11 +2008,18 @@ function normalizeLatexDelimiters(s) {
 
 
 function displayMarkdownMessage(text, className, userQuestion = null) {
-    // const html = markdown.render(text);
-    const html = markdown.render(normalizeLatexDelimiters(text));
+    const html = markdown.render(text);
     const messageElement = document.createElement('div');
-    messageElement.innerHTML = html;
     messageElement.className = className;
+    if (className === 'user-message') {
+        const userTextElement = document.createElement('div');
+        userTextElement.innerHTML = html;
+        userTextElement.className = 'user-text';
+        messageElement.appendChild(userTextElement);
+    }
+    else {
+        messageElement.innerHTML = html;
+    }
     messageElement.dataset.fullText = text; // Store the full text for later use
     
     // Add copy button for agent messages
@@ -1539,24 +2035,30 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = function() { verifyAnswer(messageElement.dataset.fullText || text, this); };
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
-            verifyBtn.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
-            verifyBtn.style.display = 'none';
+            // copyButton.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            copyButton.style.visibility = 'hidden';
+            verifyBtn.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -1583,14 +2085,28 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         editButton.className = 'edit-button';
         editButton.classList.add('action-button');
         editButton.title = 'Edit message';
-        editButton.style.display = 'none'; // Hidden by default
+        // editButton.style.display = 'none'; // Hidden by default
+        editButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
+
+        if (text.length > 500) {
+            messageElement.classList.add('collapsible', 'collapsed');
+            
+            messageElement.addEventListener('click', (e) => {
+                // ถ้าคลิกโดนปุ่ม action (copy/edit) ไม่ต้องซ้อนข้อความ
+                if (e.target.closest('.action-button')) return;
+                
+                messageElement.classList.toggle('collapsed');
+            });
+        }
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            editButton.style.display = 'inline-flex';
+            // editButton.style.display = 'inline-flex';
+            editButton.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            editButton.style.display = 'none';
+            // editButton.style.display = 'none';
+            editButton.style.visibility = 'hidden';
         });
         
         // Edit button click handler
@@ -1605,14 +2121,17 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Show button on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
+            // copyButton.style.display = 'none';
+            copyButton.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -1634,13 +2153,8 @@ function displayMarkdownMessage(text, className, userQuestion = null) {
     messagesDiv.appendChild(messageElement);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // if (window.MathJax) {
-    //     MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
-    // }
-
-    if (window.MathJax?.typesetPromise) {
-        MathJax.typesetClear([messageElement]);           // กันสมการซ้อน/หน่วง
-        MathJax.typesetPromise([messageElement]).catch(console.error);
+    if (window.MathJax) {
+        MathJax.typesetPromise([messageElement]).catch(err => console.error(err));
     }
 }
 
@@ -1681,14 +2195,16 @@ function displayMarkdownMessageStream(text, messageElement) {
         copyButton.className = 'copy-button';
         copyButton.classList.add('action-button');
         copyButton.title = 'Copy message';
-        copyButton.style.display = 'none'; // Hidden by default
+        // copyButton.style.display = 'none'; // Hidden by default
+        copyButton.style.visibility = 'hidden'; // Use visibility to prevent layout shift
         
         // Verify button
         const verifyBtn = document.createElement('button');
         verifyBtn.innerHTML = '✓';
         verifyBtn.className = 'action-button verify-button';
         verifyBtn.title = 'Verify';
-        verifyBtn.style.display = 'none';
+        // verifyBtn.style.display = 'none';
+        verifyBtn.style.visibility = 'hidden';
         verifyBtn.onclick = function() { 
             // Always use the GLOBAL lastAgentResponse first (has the FULL answer from API)
             // Then fallback to messageElement.dataset.fullText, then streaming text, then local text
@@ -1707,12 +2223,16 @@ function displayMarkdownMessageStream(text, messageElement) {
         
         // Show buttons on hover
         messageElement.addEventListener('mouseenter', () => {
-            copyButton.style.display = 'inline-flex';
-            verifyBtn.style.display = 'inline-flex';
+            // copyButton.style.display = 'inline-flex';
+            // verifyBtn.style.display = 'inline-flex';
+            copyButton.style.visibility = 'visible';
+            verifyBtn.style.visibility = 'visible';
         });
         messageElement.addEventListener('mouseleave', () => {
-            copyButton.style.display = 'none';
-            verifyBtn.style.display = 'none';
+            // copyButton.style.display = 'none';
+            // verifyBtn.style.display = 'none';
+            verifyBtn.style.visibility = 'hidden';
+            copyButton.style.visibility = 'hidden';
         });
         
         // Copy button click handler
@@ -2553,10 +3073,12 @@ function startEditMessage(messageElement, originalText) {
                 startEditMessage(originalElement, originalText);
             });
             originalElement.addEventListener('mouseenter', () => {
-                editButton.style.display = 'inline-flex';
+                // editButton.style.display = 'inline-flex';
+                editButton.style.visibility = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
-                editButton.style.display = 'none';
+                // editButton.style.display = 'none';
+                editButton.style.visibility = 'hidden';
             });
         }
         if (copyButton) {
@@ -2571,10 +3093,12 @@ function startEditMessage(messageElement, originalText) {
                 });
             });
             originalElement.addEventListener('mouseenter', () => {
-                copyButton.style.display = 'inline-flex';
+                // copyButton.style.display = 'inline-flex';
+                copyButton.style.visibility = 'visible';
             });
             originalElement.addEventListener('mouseleave', () => {
-                copyButton.style.display = 'none';
+                // copyButton.style.display = 'none';
+                copyButton.style.visibility = 'hidden';
             });
         }
     }

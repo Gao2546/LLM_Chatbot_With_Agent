@@ -105,13 +105,13 @@ setInterval(async () => {
   }
 }, CLEANUP_INTERVAL_MS);
 
-const BypassSession = ["/auth/login", "/auth/register", "/auth/session", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/related-questions", "/api/related-questions-all"];
+const BypassSession = ["/auth/login", "/auth/register", "/auth/session", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/auth/login?error=invalide_username_or_password", "/auth/login?success=registered", "/auth/login?error=server_error", "/auth/register?error=server_error", "/auth/register?error=username_exists", "/auth/register?error=email_exists", "/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/related-questions", "/api/related-questions-all", "/api/chat/-1/files","/api/create_guest_user", "api/upload_url"];
 const BypassSessionNRe = ["/api/download-script", "/api/download-script/entrypoint.sh", "/api/download-script/entrypoint.bat", "/.well-known/appspecific/com.chrome.devtools.json"]
 
 // Session timeout cleanup middleware
 app.use(async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Bypass session check for public API endpoints and non-api routes
-  const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications", "/api/related-questions", "/api/related-questions-all"];
+  const publicPaths = ["/auth/login", "/auth/register", "/auth/styleRL.css", "/api/message", "/api/create_record", "/auth/login.js", "/auth/register.js","/auth/admin", "/api/download-script", "/api/detect-platform", "/.well-known/appspecific/com.chrome.devtools.json", "/api/set-model", "/api/save_img", "/api/stop", "/api/get-all-verified-answers", "/api/search-verified-answers", "/api/submit-verified-answer", "/api/submit-verification", "/api/get-verifications", "/api/related-questions", "/api/related-questions-all", "/api/chat/-1/files", "/api/create_guest_user", "api/upload_url"];
   
   if (publicPaths.includes(req.path) || req.path.startsWith('/api/get-') || req.path.startsWith('/api/search-') || req.path.startsWith('/api/submit-')) {
     return next();
@@ -126,6 +126,7 @@ app.use(async (req: express.Request, res: express.Response, next: express.NextFu
         return next();
       }
       else{
+        console.log('No user in session, redirecting to home page');
         return res.redirect("/")
         // res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
         // res.json({ exp: true });
@@ -241,8 +242,11 @@ io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
   socket.on('register', async (data) => { //for update socket if when reload page
-    const userId = typeof data === 'object' && data?.userId ? data.userId : data;
-    if (!userId) {
+    console.log("ddds")
+    console.log(data);
+    const userId = (typeof data === 'object' && (data?.userId !== undefined && data?.userId !== null)) ? data.userId : data;
+    console.log(userId);
+    if (userId === undefined || userId === null) {
       console.log("no data")
       return;
     }
