@@ -97,8 +97,22 @@ deploy_hicp:
 
     - |
       if [ -n "$HICP_IMAGE_NAME3" ]; then
+        echo "=== Setting up Detect_Na resources ==="
+
+        # Apply YAML manifest (creates ImageStream, BuildConfig, Deployment, Service, Route)
+        oc apply -f detect-na-openshift.yaml
+
+        # Copy sourceSecret from existing BuildConfig so Detect_Na BC can clone the same private repo
+        EXISTING_SECRET=$(oc get bc $HICP_IMAGE_NAME -n $HICP_PROJECT -o jsonpath='{.spec.source.sourceSecret.name}' 2>/dev/null || echo "")
+        if [ -n "$EXISTING_SECRET" ]; then
+          echo "Patching sourceSecret '$EXISTING_SECRET' onto $HICP_IMAGE_NAME3 BuildConfig"
+          oc patch bc $HICP_IMAGE_NAME3 -n $HICP_PROJECT -p "{\"spec\":{\"source\":{\"sourceSecret\":{\"name\":\"$EXISTING_SECRET\"}}}}"
+        else
+          echo "No sourceSecret found on existing BC, skipping patch"
+        fi
+
         echo "Building Detect_Na image: $HICP_IMAGE_NAME3"
-        oc start-build $HICP_IMAGE_NAME3 --follow
+        oc start-build $HICP_IMAGE_NAME3 -n $HICP_PROJECT --follow
         oc tag ${HICP_IMAGE_NAME3}:latest ${HICP_IMAGE_NAME3}:$VERSION
         oc set image deployment/$HICP_IMAGE_NAME3 ${HICP_IMAGE_NAME3}=${HICP_IMAGE_NAME3}:$VERSION
         echo "Detect_Na deployed version $VERSION"
