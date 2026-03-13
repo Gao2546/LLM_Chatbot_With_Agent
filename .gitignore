@@ -32,6 +32,8 @@ tmp/
 *.pdf
 .key
 ca-bundle.crt
+!ai_agent_core/ca-bundle.crt
+!api_server/ca-bundle.crt
 *.keys
 __pycache__/
 data*/
@@ -56,12 +58,11 @@ backup_temp/
 download_minio.bat
 minio-data/
 minio-server/
-package-lock.json
+!ai_agent_core/package-lock.json
 setup_local.bat
 sum_doc/
 
 final2.md
-package-lock.json
 PROJECT_OVERVIEW.md
 database_migration_drop_rating_column.sql
 database_migration_remove_ratings.sql

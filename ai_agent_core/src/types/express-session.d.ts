@@ -10,6 +10,7 @@ declare module 'express-session' {
       currentChatModel?: string | null; // Add chat model
       [key: string]: any; // Keep for flexibility
     };
+    lastAccess?: number;
   }
 }
 
