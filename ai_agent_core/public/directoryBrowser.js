@@ -204,7 +204,7 @@ async function confirmDirectoryChange() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    new_path: selectedDirectoryPath,
+                    target_path: selectedDirectoryPath,
                 }),
                 mode: "cors",
                 credentials: "include"
