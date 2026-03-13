@@ -8,12 +8,12 @@ USER 1001
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY --chown=1001:0 package*.json ./
 RUN npm install
 
-COPY tsconfig.json ./
-COPY src ./src
-COPY public ./public
+COPY --chown=1001:0 tsconfig.json ./
+COPY --chown=1001:0 src ./src
+COPY --chown=1001:0 public ./public
 
 RUN npm run build
 
@@ -47,12 +47,12 @@ USER 1001
 WORKDIR /app
 
 # Setup ai_agent_core
-COPY package.json ./
-COPY --from=builder_app /app/node_modules ./node_modules
-COPY --from=builder_app /app/build ./build
-COPY build/setting.txt ./build/setting.txt
-COPY scripts ./scripts
-COPY --from=builder_app /app/public ./public
+COPY --chown=1001:0 package.json ./
+COPY --chown=1001:0 --from=builder_app /app/node_modules ./node_modules
+COPY --chown=1001:0 --from=builder_app /app/build ./build
+COPY --chown=1001:0 build/setting.txt ./build/setting.txt
+COPY --chown=1001:0 scripts ./scripts
+COPY --chown=1001:0 --from=builder_app /app/public ./public
 
 # Set environment variables
 ENV DATABASE_URL=postgres://athip:123456@llm-chatbot-with-agent-postgresql:5432/ai_agent \

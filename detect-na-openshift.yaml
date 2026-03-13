@@ -26,6 +26,8 @@ spec:
       uri: https://gitlab.intra.infineon.com/bkk_wafer_test/internship_spring_2026/wafertestchatbot.git
       ref: main
     contextDir: .
+    sourceSecret:
+      name: gitlab-credentials
   strategy:
     type: Docker
     dockerStrategy:
