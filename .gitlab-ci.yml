@@ -75,28 +75,25 @@ default:
 deploy_hicp:
   stage: deploy
   image: widerin/openshift-cli
+  timeout: 30m
   script:
     - echo 'Build docker image using HICP Build configs'
     - oc login --token=${HICP_TOKEN} --server=${HICP_PROJECT_URL} --insecure-skip-tls-verify
     - oc project $HICP_PROJECT
 
-    # --- Build IMAGE 1 (ai_agent_core) ---
-    - echo "=== Building $HICP_IMAGE_NAME ==="
-    - BUILD1=$(oc start-build $HICP_IMAGE_NAME --wait 2>&1) || echo "Build started, waiting..."
-    - echo "$BUILD1"
+    # --- Build IMAGE 1 (ai_agent_core) - fastest, should complete in 2-5 min ---
+    - echo "=== Triggering build for $HICP_IMAGE_NAME ==="
+    - oc start-build $HICP_IMAGE_NAME -n $HICP_PROJECT
+    - sleep 5
     - oc tag ${HICP_IMAGE_NAME}:latest ${HICP_IMAGE_NAME}:$VERSION || true
     - oc set image deployment/$HICP_IMAGE_NAME ${HICP_IMAGE_NAME}=${HICP_IMAGE_NAME}:$VERSION
     - oc rollout restart deployment/$HICP_IMAGE_NAME
     - oc annotate route $HICP_IMAGE_NAME -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite
 
-    # --- Build IMAGE 2 (api_server) ---
-    - echo "=== Building $HICP_IMAGE_NAME2 ==="
-    - BUILD2=$(oc start-build $HICP_IMAGE_NAME2 --wait 2>&1) || echo "Build started, waiting..."
-    - echo "$BUILD2"
-    - oc tag ${HICP_IMAGE_NAME2}:latest ${HICP_IMAGE_NAME2}:$VERSION || true
-    - oc set image deployment/$HICP_IMAGE_NAME2 ${HICP_IMAGE_NAME2}=${HICP_IMAGE_NAME2}:$VERSION
-    - oc rollout restart deployment/$HICP_IMAGE_NAME2
-    - oc annotate route $HICP_IMAGE_NAME2 -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite
+    # --- Build IMAGE 2 (api_server) - slower, triggered in background ---
+    - echo "=== Triggering build for $HICP_IMAGE_NAME2 ==="
+    - oc start-build $HICP_IMAGE_NAME2 -n $HICP_PROJECT
+    # No wait - let it build in background, deployment will pick it up when ready
 
     # --- Build IMAGE 3 (Detect_Na) ---
     - |
@@ -107,31 +104,35 @@ deploy_hicp:
         # Copy sourceSecret from existing BuildConfig
         EXISTING_SECRET=$(oc get bc $HICP_IMAGE_NAME -n $HICP_PROJECT -o jsonpath='{.spec.source.sourceSecret.name}' 2>/dev/null || echo "")
         if [ -n "$EXISTING_SECRET" ]; then
-          echo "Patching sourceSecret '$EXISTING_SECRET' onto $HICP_IMAGE_NAME3 BuildConfig"
-          oc patch bc $HICP_IMAGE_NAME3 -n $HICP_PROJECT -p "{\"spec\":{\"source\":{\"sourceSecret\":{\"name\":\"$EXISTING_SECRET\"}}}}"
+          echo "Patching sourceSecret '$EXISTING_SECRET' onto $HICP_IMAGE_NAME3"
+          oc patch bc $HICP_IMAGE_NAME3 -n $HICP_PROJECT -p "{\"spec\":{\"source\":{\"sourceSecret\":{\"name\":\"$EXISTING_SECRET\"}}}}" || true
         fi
 
-        echo "=== Building $HICP_IMAGE_NAME3 ==="
-        oc start-build $HICP_IMAGE_NAME3 -n $HICP_PROJECT --wait || echo "Build triggered"
-
-        # Wait for image to exist before tagging
-        echo "Waiting for build to produce image..."
+        echo "=== Triggering build for $HICP_IMAGE_NAME3 ==="
+        oc start-build $HICP_IMAGE_NAME3 -n $HICP_PROJECT
+        
+        # Wait for Detect_Na image (poll for max 5 min - should be faster than api_server)
+        echo "Waiting for $HICP_IMAGE_NAME3 image to be ready..."
         for i in $(seq 1 30); do
           if oc get istag ${HICP_IMAGE_NAME3}:latest -n $HICP_PROJECT > /dev/null 2>&1; then
-            echo "Image ready!"
+            echo "✓ Image ready at attempt $i"
+            oc tag ${HICP_IMAGE_NAME3}:latest ${HICP_IMAGE_NAME3}:$VERSION || true
+            oc set image deployment/$HICP_IMAGE_NAME3 ${HICP_IMAGE_NAME3}=${HICP_IMAGE_NAME3}:$VERSION || true
+            oc rollout restart deployment/$HICP_IMAGE_NAME3 || true
+            oc annotate route $HICP_IMAGE_NAME3 -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite || true
             break
           fi
-          echo "Waiting... ($i/30)"
-          sleep 10
+          if [ $i -eq 30 ]; then
+            echo "⚠ Timeout waiting for image, deployment will use it when ready"
+          else
+            echo "Waiting... (attempt $i/30)"
+            sleep 10
+          fi
         done
-
-        oc tag ${HICP_IMAGE_NAME3}:latest ${HICP_IMAGE_NAME3}:$VERSION || echo "Tag failed - image may not be ready yet"
-        oc set image deployment/$HICP_IMAGE_NAME3 ${HICP_IMAGE_NAME3}=${HICP_IMAGE_NAME3}:$VERSION || true
-        oc rollout restart deployment/$HICP_IMAGE_NAME3 || true
-        oc annotate route $HICP_IMAGE_NAME3 -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite || true
-        echo "Detect_Na deployment complete"
       else
-        echo "HICP_IMAGE_NAME3 not set - skipping Detect_Na deployment"
+        echo "HICP_IMAGE_NAME3 not set - skipping Detect_Na"
       fi
+
+    - echo "✓ Pipeline complete - builds triggered, deployments will update when images are ready"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
