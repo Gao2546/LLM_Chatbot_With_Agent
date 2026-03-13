@@ -64,7 +64,7 @@ WAFER_ANALYSIS = get_latest_wafer_analysis() or os.path.join(PROJECT_DIR, "wafer
 
 # Server config
 HOST = "0.0.0.0"
-PORT = 5000
+PORT = 5001
 DEBUG = True
 
 # Auto-refresh interval (seconds)  
