@@ -101,14 +101,16 @@ spec:
           httpGet:
             path: /api/status
             port: 5001
-          initialDelaySeconds: 30
-          periodSeconds: 10
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 5
         readinessProbe:
           httpGet:
-            path: /
+            path: /api/status
             port: 5001
-          initialDelaySeconds: 10
-          periodSeconds: 5
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 3
 ---
 # Service - exposes Pod as network service
 apiVersion: v1

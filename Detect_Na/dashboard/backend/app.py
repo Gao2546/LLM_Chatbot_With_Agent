@@ -206,6 +206,12 @@ def serve_images(filename):
     return send_from_directory(images_dir, filename)
 
 
+@app.route("/api/status")
+def api_status():
+    """Health check endpoint for OpenShift liveness/readiness probes."""
+    return jsonify({"status": "ok", "service": "detect-na-dashboard"}), 200
+
+
 @app.route("/api/machines")
 def api_machines():
     """Get status of all machines."""
