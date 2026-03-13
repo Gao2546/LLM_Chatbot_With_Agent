@@ -18,11 +18,11 @@ from contextlib import contextmanager
 # =====================================================
 
 _DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "ai_agent",
-    "user": "athip",
-    "password": "123456",
+    "host": os.environ.get("DB_HOST", "localhost"),
+    "port": int(os.environ.get("DB_PORT", 5432)),
+    "dbname": os.environ.get("DB_NAME", "ai_agent"),
+    "user": os.environ.get("DB_USER", "athip"),
+    "password": os.environ.get("DB_PASSWORD", "123456"),
 }
 
 _local = threading.local()

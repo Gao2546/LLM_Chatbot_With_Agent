@@ -15,8 +15,8 @@ import pandas as pd
 import pytesseract
 
 # === Tesseract Path ===
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+    "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 )
 
 # === Paths ===

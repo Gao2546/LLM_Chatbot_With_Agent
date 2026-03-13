@@ -63,9 +63,9 @@ WAFER_ANALYSIS = get_latest_wafer_analysis() or os.path.join(PROJECT_DIR, "wafer
 # Machine config is loaded from PostgreSQL via db_helper
 
 # Server config
-HOST = "0.0.0.0"
-PORT = 5001
-DEBUG = True
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", 5001))
+DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
 # Auto-refresh interval (seconds)  
 REFRESH_INTERVAL = 30

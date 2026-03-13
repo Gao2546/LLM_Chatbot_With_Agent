@@ -94,5 +94,12 @@ deploy_hicp:
     - echo "New version is $NEW_VERSION"
     - oc rollout restart deployment/$HICP_IMAGE_NAME2
     - oc annotate route $HICP_IMAGE_NAME2 -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite
+
+    - oc start-build $HICP_IMAGE_NAME3 --follow
+    - oc tag ${HICP_IMAGE_NAME3}:latest ${HICP_IMAGE_NAME3}:$VERSION
+    - oc set image deployment/$HICP_IMAGE_NAME3 ${HICP_IMAGE_NAME3}=${HICP_IMAGE_NAME3}:$VERSION
+    - echo "Detect_Na deployed version $VERSION"
+    - oc rollout restart deployment/$HICP_IMAGE_NAME3
+    - oc annotate route $HICP_IMAGE_NAME3 -n $HICP_PROJECT haproxy.router.openshift.io/timeout=1h --overwrite
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
