@@ -1,0 +1,146 @@
+---
+# Detect_Na OpenShift Deployment - All Resources in One File
+# Apply with: oc apply -f detect-na-openshift.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: detect-na
+---
+# ImageStream - holds built container images
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: detect-na-dashboard
+  namespace: detect-na
+spec:
+  lookupPolicy:
+    local: false
+---
+# BuildConfig - builds image from Dockerfile in repo
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: detect-na-dashboard
+  namespace: detect-na
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://gitlab.intra.infineon.com/bkk_wafer_test/internship_spring_2026/wafertestchatbot.git
+      ref: main
+    contextDir: .
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Detect_Na/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: detect-na-dashboard:latest
+  triggers:
+    - type: GitHub
+      github:
+        secret: secret123
+    - type: GitLab
+      gitlab:
+        secret: secret123
+    - type: ImageChange
+      imageChange:
+        from:
+          kind: ImageStreamTag
+          name: detect-na-dashboard:latest
+---
+# Deployment - runs the Detect_Na Flask app
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detect-na-dashboard
+  namespace: detect-na
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: detect-na-dashboard
+  template:
+    metadata:
+      labels:
+        app: detect-na-dashboard
+    spec:
+      containers:
+      - name: detect-na-dashboard
+        image: image-registry.openshift-image-registry.svc:5000/detect-na/detect-na-dashboard:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 5001
+          protocol: TCP
+        env:
+        - name: DB_HOST
+          value: llm-chatbot-with-agent-postgresql
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: ai_agent
+        - name: DB_USER
+          value: athip
+        - name: DB_PASSWORD
+          value: "123456"
+        - name: TESSERACT_CMD
+          value: /usr/bin/tesseract
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "5001"
+        - name: DEBUG
+          value: "False"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 5001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+# Service - exposes Pod as network service
+apiVersion: v1
+kind: Service
+metadata:
+  name: detect-na-dashboard
+  namespace: detect-na
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5001
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: detect-na-dashboard
+---
+# Route - exposes service to external traffic
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: detect-na-dashboard
+  namespace: detect-na
+spec:
+  to:
+    kind: Service
+    name: detect-na-dashboard
+    weight: 100
+  port:
+    targetPort: http
+  wildcardPolicy: None

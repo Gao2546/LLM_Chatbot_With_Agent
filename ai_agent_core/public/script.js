@@ -1,3 +1,15 @@
+// ===== GLOBAL CONFIG =====
+const APP_CONFIG = {
+    DETECT_NA_URL: window.location.hostname === 'localhost' 
+        ? 'http://localhost:5001'
+        : 'http://detect-na-dashboard-detect-na.apps.openshiftdomain.com'
+};
+
+// Open Detect_Na Manufacturing Dashboard
+function openDetectNaDashboard() {
+    window.open(APP_CONFIG.DETECT_NA_URL, '_blank');
+}
+
 let socket = io({ serveClient: false });
 const userId = null; // Replace with the actual user ID
 // socket.emit('pong');
